@@ -34,13 +34,14 @@ func (h *HealthCheck) Run(map[string]string) (map[string]string, error) {
 	return map[string]string{"status": h.Service.Get(h.Service.ID)}, nil
 }
 
-// Owner always picks service.health_check — V1 planning is intentionally fixed.
-type Owner struct{}
+// fixedHealthCheck always selects service.health_check — V1 decision making is intentionally fixed.
+type fixedHealthCheck struct{}
 
-func (Owner) Next(task autonomy.Task, _ autonomy.World) (autonomy.Step, error) {
-	return autonomy.Step{
+func (fixedHealthCheck) Decide(task autonomy.Task, _ autonomy.Agent, _ autonomy.World) (autonomy.Action, error) {
+	return autonomy.Action{
 		Capability: "service.health_check",
-		Input:      map[string]string{"asset": task.Asset},
+		Target:     task.Target,
+		Input:      map[string]string{"asset": task.Target},
 	}, nil
 }
 
@@ -48,16 +49,18 @@ func main() {
 	svc := &FakeService{ID: "demo-api", Healthy: true}
 	task := autonomy.Task{
 		ID:      "hello-health",
-		Goal:    "demo-api is healthy",
+		Domain:  "software-service",
 		Context: "demo",
-		Asset:   svc.ID,
+		Target:  svc.ID,
+		Goal:    "demo-api is healthy",
 		Contract: autonomy.Contract{
 			ExpectedState: "healthy",
 		},
 	}
 
 	loop := autonomy.Loop{
-		Agent:    Owner{},
+		Agent:    autonomy.Agent{ID: "owner-1", State: "idle"},
+		Decide:   fixedHealthCheck{},
 		Runtime:  autonomy.NewRuntime(&HealthCheck{Service: svc}),
 		World:    svc,
 		Verifier: autonomy.StateVerifier{},

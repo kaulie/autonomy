@@ -1,6 +1,13 @@
 package autonomy
 
-// Agent decides the next step for a task given the current world.
-type Agent interface {
-	Next(task Task, world World) (Step, error)
+// Agent is the subject that owns decision authority for a task.
+// It is an entity, not a behavior interface.
+type Agent struct {
+	ID    string
+	State string
+}
+
+// DecisionMaker chooses the next action for an agent given task and world.
+type DecisionMaker interface {
+	Decide(task Task, agent Agent, world World) (Action, error)
 }

@@ -1,13 +1,7 @@
 package autonomy
 
-// Capability is a named thing the system can do.
+// Capability is a named thing the system can do to or with the world.
 type Capability interface {
 	Name() string
 	Run(in map[string]string) (map[string]string, error)
-}
-
-// Step is the next capability invocation chosen by an agent.
-type Step struct {
-	Capability string
-	Input      map[string]string
 }

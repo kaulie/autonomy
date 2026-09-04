@@ -1,11 +1,13 @@
 package autonomy
 
 // Task is the work contract: what to achieve and how completion is judged.
+// It defines goal, not path.
 type Task struct {
 	ID       string
-	Goal     string
+	Domain   string
 	Context  string
-	Asset    string
+	Target   string
+	Goal     string
 	Contract Contract
 }
 

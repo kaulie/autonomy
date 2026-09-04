@@ -12,12 +12,12 @@ type memWorld struct {
 
 func (w *memWorld) Get(id string) string { return w.state[id] }
 
-type fixedAgent struct {
-	step autonomy.Step
+type fixedDecide struct {
+	action autonomy.Action
 }
 
-func (a fixedAgent) Next(autonomy.Task, autonomy.World) (autonomy.Step, error) {
-	return a.step, nil
+func (d fixedDecide) Decide(autonomy.Task, autonomy.Agent, autonomy.World) (autonomy.Action, error) {
+	return d.action, nil
 }
 
 type echoCap struct{}
@@ -31,14 +31,15 @@ func (echoCap) Run(in map[string]string) (map[string]string, error) {
 func TestLoopDoneWhenWorldAlreadyHealthy(t *testing.T) {
 	world := &memWorld{state: map[string]string{"svc": "healthy"}}
 	loop := autonomy.Loop{
-		Agent:    fixedAgent{step: autonomy.Step{Capability: "service.health_check"}},
+		Agent:    autonomy.Agent{ID: "owner-1"},
+		Decide:   fixedDecide{action: autonomy.Action{Capability: "service.health_check", Target: "svc"}},
 		Runtime:  autonomy.NewRuntime(echoCap{}),
 		World:    world,
 		Verifier: autonomy.StateVerifier{},
 		MaxSteps: 3,
 	}
 	task := autonomy.Task{
-		ID: "t1", Goal: "service healthy", Asset: "svc",
+		ID: "t1", Goal: "service healthy", Target: "svc",
 		Contract: autonomy.Contract{ExpectedState: "healthy"},
 	}
 	if err := loop.Run(task); err != nil {
@@ -49,8 +50,10 @@ func TestLoopDoneWhenWorldAlreadyHealthy(t *testing.T) {
 func TestLoopFailsWhenWorldStaysUnhealthy(t *testing.T) {
 	world := &memWorld{state: map[string]string{"svc": "unhealthy"}}
 	loop := autonomy.Loop{
-		Agent: fixedAgent{step: autonomy.Step{
+		Agent: autonomy.Agent{ID: "owner-1"},
+		Decide: fixedDecide{action: autonomy.Action{
 			Capability: "service.health_check",
+			Target:     "svc",
 			Input:      map[string]string{"status": "unhealthy"},
 		}},
 		Runtime:  autonomy.NewRuntime(echoCap{}),
@@ -59,7 +62,7 @@ func TestLoopFailsWhenWorldStaysUnhealthy(t *testing.T) {
 		MaxSteps: 2,
 	}
 	task := autonomy.Task{
-		ID: "t2", Goal: "service healthy", Asset: "svc",
+		ID: "t2", Goal: "service healthy", Target: "svc",
 		Contract: autonomy.Contract{ExpectedState: "healthy"},
 	}
 	if err := loop.Run(task); err == nil {

@@ -76,7 +76,10 @@ Full principle set: [`docs/principles.md`](docs/principles.md)
 
 Early-stage experimental project.
 
-**Current focus:** flat Go core under `src/` + a runnable hello loop.
+**Current focus:** flat Go core under `src/` aligned with the architecture baseline — entities vs behavior interfaces — plus a runnable hello loop.
+
+Entity objects: `Task`, `Agent`, `Asset`, `Action`, `Event`.  
+Behavior interfaces: `DecisionMaker`, `Capability`, `Runtime`, `Verifier`, `World`.
 
 ```bash
 go test ./...
