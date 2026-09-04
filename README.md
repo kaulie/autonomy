@@ -1,5 +1,3 @@
-可以。我建议 README 不要写成“功能介绍大全”，而是直接把这个仓库为什么存在、核心模型是什么、和传统 Workflow Agent 有什么区别讲清楚。这样以后代码怎么演进都不会把最初的理念弄丢。
-
 Autonomy
 
 A goal-driven agent runtime for autonomous action, world-state awareness, capability composition, and self-verification.
@@ -125,5 +123,3 @@ Early-stage experimental project.
 The current focus is establishing the core ontology and runtime boundaries before building a large capability ecosystem.
 
 Built with Go (Golang).
-
-我会建议你就用这个作为第一版。它已经把你今天最核心的思想——Workflow 不再是系统输入，Verification 才是自治闭环的关键——固定在仓库的根上了。
