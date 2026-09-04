@@ -43,10 +43,12 @@ func (failCap) Run(map[string]string) (map[string]string, error) {
 func TestLoopDoneWhenWorldAlreadyHealthy(t *testing.T) {
 	world := &memWorld{state: map[string]string{"svc": "healthy"}}
 	loop := autonomy.Loop{
-		Agent: autonomy.Agent{ID: "owner-1"},
-		Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
-			Capability: "service.health_check", Target: "svc",
-		}}},
+		Agent: autonomy.Agent{
+			ID: "owner-1",
+			Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
+				Capability: "service.health_check", Target: "svc",
+			}}},
+		},
 		Runtime:  autonomy.NewRuntime(echoCap{}),
 		World:    world,
 		Verifier: autonomy.StateVerifier{},
@@ -62,6 +64,9 @@ func TestLoopDoneWhenWorldAlreadyHealthy(t *testing.T) {
 	if loop.Agent.State != "idle" {
 		t.Fatalf("agent state = %q, want idle", loop.Agent.State)
 	}
+	if loop.Agent.CurrentTask != nil {
+		t.Fatal("expected CurrentTask cleared")
+	}
 	if len(loop.History) != 1 {
 		t.Fatalf("history len = %d, want 1", len(loop.History))
 	}
@@ -70,12 +75,14 @@ func TestLoopDoneWhenWorldAlreadyHealthy(t *testing.T) {
 func TestLoopFailsWhenWorldStaysUnhealthy(t *testing.T) {
 	world := &memWorld{state: map[string]string{"svc": "unhealthy"}}
 	loop := autonomy.Loop{
-		Agent: autonomy.Agent{ID: "owner-1"},
-		Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
-			Capability: "service.health_check",
-			Target:     "svc",
-			Input:      map[string]string{"status": "unhealthy"},
-		}}},
+		Agent: autonomy.Agent{
+			ID: "owner-1",
+			Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
+				Capability: "service.health_check",
+				Target:     "svc",
+				Input:      map[string]string{"status": "unhealthy"},
+			}}},
+		},
 		Runtime:  autonomy.NewRuntime(echoCap{}),
 		World:    world,
 		Verifier: autonomy.StateVerifier{},
@@ -93,10 +100,12 @@ func TestLoopFailsWhenWorldStaysUnhealthy(t *testing.T) {
 func TestLoopTerminatesOnExecuteFailure(t *testing.T) {
 	world := &memWorld{state: map[string]string{"svc": "unhealthy"}}
 	loop := autonomy.Loop{
-		Agent: autonomy.Agent{ID: "owner-1"},
-		Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
-			Capability: "service.health_check", Target: "svc",
-		}}},
+		Agent: autonomy.Agent{
+			ID: "owner-1",
+			Decide: fixedDecide{decision: autonomy.Decision{Action: autonomy.Action{
+				Capability: "service.health_check", Target: "svc",
+			}}},
+		},
 		Runtime:  autonomy.NewRuntime(failCap{}),
 		World:    world,
 		Verifier: autonomy.StateVerifier{},

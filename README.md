@@ -79,7 +79,7 @@ Early-stage experimental project.
 **Current focus:** flat Go core under `src/` aligned with the architecture baseline — entities vs behavior interfaces — plus a runnable hello loop.
 
 Entity objects: `Task`, `Agent`, `Asset`, `Action`, `Event`.  
-Behavior interfaces: `DecisionMaker`, `Capability`, `Runtime`, `Verifier`, `World`.
+Behavior interfaces: `DecisionMaker` (on Agent), `Capability`, `Runtime`, `Verifier`, `World`.
 
 ```bash
 go test ./...

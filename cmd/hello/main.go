@@ -59,8 +59,12 @@ func main() {
 	}
 
 	loop := autonomy.Loop{
-		Agent:    autonomy.Agent{ID: "owner-1", State: "idle"},
-		Decide:   fixedHealthCheck{},
+		Agent: autonomy.Agent{
+			ID:      "owner-1",
+			State:   "idle",
+			Context: "demo",
+			Decide:  fixedHealthCheck{},
+		},
 		Runtime:  autonomy.NewRuntime(&HealthCheck{Service: svc}),
 		World:    svc,
 		Verifier: autonomy.StateVerifier{},
