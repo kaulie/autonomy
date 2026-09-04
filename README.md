@@ -76,8 +76,16 @@ Full principle set: [`docs/principles.md`](docs/principles.md)
 
 Early-stage experimental project.
 
-**Current focus:** core ontology documents under `docs/` (boundaries before a large capability ecosystem).
+**Current focus:** flat Go core under `src/` aligned with the architecture baseline — entities vs behavior interfaces — plus a runnable hello loop.
 
-**Next implementation milestone:** a runnable hello loop — health-check a fake service against a Completion Contract.
+Entity objects: `Task`, `Agent`, `Asset`, `Action`, `Event`.  
+Behavior interfaces: `DecisionMaker`, `Capability`, `Runtime`, `Verifier`, `World`.
+
+```bash
+go test ./...
+go run ./cmd/hello
+```
+
+The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
 Built with Go (Golang).
