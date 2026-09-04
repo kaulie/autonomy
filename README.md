@@ -76,7 +76,7 @@ Full principle set: [`docs/principles.md`](docs/principles.md)
 
 Early-stage experimental project.
 
-**Current focus:** flat Go core types + a runnable hello loop.
+**Current focus:** flat Go core under `src/` + a runnable hello loop.
 
 ```bash
 go test ./...

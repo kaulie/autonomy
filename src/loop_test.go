@@ -3,7 +3,7 @@ package autonomy_test
 import (
 	"testing"
 
-	"github.com/kaulie/autonomy"
+	"github.com/kaulie/autonomy/src"
 )
 
 type memWorld struct {

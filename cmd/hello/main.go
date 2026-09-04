@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kaulie/autonomy"
+	"github.com/kaulie/autonomy/src"
 )
 
 // FakeService is a demo asset with a simple healthy/unhealthy state.
