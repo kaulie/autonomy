@@ -76,8 +76,13 @@ Full principle set: [`docs/principles.md`](docs/principles.md)
 
 Early-stage experimental project.
 
-**Current focus:** core ontology documents under `docs/` (boundaries before a large capability ecosystem).
+**Current focus:** flat Go core types + a runnable hello loop.
 
-**Next implementation milestone:** a runnable hello loop — health-check a fake service against a Completion Contract.
+```bash
+go test ./...
+go run ./cmd/hello
+```
+
+The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
 Built with Go (Golang).
