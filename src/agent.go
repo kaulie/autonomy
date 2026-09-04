@@ -7,7 +7,7 @@ type Agent struct {
 	State string
 }
 
-// DecisionMaker chooses the next action for an agent given task and world.
+// DecisionMaker chooses the next decision given a decision context.
 type DecisionMaker interface {
-	Decide(task Task, agent Agent, world World) (Action, error)
+	Decide(ctx DecisionContext) (Decision, error)
 }

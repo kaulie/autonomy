@@ -37,12 +37,12 @@ func (h *HealthCheck) Run(map[string]string) (map[string]string, error) {
 // fixedHealthCheck always selects service.health_check — V1 decision making is intentionally fixed.
 type fixedHealthCheck struct{}
 
-func (fixedHealthCheck) Decide(task autonomy.Task, _ autonomy.Agent, _ autonomy.World) (autonomy.Action, error) {
-	return autonomy.Action{
+func (fixedHealthCheck) Decide(ctx autonomy.DecisionContext) (autonomy.Decision, error) {
+	return autonomy.Decision{Action: autonomy.Action{
 		Capability: "service.health_check",
-		Target:     task.Target,
-		Input:      map[string]string{"asset": task.Target},
-	}, nil
+		Target:     ctx.Task.Target,
+		Input:      map[string]string{"asset": ctx.Task.Target},
+	}}, nil
 }
 
 func main() {
