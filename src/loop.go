@@ -2,10 +2,10 @@ package autonomy
 
 import "fmt"
 
-// Loop is the goal-driven cycle: decide → execute → record → update → verify → repeat.
+// Loop orchestrates the goal-driven cycle.
+// It does not own decision making — that belongs to Agent.
 type Loop struct {
 	Agent    Agent
-	Decide   DecisionMaker
 	Runtime  Runtime
 	World    World
 	Verifier Verifier
@@ -67,13 +67,21 @@ func (l *Loop) Run(task Task) error {
 	if l.MaxSteps <= 0 {
 		l.MaxSteps = 8
 	}
+	if l.Agent.Decide == nil {
+		return fmt.Errorf("agent %s has no decision making", l.Agent.ID)
+	}
+
+	l.Agent.CurrentTask = &task
 	l.Agent.State = "running"
-	defer func() { l.Agent.State = "idle" }()
+	defer func() {
+		l.Agent.State = "idle"
+		l.Agent.CurrentTask = nil
+	}()
 
 	for i := 0; i < l.MaxSteps; i++ {
 		ctx := l.BuildDecisionContext(task)
 
-		decision, err := l.Decide.Decide(ctx)
+		decision, err := l.Agent.Decide.Decide(ctx)
 		if err != nil {
 			return err
 		}
