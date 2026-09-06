@@ -1,10 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
-	"github.com/kaulie/autonomy/src"
+	autonomy "github.com/kaulie/autonomy/src"
 )
 
 // FakeService is a demo asset with a simple healthy/unhealthy state.
@@ -38,11 +35,7 @@ func (h *HealthCheck) Run(map[string]string) (map[string]string, error) {
 type fixedHealthCheck struct{}
 
 func (fixedHealthCheck) Decide(ctx autonomy.DecisionContext) (autonomy.Decision, error) {
-	return autonomy.Decision{Action: autonomy.Action{
-		Capability: "service.health_check",
-		Target:     ctx.Task.Target,
-		Input:      map[string]string{"asset": ctx.Task.Target},
-	}}, nil
+	return autonomy.Decision{}, nil
 }
 
 func main() {
@@ -58,25 +51,24 @@ func main() {
 		},
 	}
 
-	loop := autonomy.Loop{
-		Agent: autonomy.Agent{
-			ID:      "owner-1",
-			State:   "idle",
-			Context: "demo",
-			Decide:  fixedHealthCheck{},
-		},
-		Runtime:  autonomy.NewRuntime(&HealthCheck{Service: svc}),
-		World:    svc,
-		Verifier: autonomy.StateVerifier{},
-		MaxSteps: 3,
-		OnEvent: func(e autonomy.Event) {
-			fmt.Printf("[%s] %s\n", e.Type, e.Message)
-		},
+	// loop := autonomy.Loop{
+	// 	Agent: autonomy.Agent{
+	// 		ID:      "owner-1",
+	// 		State:   "idle",
+	// 		Context: "demo",
+	// 	},
+		// Runtime:  autonomy.NewRuntime(&HealthCheck{Service: svc}),
+		// World:    svc,
+		// Verifier: autonomy.StateVerifier{},
+		// MaxSteps: 3,
+		// OnEvent: func(e autonomy.Event) {
+		// 	fmt.Printf("[%s] %s\n", e.Type, e.Message)
+		// },
 	}
 
-	if err := loop.Run(task); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println("completion contract satisfied")
+	// if err := loop.Run(task); err != nil {
+	// 	fmt.Fprintln(os.Stderr, err)
+	// 	os.Exit(1)
+	// }
+	// fmt.Println("completion contract satisfied")
 }

@@ -1,29 +1,27 @@
 package autonomy
 
-import "fmt"
-
 // Runtime reliably executes actions. It does not decide what to do next.
-type Runtime interface {
-	Execute(action Action) (map[string]string, error)
+type Runtime struct {
+	caps  map[string]Capability
+	world *World
 }
 
-// LocalRuntime looks up capabilities by name and runs them in-process.
-type LocalRuntime struct {
-	caps map[string]Capability
-}
-
-func NewRuntime(caps ...Capability) *LocalRuntime {
+func NewRuntime(caps ...Capability) *Runtime {
 	m := make(map[string]Capability, len(caps))
 	for _, c := range caps {
 		m[c.Name()] = c
 	}
-	return &LocalRuntime{caps: m}
+	return &Runtime{caps: m}
 }
 
-func (r *LocalRuntime) Execute(action Action) (map[string]string, error) {
-	c, ok := r.caps[action.Capability]
-	if !ok {
-		return nil, fmt.Errorf("unknown capability %q", action.Capability)
+func (r *Runtime) Execute(decision Decision) (Result, error) {
+	// fmt.Println("Executing decision: ", decision)
+	action := decision.Action
+	err := action.Execute(decision.Ctx)
+	if err != nil {
+		return Result{}, err
 	}
-	return c.Run(action.Input)
+	return Result{
+		Message: "Action executed",
+	}, nil
 }
