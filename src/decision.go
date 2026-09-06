@@ -1,6 +1,9 @@
 package autonomy
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // DecisionContext is the input bag for one decision cycle.
 type DecisionContext struct {
@@ -15,11 +18,16 @@ type DecisionMaker struct {
 }
 
 func NewDecideMaker() *DecisionMaker {
-	// reasoner := NewLLMReasoner("gpt-4o-mini")
-	reasoner := NewLocalReasoner("local-reasoner")
-	return &DecisionMaker{
-		reasoner: reasoner,
+	// Default stays local for offline tests. Set AUTONOMY_REASONER=llm to use Cursor SDK Bridge.
+	reasoner := Reasoner(NewLocalReasoner("local-reasoner"))
+	if os.Getenv("AUTONOMY_REASONER") == "llm" {
+		model := os.Getenv("AUTONOMY_LLM_MODEL")
+		if model == "" {
+			model = "composer-2"
+		}
+		reasoner = NewLLMReasoner(model)
 	}
+	return &DecisionMaker{reasoner: reasoner}
 }
 
 func (d *DecisionMaker) Decide(ctx DecisionContext) (Decision, error) {
