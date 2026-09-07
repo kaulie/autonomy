@@ -95,7 +95,10 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		return ReasoningResult{}, fmt.Errorf("cursor run returned empty text (status=%s msg=%s)", result.Status, result.ErrorMessage)
 	}
 
-	reason, action := parseDecision(text)
+	reason, action, err := parseDecision(text)
+	if err != nil {
+		return ReasoningResult{}, fmt.Errorf("cursor decision: %w", err)
+	}
 	return ReasoningResult{
 		Decision: Decision{
 			Reason: reason,
@@ -103,52 +106,6 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 			Ctx:    ctx,
 		},
 	}, nil
-}
-
-func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
-	var b strings.Builder
-	b.WriteString("You are the Decision Making component of an Autonomy agent.\n")
-	b.WriteString("Choose exactly one next action for the task target asset.\n")
-	b.WriteString("Available actions:\n")
-	b.WriteString("- change: mutate the target asset state toward the contract expected state\n")
-	b.WriteString("- noop: do nothing this cycle\n")
-	b.WriteString("Reply in exactly this format (no markdown):\n")
-	b.WriteString("ACTION: <change|noop>\n")
-	b.WriteString("REASON: <one short sentence>\n\n")
-	if ctx.Task != nil {
-		fmt.Fprintf(&b, "Task ID: %s\n", ctx.Task.ID)
-		fmt.Fprintf(&b, "Goal: %s\n", ctx.Task.Goal)
-		fmt.Fprintf(&b, "Description: %s\n", ctx.Task.Description)
-		fmt.Fprintf(&b, "Target: %s\n", ctx.Task.Target)
-		fmt.Fprintf(&b, "Expected state: %s\n", ctx.Task.Contract.ExpectedState)
-	}
-	if strings.TrimSpace(input.Text) != "" {
-		fmt.Fprintf(&b, "\nAdditional input:\n%s\n", input.Text)
-	}
-	return b.String()
-}
-
-// parseDecision maps model text into a Decision reason + Action.
-// Unknown or missing ACTION defaults to change so a coherent reply still advances the demo loop.
-func parseDecision(text string) (string, Action) {
-	actionName := "change"
-	reason := text
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		upper := strings.ToUpper(line)
-		switch {
-		case strings.HasPrefix(upper, "ACTION:"):
-			actionName = strings.ToLower(strings.TrimSpace(line[len("ACTION:"):]))
-		case strings.HasPrefix(upper, "REASON:"):
-			reason = strings.TrimSpace(line[len("REASON:"):])
-		}
-	}
-	switch actionName {
-	case "noop", "nothing", "none":
-		return reason, NothingAction{}
-	default:
-		return reason, SimpleAction{}
-	}
 }
 
 type LocalReasoner struct {

@@ -25,7 +25,7 @@ func TestLLMReasonerLive(t *testing.T) {
 	var out autonomy.ReasoningResult
 	var err error
 	go func() {
-		out, err = r.Reason(autonomy.DecisionContext{Task: task}, autonomy.ReasoningInput{Text: "Reply with the token HELLO_AUTONOMY and nothing else."})
+		out, err = r.Reason(autonomy.DecisionContext{Task: task}, autonomy.ReasoningInput{Text: "Return a plan that uses asset.change. Put HELLO_AUTONOMY in the reason field."})
 		close(done)
 	}()
 	select {

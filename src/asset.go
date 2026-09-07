@@ -43,3 +43,16 @@ func (m *AssetManager) Get(id string) (Asset, error) {
 func (m *AssetManager) Set(id string, asset Asset) {
 	m.assetsByID[id] = asset
 }
+
+// List returns a snapshot of registered assets in registration order.
+func (m *AssetManager) List() []Asset {
+	out := make([]Asset, 0, len(m.assets))
+	for _, a := range m.assets {
+		if cur, ok := m.assetsByID[a.ID]; ok {
+			out = append(out, cur)
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
