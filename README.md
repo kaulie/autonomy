@@ -99,8 +99,12 @@ export CURSOR_API_KEY=...
 ./scripts/fetch-bridge.sh          # or set CURSOR_SDK_BRIDGE_BIN
 export AUTONOMY_REASONER=llm
 export AUTONOMY_LLM_MODEL=composer-2
+# Avoid proxying loopback bridge traffic if your shell exports HTTP(S)_PROXY:
+# unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
 go run ./cmd/autonomy
 ```
+
+`LLMReasoner` asks the model for `ACTION: change|noop` + `REASON: ...`, then maps that into `SimpleAction` / `NothingAction`.
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
 

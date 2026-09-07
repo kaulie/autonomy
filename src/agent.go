@@ -44,15 +44,15 @@ func (a *Agent) Observe(result Result) {
 	fmt.Println("Agent observed: ", result.Message)
 }
 
-func (a *Agent) Decide() Decision {
+func (a *Agent) Decide() (Decision, error) {
 	decision, err := a.DecideMaker.Decide(DecisionContext{
 		Task: a.CurrentTask,
 	})
-	// fmt.Println("Agent decided: ", decision, ", error: ", err)
 	if err != nil {
-		return Decision{}
+		return Decision{}, err
 	}
-	return decision
+	fmt.Printf("Agent decided: reason=%q\n", decision.Reason)
+	return decision, nil
 }
 
 func (a *Agent) Result() (bool, error) {

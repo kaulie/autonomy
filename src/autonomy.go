@@ -50,9 +50,11 @@ func (r *Autonomy) Run(task *Task) error {
 		if steps > r.MaxSteps {
 			break
 		}
-		decision := agent.Decide()
+		decision, err := agent.Decide()
+		if err != nil {
+			return fmt.Errorf("decide: %w", err)
+		}
 		result, err := r.Runtime.Execute(decision)
-		// fmt.Printf("result: %v, error: %v\n", result, err)
 		if err != nil {
 			return fmt.Errorf("execute decision: %w", err)
 		}
