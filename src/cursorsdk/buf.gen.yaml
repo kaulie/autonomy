@@ -1,0 +1,15 @@
+# Codegen for the Go Cursor SDK Bridge adapter.
+# Run from repo root: buf generate --template src/cursorsdk/buf.gen.yaml
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/kaulie/autonomy/src/cursorsdk/gen
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.5
+    out: src/cursorsdk/gen
+    opt: paths=source_relative
+  - remote: buf.build/connectrpc/go:v1.18.1
+    out: src/cursorsdk/gen
+    opt: paths=source_relative
