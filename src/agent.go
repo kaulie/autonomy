@@ -15,7 +15,8 @@ func NewAgentFactory() *AgentFactory {
 
 func (f *AgentFactory) Create(task *Task) *Agent {
 
-	agent := f.NewAgent("agent-0")
+	agentName := fmt.Sprintf("agent-%s", task.ID)
+	agent := f.NewAgent(agentName)
 	agent.CurrentTask = task
 	return agent
 }
