@@ -58,7 +58,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	if ctx.Context != nil {
 		goCtx = ctx.Context
 	}
-
+	fmt.Printf("Creating cursor client for model: %s\n", model)
 	client := cursorsdk.NewClient(
 		cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
 		cursorsdk.WithWorkspace(cwd),
@@ -69,7 +69,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	if err := client.Ping(goCtx); err != nil {
 		return ReasoningResult{}, fmt.Errorf("cursor bridge ping: %w", err)
 	}
-
+	fmt.Printf("Creating cursor agent for model: %s\n", model)
 	agent, err := client.Agents().Create(goCtx, cursorsdk.CreateOptions{
 		Model: model,
 		CWD:   cwd,
@@ -80,11 +80,13 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	defer agent.Close(goCtx)
 
 	prompt := buildReasoningPrompt(ctx, input)
+	fmt.Printf("Sending prompt to cursor agent: %s\n", prompt)
 	run, err := agent.Send(goCtx, prompt)
 	if err != nil {
 		return ReasoningResult{}, fmt.Errorf("cursor send: %w", err)
 	}
 	result, err := run.Wait(goCtx)
+	fmt.Printf("Cursor agent result: %s\n", result.Text)
 	if err != nil {
 		return ReasoningResult{}, fmt.Errorf("cursor wait: %w", err)
 	}
