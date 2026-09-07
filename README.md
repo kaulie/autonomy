@@ -89,17 +89,21 @@ go run ./cmd/autonomy
 
 ### Cursor SDK Bridge (LLMReasoner)
 
-`LLMReasoner` drives Cursor agents via the official [SDK Bridge](https://cursor.com/docs/sdk/bridge):
+Go adapter: `src/cursorsdk` (BridgeManager + Connect client + Agent/Run), generated from `proto/sdk/v1` per [Agent: start here](https://github.com/cursor/sdk-bridge#agent-start-here).
 
 ```bash
+# regenerate stubs after proto bumps
+buf generate --template src/cursorsdk/buf.gen.yaml
+
 export CURSOR_API_KEY=...
 ./scripts/fetch-bridge.sh          # or set CURSOR_SDK_BRIDGE_BIN
-export AUTONOMY_REASONER=llm       # DecisionMaker uses LLMReasoner
+export AUTONOMY_REASONER=llm
 export AUTONOMY_LLM_MODEL=composer-2
 go run ./cmd/autonomy
 ```
 
-Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 4m -v`
+Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
+
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 

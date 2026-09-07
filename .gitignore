@@ -32,6 +32,4 @@ go.work.sum
 # .vscode/
 
 # Cursor SDK Bridge standalone binary (download via scripts/fetch-bridge.sh)
-third_party/bin/
-third_party/proto/
-third_party/manifest.json
+third_party/

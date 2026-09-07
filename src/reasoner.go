@@ -1,10 +1,13 @@
 package autonomy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
 type ReasoningInput struct {
@@ -27,7 +30,7 @@ type Reason struct {
 	UpdatedAt   time.Time
 }
 
-// LLMReasoner uses the official Cursor SDK Bridge to run one local agent turn.
+// LLMReasoner uses the official Cursor SDK Bridge via the Go cursorsdk adapter.
 // Requires CURSOR_API_KEY and cursor-sdk-bridge (CURSOR_SDK_BRIDGE_BIN or third_party/bin).
 type LLMReasoner struct {
 	model string
@@ -43,21 +46,51 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	bridge, err := StartCursorBridge(cwd)
-	if err != nil {
-		return ReasoningResult{}, err
+	model := r.model
+	if model == "" {
+		model = os.Getenv("AUTONOMY_LLM_MODEL")
 	}
-	defer bridge.Close()
+	if model == "" {
+		model = "composer-2"
+	}
 
-	agentID, err := bridge.CreateLocalAgent(r.model, cwd)
+	goCtx := context.Background()
+	if ctx.Context != nil {
+		goCtx = ctx.Context
+	}
+
+	client := cursorsdk.NewClient(
+		cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
+		cursorsdk.WithWorkspace(cwd),
+		cursorsdk.WithBridgeBin(os.Getenv("CURSOR_SDK_BRIDGE_BIN")),
+	)
+	defer client.Close()
+
+	if err := client.Ping(goCtx); err != nil {
+		return ReasoningResult{}, fmt.Errorf("cursor bridge ping: %w", err)
+	}
+
+	agent, err := client.Agents().Create(goCtx, cursorsdk.CreateOptions{
+		Model: model,
+		CWD:   cwd,
+	})
 	if err != nil {
 		return ReasoningResult{}, fmt.Errorf("create cursor agent: %w", err)
 	}
+	defer agent.Close(goCtx)
 
 	prompt := buildReasoningPrompt(ctx, input)
-	text, err := bridge.Prompt(agentID, prompt)
+	run, err := agent.Send(goCtx, prompt)
 	if err != nil {
-		return ReasoningResult{}, fmt.Errorf("cursor prompt: %w", err)
+		return ReasoningResult{}, fmt.Errorf("cursor send: %w", err)
+	}
+	result, err := run.Wait(goCtx)
+	if err != nil {
+		return ReasoningResult{}, fmt.Errorf("cursor wait: %w", err)
+	}
+	text := strings.TrimSpace(result.Text)
+	if text == "" {
+		return ReasoningResult{}, fmt.Errorf("cursor run returned empty text (status=%s msg=%s)", result.Status, result.ErrorMessage)
 	}
 
 	return ReasoningResult{

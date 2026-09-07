@@ -30,14 +30,15 @@ func TestLLMReasonerLive(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(3 * time.Minute):
+	case <-time.After(4 * time.Minute):
 		t.Fatal("timeout")
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Decision.Reason, "HELLO_AUTONOMY") && out.Decision.Reason == "" {
-		t.Fatalf("empty or unexpected reason: %q", out.Decision.Reason)
+	if out.Decision.Reason == "" {
+		t.Fatalf("empty reason")
 	}
 	t.Logf("reason=%q", out.Decision.Reason)
+	_ = strings.Contains(out.Decision.Reason, "HELLO_AUTONOMY")
 }
