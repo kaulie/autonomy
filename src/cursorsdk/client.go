@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -101,13 +102,16 @@ func (c *Client) ensure() error {
 		return nil
 	}
 
+	started := time.Now()
 	var ep *BridgeEndpoint
 	if c.Endpoint != "" || c.AuthToken != "" {
 		if c.Endpoint == "" || c.AuthToken == "" {
 			return sdkErr("endpoint and auth_token must be provided together")
 		}
 		ep = &BridgeEndpoint{URL: c.Endpoint, AuthToken: c.AuthToken}
+		Trace("ensure", "attach external endpoint=%s", c.Endpoint)
 	} else {
+		Trace("ensure", "spawn bridge bin=%q workspace=%q", c.BridgeBin, c.Workspace)
 		c.manager = &BridgeManager{
 			Binary:    c.BridgeBin,
 			Workspace: c.Workspace,
@@ -118,6 +122,7 @@ func (c *Client) ensure() error {
 		if err != nil {
 			return err
 		}
+		Trace("ensure", "bridge ready url=%s pid=%d elapsed=%s", ep.URL, ep.PID, time.Since(started).Round(time.Millisecond))
 	}
 
 	c.http = newBridgeHTTPClient(ep.AuthToken)
@@ -146,11 +151,18 @@ func (c *Client) Close() error {
 
 // Ping checks bridge liveness.
 func (c *Client) Ping(ctx context.Context) error {
+	started := time.Now()
+	Trace("Ping", "begin")
 	if err := c.ensure(); err != nil {
 		return err
 	}
 	_, err := c.ctrlRPC.Ping(ctx, connect.NewRequest(&sdkv1.PingRequest{}))
-	return wrapConnectErr(err)
+	if err != nil {
+		Trace("Ping", "error after %s: %v", time.Since(started).Round(time.Millisecond), err)
+		return wrapConnectErr(err)
+	}
+	Trace("Ping", "ok elapsed=%s", time.Since(started).Round(time.Millisecond))
+	return nil
 }
 
 // Version returns bridge/protocol/capabilities.
@@ -206,11 +218,16 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 			Mode:   opts.Mode,
 		},
 	}
+	Trace("CreateAgent", "rpc begin model=%s cwd=%s", opts.Model, cwd)
+	started := time.Now()
 	resp, err := f.client.agentRPC.CreateAgent(ctx, connect.NewRequest(req))
 	if err != nil {
+		Trace("CreateAgent", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		return nil, wrapConnectErr(err)
 	}
-	return &Agent{client: f.client, ID: resp.Msg.GetAgentId(), Model: opts.Model}, nil
+	id := resp.Msg.GetAgentId()
+	Trace("CreateAgent", "rpc ok agent_id=%s elapsed=%s", id, time.Since(started).Round(time.Millisecond))
+	return &Agent{client: f.client, ID: id, Model: opts.Model}, nil
 }
 
 // CursorCatalog wraps SdkCursorService.

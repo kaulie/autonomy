@@ -99,8 +99,11 @@ export CURSOR_API_KEY=...
 ./scripts/fetch-bridge.sh          # or set CURSOR_SDK_BRIDGE_BIN
 export AUTONOMY_REASONER=llm
 export AUTONOMY_LLM_MODEL=composer-2
-# Avoid proxying loopback bridge traffic if your shell exports HTTP(S)_PROXY:
-# unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
+# Optional: AUTONOMY_LLM_TIMEOUT=3m (default). CreateAgent/Send/Wait share this deadline.
+# Keep HTTPS_PROXY if you need it for Cursor API egress. The Go client already
+# disables proxy for loopback Bridge RPCs; unsetting proxy can make CreateAgent hang.
+# Stage timing logs go to stderr by default. AUTONOMY_LLM_DEBUG=0 silences SDK traces;
+# AUTONOMY_LLM_DEBUG=1 also dumps prompt body and assistant chunk sizes.
 go run ./cmd/autonomy
 ```
 
