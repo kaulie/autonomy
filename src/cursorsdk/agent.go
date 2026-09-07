@@ -2,6 +2,7 @@ package cursorsdk
 
 import (
 	"context"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -20,13 +21,17 @@ func (a *Agent) Send(ctx context.Context, text string) (*Run, error) {
 	if err := a.client.ensure(); err != nil {
 		return nil, err
 	}
+	Trace("Send", "rpc begin agent_id=%s prompt_bytes=%d", a.ID, len(text))
+	started := time.Now()
 	stream, err := a.client.agentRPC.Send(ctx, connect.NewRequest(&sdkv1.SendRequest{
 		AgentId: a.ID,
 		Message: &sdkv1.UserMessage{Text: text},
 	}))
 	if err != nil {
+		Trace("Send", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		return nil, wrapConnectErr(err)
 	}
+	Trace("Send", "stream opened elapsed=%s (next: Wait drains events)", time.Since(started).Round(time.Millisecond))
 	return newRun(a.client, a.ID, stream), nil
 }
 

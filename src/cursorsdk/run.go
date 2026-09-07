@@ -3,6 +3,7 @@ package cursorsdk
 import (
 	"context"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -37,12 +38,12 @@ type Run struct {
 	agentID string
 	stream  *connect.ServerStreamForClient[sdkv1.RunStreamMessage]
 
-	runID        string
-	lastOffset   string
-	assistant    strings.Builder
-	statusMsg    string
-	terminal     *RunResult
-	drained      bool
+	runID      string
+	lastOffset string
+	assistant  strings.Builder
+	statusMsg  string
+	terminal   *RunResult
+	drained    bool
 }
 
 func newRun(client *Client, agentID string, stream *connect.ServerStreamForClient[sdkv1.RunStreamMessage]) *Run {
@@ -69,19 +70,29 @@ func (r *Run) Wait(ctx context.Context) (*RunResult, error) {
 	if r.terminal != nil {
 		return r.terminal, nil
 	}
+	started := time.Now()
+	Trace("Wait", "begin drain agent_id=%s", r.agentID)
+	stopHB := startHeartbeat("Wait", started)
+	defer stopHB()
+
 	if err := r.consume(ctx, nil); err != nil {
+		Trace("Wait", "consume error after %s run_id=%s: %v", time.Since(started).Round(time.Millisecond), r.runID, err)
 		// Dropped live stream: fall back to WaitLiveRun when we know run id.
 		if r.runID != "" {
+			Trace("Wait", "fallback WaitLiveRun run_id=%s", r.runID)
 			return r.waitLive(ctx)
 		}
 		return nil, err
 	}
 	if r.terminal == nil {
 		if r.runID != "" {
+			Trace("Wait", "no terminal on stream; fallback WaitLiveRun run_id=%s", r.runID)
 			return r.waitLive(ctx)
 		}
 		return nil, sdkErr("run ended without terminal result")
 	}
+	Trace("Wait", "done status=%s run_id=%s text_bytes=%d elapsed=%s",
+		r.terminal.Status, r.terminal.RunID, len(r.terminal.Text), time.Since(started).Round(time.Millisecond))
 	return r.terminal, nil
 }
 
@@ -98,46 +109,81 @@ func (r *Run) waitLive(ctx context.Context) (*RunResult, error) {
 	if err := r.client.ensure(); err != nil {
 		return nil, err
 	}
+	started := time.Now()
+	Trace("WaitLiveRun", "rpc begin run_id=%s", r.runID)
 	resp, err := r.client.agentRPC.WaitLiveRun(ctx, connect.NewRequest(&sdkv1.WaitLiveRunRequest{RunId: r.runID}))
 	if err != nil {
+		Trace("WaitLiveRun", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		return nil, wrapConnectErr(err)
 	}
 	rr := runResultFromProto(resp.Msg.GetResult(), "", r.statusMsg)
 	r.terminal = &rr
+	Trace("WaitLiveRun", "rpc ok status=%s elapsed=%s", rr.Status, time.Since(started).Round(time.Millisecond))
 	return r.terminal, nil
+}
+
+func startHeartbeat(stage string, started time.Time) func() {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				Trace(stage, "still waiting… elapsed=%s", time.Since(started).Round(time.Millisecond))
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 	if r.drained {
 		return nil
 	}
+	n := 0
 	for r.stream.Receive() {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		n++
 		msg := r.stream.Msg()
 		if off := msg.GetOffset(); off != "" {
 			r.lastOffset = off
 		}
 		switch env := msg.GetEnvelope().(type) {
 		case nil:
+			if TraceVerbose() {
+				Trace("stream", "keepalive/#%d offset=%s", n, msg.GetOffset())
+			}
 			continue // keepalive / unknown
 		case *sdkv1.RunStreamMessage_SdkMessage:
 			sm := env.SdkMessage
 			payload := structToMap(sm.GetMessage())
 			if rid, _ := payload["run_id"].(string); rid != "" && r.runID == "" {
 				r.runID = rid
+				Trace("stream", "run_id=%s", r.runID)
 			}
 			if rid, _ := payload["runId"].(string); rid != "" && r.runID == "" {
 				r.runID = rid
+				Trace("stream", "run_id=%s", r.runID)
 			}
 			typ := sm.GetType()
 			if typ == "assistant" {
-				r.assistant.WriteString(textFromPayload(payload))
+				chunk := textFromPayload(payload)
+				r.assistant.WriteString(chunk)
+				if TraceVerbose() {
+					Trace("stream", "assistant +%d bytes (total=%d)", len(chunk), r.assistant.Len())
+				}
+			} else {
+				Trace("stream", "event type=%s run_id=%s", typ, r.runID)
 			}
 			if typ == "status" {
 				if m, ok := payload["message"].(string); ok && m != "" {
 					r.statusMsg = m
+					Trace("stream", "status message=%q", m)
 				}
 			}
 			if onEvent != nil {
@@ -152,17 +198,20 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 				r.runID = rr.RunID
 			}
 			r.terminal = &rr
+			Trace("stream", "result status=%s err=%s text_bytes=%d", rr.Status, rr.ErrorCode, len(rr.Text))
 			if onEvent != nil {
 				onEvent(RunEvent{Type: "result", Payload: map[string]any{"status": rr.Status, "text": rr.Text}, Offset: msg.GetOffset()})
 			}
 		case *sdkv1.RunStreamMessage_Done:
 			r.drained = true
+			Trace("stream", "done after %d messages", n)
 			return r.stream.Err()
 		default:
 			continue
 		}
 	}
 	r.drained = true
+	Trace("stream", "receive ended after %d messages err=%v", n, r.stream.Err())
 	return r.stream.Err()
 }
 
