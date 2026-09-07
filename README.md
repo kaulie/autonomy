@@ -104,7 +104,7 @@ export AUTONOMY_LLM_MODEL=composer-2
 go run ./cmd/autonomy
 ```
 
-`LLMReasoner` asks the model for `ACTION: change|noop` + `REASON: ...`, then maps that into `SimpleAction` / `NothingAction`.
+`LLMReasoner` builds prompts from `src/agent_policy/AGENT_V1.md` (fills `{{CONSTRUCTS}}`, appends current Goal/World) and expects a JSON decision (`plan` / `done` / `blocked` / `need_input`). `plan` + `asset.change` maps to `SimpleAction`.
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
 
