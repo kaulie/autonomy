@@ -1,10 +1,8 @@
 package autonomy
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
@@ -17,7 +15,15 @@ const (
 	AgentLifecyclePersistent AgentLifecycle = "persistent"
 )
 
-// AgentFactory creates and caches agents by id.
+// AgentBackend identifies how an autonomy agent is backed.
+type AgentBackend string
+
+const (
+	AgentBackendLocal  AgentBackend = "local"
+	AgentBackendCursor AgentBackend = "cursor"
+)
+
+// AgentFactory creates and caches agents by id. All agents (including Cursor-backed) register here.
 type AgentFactory struct {
 	agents map[string]*Agent
 }
@@ -36,6 +42,7 @@ func (f *AgentFactory) Create(task *Task) *Agent {
 	return agent
 }
 
+// NewAgent registers a local autonomy agent with AGENT_WORKSPACE.
 func (f *AgentFactory) NewAgent(id string) *Agent {
 	if a, ok := f.agents[id]; ok {
 		return a
@@ -50,6 +57,7 @@ func (f *AgentFactory) NewAgent(id string) *Agent {
 		State:     "idle",
 		Lifecycle: AgentLifecycleEphemeral,
 		Workspace: ws,
+		Backend:   AgentBackendLocal,
 	}
 	f.agents[id] = agent
 	agent.DecideMaker = NewDecideMaker()
@@ -68,17 +76,17 @@ func (f *AgentFactory) Get(id string) *Agent {
 }
 
 // Agent is the subject that owns a task and decision authority.
-// Decision making is a capability of the agent, not of the loop.
+// Cursor-backed agents still register here; Cursor SDK is only the backend.
 type Agent struct {
 	ID          string
 	State       string // runtime: idle | running | ...
 	Lifecycle   AgentLifecycle
+	Backend     AgentBackend
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	CurrentTask *Task
 	Context     string
 	DecideMaker *DecisionMaker
 
-	// Cursor SDK session for the current task (LLMReasoner).
 	cursorClient *cursorsdk.Client
 	cursorAgent  *cursorsdk.Agent
 	// CursorAgentID is retained for persistent agents after Close (Resume later).
@@ -126,86 +134,4 @@ func (a *Agent) Stop() {
 
 func (a *Agent) IsRunning() bool {
 	return a.State == "running"
-}
-
-// ensureCursorSession creates or resumes a Cursor SDK agent for this autonomy agent.
-func (a *Agent) ensureCursorSession(ctx context.Context, model, cwd string) (*cursorsdk.Agent, error) {
-	if a.cursorAgent != nil {
-		return a.cursorAgent, nil
-	}
-	if cwd == "" && a.Workspace != "" {
-		cwd = a.Workspace
-	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	client := a.cursorClient
-	if client == nil {
-		client = cursorsdk.NewClient(
-			cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
-			cursorsdk.WithWorkspace(cwd),
-			cursorsdk.WithBridgeBin(os.Getenv("CURSOR_SDK_BRIDGE_BIN")),
-		)
-		a.cursorClient = client
-	}
-	if err := client.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("cursor bridge ping: %w", err)
-	}
-
-	var (
-		agent *cursorsdk.Agent
-		err   error
-	)
-	if a.CursorAgentID != "" && !a.IsEphemeral() {
-		agent, err = client.Agents().Resume(ctx, a.CursorAgentID, model)
-		if err != nil {
-			return nil, fmt.Errorf("resume cursor agent: %w", err)
-		}
-	} else {
-		agent, err = client.Agents().Create(ctx, cursorsdk.CreateOptions{
-			Model: model,
-			CWD:   cwd,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create cursor agent: %w", err)
-		}
-	}
-	a.cursorAgent = agent
-	a.CursorAgentID = agent.ID
-	persistAgent(a)
-	return agent, nil
-}
-
-// disposeCursorSession ends the Cursor SDK session for this task.
-// Ephemeral agents are permanently deleted via DeleteAgent; persistent agents are only Closed.
-// Cleanup failures are logged to stderr (they must not hide the original task error).
-func (a *Agent) disposeCursorSession(ctx context.Context) {
-	if a.cursorAgent != nil {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		// Bound cleanup so task teardown cannot hang forever.
-		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		agentID := a.cursorAgent.ID
-		if a.IsEphemeral() {
-			if err := a.cursorAgent.Delete(cctx); err != nil {
-				fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s failed: %v\n", agentID, err)
-			} else {
-				fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s ok\n", agentID)
-			}
-			a.CursorAgentID = ""
-		} else {
-			if err := a.cursorAgent.Close(cctx); err != nil {
-				fmt.Fprintf(os.Stderr, "[autonomy] CloseAgent %s failed: %v\n", agentID, err)
-			}
-		}
-		a.cursorAgent = nil
-	}
-	if a.cursorClient != nil {
-		if err := a.cursorClient.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "[autonomy] cursor client Close failed: %v\n", err)
-		}
-		a.cursorClient = nil
-	}
 }

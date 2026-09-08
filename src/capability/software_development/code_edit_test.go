@@ -8,31 +8,50 @@ import (
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
-type mockRunner struct {
-	lastWS, lastInst string
-	summary          string
-	err              error
+type mockSession struct {
+	id      string
+	summary string
+	err     error
+	prompt  string
 }
 
-func (m *mockRunner) RunEdit(_ context.Context, workspace, instruction string) (string, error) {
-	m.lastWS = workspace
-	m.lastInst = instruction
+func (m *mockSession) ID() string { return m.id }
+
+func (m *mockSession) Prompt(_ context.Context, prompt string) (string, error) {
+	m.prompt = prompt
 	return m.summary, m.err
+}
+
+func (m *mockSession) Release(context.Context) error { return nil }
+
+type mockBroker struct {
+	lastOpts sd.AcquireAgentOpts
+	sess     *mockSession
+	err      error
+}
+
+func (m *mockBroker) AcquireAgent(_ context.Context, opts sd.AcquireAgentOpts) (sd.AgentSession, error) {
+	m.lastOpts = opts
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.sess, nil
 }
 
 func TestCodeEditRequiresInstruction(t *testing.T) {
 	t.Parallel()
-	c := sd.CodeEdit{Runner: &mockRunner{summary: "ok"}}
+	c := sd.CodeEdit{Agents: &mockBroker{sess: &mockSession{summary: "ok"}}}
 	_, err := c.Run(map[string]string{"workspace": "/tmp/ws"})
 	if err == nil || !strings.Contains(err.Error(), "instruction") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestCodeEditUsesWorkspaceAndRunner(t *testing.T) {
+func TestCodeEditUsesWorkspaceAndBroker(t *testing.T) {
 	t.Parallel()
-	m := &mockRunner{summary: "edited files"}
-	c := sd.CodeEdit{Runner: m}
+	sess := &mockSession{id: "agent-code_edit-1", summary: "edited files"}
+	m := &mockBroker{sess: sess}
+	c := sd.CodeEdit{Agents: m}
 	out, err := c.Run(map[string]string{
 		"workspace":   "/Users/gaolei/agent-workspace-sandbox/agent-1/",
 		"instruction": "add hello endpoint",
@@ -40,10 +59,13 @@ func TestCodeEditUsesWorkspaceAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.lastWS == "" || m.lastInst == "" {
-		t.Fatalf("runner not called: %+v", m)
+	if m.lastOpts.Workspace == "" || m.lastOpts.Purpose != sd.Name {
+		t.Fatalf("acquire opts: %+v", m.lastOpts)
 	}
-	if out["provider"] != sd.Provider || out["status"] != "ok" {
+	if !strings.Contains(sess.prompt, "add hello endpoint") {
+		t.Fatalf("prompt=%q", sess.prompt)
+	}
+	if out["provider"] != sd.Provider || out["status"] != "ok" || out["agent_id"] != sess.id {
 		t.Fatalf("out=%v", out)
 	}
 	if c.Name() != sd.Name || c.Domain() != sd.Domain || c.Provider() != sd.Provider {
