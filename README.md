@@ -108,7 +108,7 @@ export AUTONOMY_LLM_MODEL=composer-2
 go run ./cmd/autonomy
 ```
 
-`LLMReasoner` reads `$PROJECT_ROOT/src/agent_policy/AGENT_V1.md` at runtime, passes it through to the model (replacing `{{CONSTRUCTS}}` from bootstrap-registered capabilities in `src/capability/`, plus any future `{{...}}` placeholders), then appends current Goal/World/extra input as an appendix. Bootstrap calls `capability.RegisterDefaults` (currently `asset.change`) and opens SQLite at `$PROJECT_ROOT/data/autonomy.db` (tables: `tasks`, `agents` with soft-delete, `reason_turns` for each reasoner input/output). It expects a JSON decision (`plan` / `done` / `blocked` / `need_input`). `plan` + `asset.change` maps to `SimpleAction`.
+`LLMReasoner` reads `$PROJECT_ROOT/src/agent_policy/AGENT_V1.md` at runtime, passes it through to the model (replacing `{{CONSTRUCTS}}` from bootstrap-registered capabilities in `src/capability/`, plus any future `{{...}}` placeholders), then appends current Goal/World/extra input as an appendix. Bootstrap calls `capability.RegisterDefaults` (`asset.change` provider=`autonomy`, `code_edit` under `software_development` provider=`cursor`) and opens SQLite at `$PROJECT_ROOT/data/autonomy.db`. Each Agent gets `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/` for Cursor / `code_edit`. Decisions map registered capabilities to `CapabilityAction` → `Capability.Run`.
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
 

@@ -38,6 +38,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
 		Assets: worldAssetMutator(),
+		Editor: CursorCodeEditor{},
 	})
 
 	_autonomy = &Autonomy{

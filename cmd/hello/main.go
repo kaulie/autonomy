@@ -29,6 +29,8 @@ func (h *HealthCheck) Name() string { return "service.health_check" }
 
 func (h *HealthCheck) Domain() string { return string(autonomy.TaskDomainServer) }
 
+func (h *HealthCheck) Provider() string { return "demo" }
+
 func (h *HealthCheck) Description() string {
 	return "probe fake service health; returns status healthy|unhealthy"
 }

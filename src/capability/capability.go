@@ -1,5 +1,5 @@
 // Package capability holds the Capability interface, factory, and built-in abilities.
-// Add new abilities as files in this package and register them in RegisterDefaults.
+// Domain-specific abilities live under subpackages (e.g. software_development).
 package capability
 
 import (
@@ -11,6 +11,7 @@ import (
 type Capability interface {
 	Name() string
 	Domain() string
+	Provider() string // who provides this capability (e.g. cursor, autonomy)
 	Description() string
 	Run(in map[string]string) (map[string]string, error)
 }
@@ -51,6 +52,15 @@ func (f *Factory) Get(name string) Capability {
 	return f.capabilitiesByName[name]
 }
 
+// Has reports whether a capability name is registered.
+func (f *Factory) Has(name string) bool {
+	if f == nil {
+		return false
+	}
+	_, ok := f.capabilitiesByName[name]
+	return ok
+}
+
 // FormatConstructs renders registered capabilities for AGENT_V1 {{CONSTRUCTS}}.
 func (f *Factory) FormatConstructs() string {
 	if f == nil || len(f.capabilities) == 0 {
@@ -58,7 +68,7 @@ func (f *Factory) FormatConstructs() string {
 	}
 	var b strings.Builder
 	for _, c := range f.capabilities {
-		fmt.Fprintf(&b, "- %s: %s\n", c.Name(), c.Description())
+		fmt.Fprintf(&b, "- %s [provider=%s]: %s\n", c.Name(), c.Provider(), c.Description())
 	}
 	return strings.TrimSpace(b.String())
 }

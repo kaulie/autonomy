@@ -19,6 +19,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 |------|------|
 | Identity | Agent 标识 |
 | Lifecycle | `ephemeral`（默认）：任务结束时先 Cancel 未结束 run，再调用 Cursor SDK `DeleteAgent`；`persistent`：仅 `CloseAgent`，保留可 Resume |
+| Workspace | `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`，创建 Agent 时分配，供 Cursor / `code_edit` 使用 |
 | Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者 |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |

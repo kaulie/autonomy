@@ -122,7 +122,7 @@ type planStepJSON struct {
 }
 
 // parseDecision maps AGENT_V1 JSON into a Decision reason + Action.
-// Executable mapping for v1: plan with asset.change → SimpleAction; otherwise NothingAction.
+// Registered capabilities become CapabilityAction; unknown plan steps become NothingAction.
 func parseDecision(text string) (string, Action, error) {
 	raw := extractJSONObject(text)
 	if raw == "" {
@@ -142,13 +142,19 @@ func parseDecision(text string) (string, Action, error) {
 		for _, step := range d.Plan {
 			capName := strings.ToLower(strings.TrimSpace(step.Capability))
 			switch capName {
-			case "asset.change", "change":
-				return reason, SimpleAction{}, nil
 			case "noop", "nothing", "none", "":
 				continue
-			default:
-				return reason, NothingAction{}, nil
+			case "change":
+				capName = "asset.change"
 			}
+			if f := activeCapabilityFactory(); f != nil && f.Has(capName) {
+				return reason, CapabilityAction{Name: capName, Input: planInputMap(step.Input)}, nil
+			}
+			// Backward-compatible demo path when factory not wired (unit tests).
+			if capName == "asset.change" {
+				return reason, SimpleAction{}, nil
+			}
+			return reason, NothingAction{}, nil
 		}
 		return reason, NothingAction{}, nil
 	case "done", "blocked", "need_input":
@@ -156,6 +162,21 @@ func parseDecision(text string) (string, Action, error) {
 	default:
 		return "", nil, fmt.Errorf("unknown decision type %q", d.Type)
 	}
+}
+
+func planInputMap(raw json.RawMessage) map[string]string {
+	out := map[string]string{}
+	if len(raw) == 0 {
+		return out
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return out
+	}
+	for k, v := range m {
+		out[k] = fmt.Sprint(v)
+	}
+	return out
 }
 
 func extractJSONObject(text string) string {

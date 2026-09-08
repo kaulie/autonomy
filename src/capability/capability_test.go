@@ -35,11 +35,18 @@ func TestRegisterDefaultsIncludesAssetChange(t *testing.T) {
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 1 || all[0].Name() != "asset.change" {
+	if len(all) != 2 {
+		t.Fatalf("GetAll len=%d want 2", len(all))
+	}
+	if f.Get("asset.change") == nil || f.Get("code_edit") == nil {
 		t.Fatalf("GetAll=%v", all)
 	}
-	if got := f.FormatConstructs(); !strings.Contains(got, "asset.change:") {
+	got := f.FormatConstructs()
+	if !strings.Contains(got, "asset.change [provider=autonomy]") {
 		t.Fatalf("constructs=%q", got)
+	}
+	if !strings.Contains(got, "code_edit [provider=cursor]") {
+		t.Fatalf("expected code_edit in constructs: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})
 	if err != nil {

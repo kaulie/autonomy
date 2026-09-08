@@ -13,7 +13,9 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 | 字段 | 含义 |
 |------|------|
-| Name / ID | 稳定语义名，如 `service.health_check`、`camera.capture` |
+| Name / ID | 稳定语义名，如 `service.health_check`、`camera.capture`、`code_edit` |
+| Domain | 所属语义域，如 `software_development` |
+| Provider | 具体实现方标识，如 `cursor`、`autonomy`（见 [Provider](provider.md)） |
 | Input / Output | 参数与结果的语义 |
 | Preconditions | 调用前世界需满足的条件 |
 | Postconditions | 成功后期望的世界效应（声明，仍需 Verification） |
