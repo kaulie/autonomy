@@ -393,12 +393,12 @@ func preparePolicyRoot(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := filepath.Join("agent_policy", "AGENT_V1.md")
+	src := filepath.Join("agent_policy", "AGENT_V2.md")
 	b, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "AGENT_V1.md"), b, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "AGENT_V2.md"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
