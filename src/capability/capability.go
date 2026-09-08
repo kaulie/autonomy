@@ -61,7 +61,7 @@ func (f *Factory) Has(name string) bool {
 	return ok
 }
 
-// FormatConstructs renders registered capabilities for AGENT_V1 {{CONSTRUCTS}}.
+// FormatConstructs renders registered capabilities for AGENT_V2 {{CONSTRUCTS}}.
 func (f *Factory) FormatConstructs() string {
 	if f == nil || len(f.capabilities) == 0 {
 		return "(none)"

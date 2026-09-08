@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-const defaultAgentPolicyRel = "src/agent_policy/AGENT_V1.md"
+const defaultAgentPolicyRel = "src/agent_policy/AGENT_V2.md"
 
-// policyPlaceholders are substituted into AGENT_V1.md; the rest of the file is passed through unchanged.
+// policyPlaceholders are substituted into AGENT_V2.md; the rest of the file is passed through unchanged.
 func policyPlaceholders() map[string]string {
 	constructs := "(none)"
 	if _autonomy != nil && _autonomy.CapabilityFactory != nil {
@@ -37,7 +37,7 @@ func projectRoot() (string, error) {
 	return root, nil
 }
 
-// loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V1.md at runtime.
+// loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V2.md at runtime.
 func loadAgentPolicy() (string, error) {
 	root, err := projectRoot()
 	if err != nil {
@@ -51,7 +51,7 @@ func loadAgentPolicy() (string, error) {
 	return string(b), nil
 }
 
-// buildReasoningPrompt sends AGENT_V1.md through to the model (placeholders only),
+// buildReasoningPrompt sends AGENT_V2.md through to the model (placeholders only),
 // then appends runtime Goal / World / extra input as an appendix.
 func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
 	raw, err := loadAgentPolicy()
@@ -121,7 +121,7 @@ type planStepJSON struct {
 	Input      json.RawMessage `json:"input"`
 }
 
-// parseDecision maps AGENT_V1 JSON into a Decision reason + Action.
+// parseDecision maps AGENT_V2 JSON into a Decision reason + Action.
 // Registered capabilities become CapabilityAction; unknown plan steps become NothingAction.
 func parseDecision(text string) (string, Action, error) {
 	raw := extractJSONObject(text)

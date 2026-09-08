@@ -46,13 +46,13 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 	filledPolicy := applyPolicyPlaceholders(raw, policyPlaceholders())
 	if !strings.HasPrefix(prompt, filledPolicy) {
-		t.Fatalf("prompt must start with full AGENT_V1.md (placeholders only)")
+		t.Fatalf("prompt must start with full AGENT_V2.md (placeholders only)")
 	}
 	if strings.Contains(prompt, "{{CONSTRUCTS}}") {
 		t.Fatal("{{CONSTRUCTS}} was not replaced")
 	}
 	if strings.Contains(prompt, "Respond with a single JSON object only") {
-		t.Fatal("must not append extra output instructions beyond AGENT_V1.md")
+		t.Fatal("must not append extra output instructions beyond AGENT_V2.md")
 	}
 
 	for _, want := range []string{
