@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS agents (
   lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
   current_task_id TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
-  cursor_agent_id TEXT NOT NULL DEFAULT '',
+  llm_agent_id TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -86,16 +86,16 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	if err := s.ensureColumn("agents", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate agents.llm_provider: %w", err)
 	}
+	if err := s.renameColumnIfMissing("agents", "cursor_agent_id", "llm_agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.llm_agent_id: %w", err)
+	}
 	return nil
 }
 
-// ensureColumn adds a column to an existing table when it is missing. CREATE
-// TABLE IF NOT EXISTS only applies to fresh databases, so this keeps older
-// databases usable after schema additions.
-func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
+func (s *SQLiteStore) columnExists(table, column string) (bool, error) {
 	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -108,17 +108,62 @@ func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
 			pk      int
 		)
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
+			return false, err
 		}
 		if name == column {
-			return nil
+			return true, nil
 		}
 	}
 	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// ensureColumn adds a column to an existing table when it is missing. CREATE
+// TABLE IF NOT EXISTS only applies to fresh databases, so this keeps older
+// databases usable after schema additions.
+func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
+	exists, err := s.columnExists(table, column)
+	if err != nil {
 		return err
+	}
+	if exists {
+		return nil
 	}
 	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
 	return err
+}
+
+// renameColumnIfMissing renames oldCol to newCol for databases that predate the
+// rename. It adds the new column, copies any non-empty values, and drops the
+// old column. Fresh databases already create newCol and skip this entirely.
+func (s *SQLiteStore) renameColumnIfMissing(table, oldCol, newCol, decl string) error {
+	hasNew, err := s.columnExists(table, newCol)
+	if err != nil {
+		return err
+	}
+	if hasNew {
+		return nil
+	}
+	hasOld, err := s.columnExists(table, oldCol)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, newCol, decl)); err != nil {
+		return err
+	}
+	if hasOld {
+		if _, err := s.db.Exec(fmt.Sprintf(
+			"UPDATE %s SET %s = %s WHERE %s <> ''", table, newCol, oldCol, oldCol,
+		)); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, oldCol)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) Close() error {
@@ -171,18 +216,18 @@ func (s *SQLiteStore) UpsertAgent(agent *Agent) error {
 		lifecycle = string(AgentLifecycleEphemeral)
 	}
 	_, err := s.db.Exec(`
-INSERT INTO agents (id, state, lifecycle, current_task_id, context, cursor_agent_id, llm_provider, created_at, updated_at, deleted_at)
+INSERT INTO agents (id, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, created_at, updated_at, deleted_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
   state=excluded.state,
   lifecycle=excluded.lifecycle,
   current_task_id=excluded.current_task_id,
   context=excluded.context,
-  cursor_agent_id=excluded.cursor_agent_id,
+  llm_agent_id=excluded.llm_agent_id,
   llm_provider=excluded.llm_provider,
   updated_at=excluded.updated_at,
   deleted_at=NULL
-`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.CursorAgentID, string(agent.LLMProvider),
+`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider),
 		formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)

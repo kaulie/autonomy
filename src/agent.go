@@ -115,8 +115,8 @@ type Agent struct {
 
 	cursorClient *cursorsdk.Client
 	cursorAgent  *cursorsdk.Agent
-	// CursorAgentID is retained for persistent agents after Close (Resume later).
-	CursorAgentID string
+	// LLMAgentID is retained for persistent agents after Close (Resume later).
+	LLMAgentID string
 }
 
 func (a *Agent) IsEphemeral() bool {

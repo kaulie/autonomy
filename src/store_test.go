@@ -26,7 +26,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	agent := &Agent{
 		ID: "a1", State: "running", Lifecycle: AgentLifecycleEphemeral,
-		CurrentTask: task, CursorAgentID: "cursor-1", LLMProvider: LLMProviderCursor,
+		CurrentTask: task, LLMAgentID: "cursor-1", LLMProvider: LLMProviderCursor,
 	}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
@@ -38,6 +38,14 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if llmProvider != string(LLMProviderCursor) {
 		t.Fatalf("llm_provider=%q, want %q", llmProvider, LLMProviderCursor)
+	}
+	var llmAgentID string
+	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, "a1").Scan(&llmAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if llmAgentID != "cursor-1" {
+		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-1")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "t1", AgentID: "a1", Step: 1, Input: "in", Output: "out",
@@ -90,7 +98,7 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old schema predates llm_provider.
+	// Old schema predates llm_provider and llm_agent_id.
 	_, err = db.Exec(`CREATE TABLE agents (
 		id TEXT PRIMARY KEY,
 		state TEXT NOT NULL DEFAULT '',
@@ -105,6 +113,12 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = db.Exec(`INSERT INTO agents
+		(id, state, lifecycle, current_task_id, context, cursor_agent_id, created_at, updated_at, deleted_at)
+		VALUES ('old', 'idle', 'ephemeral', '', '', 'cursor-keep-me', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -115,17 +129,36 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	}
 	defer store.Close()
 
-	agent := &Agent{ID: "migrated", LLMProvider: LLMProviderCline}
+	var got string
+	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, "old").Scan(&got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "cursor-keep-me" {
+		t.Fatalf("llm_agent_id=%q, want %q", got, "cursor-keep-me")
+	}
+	exists, err := store.columnExists("agents", "cursor_agent_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("cursor_agent_id column still exists after migration")
+	}
+
+	agent := &Agent{ID: "migrated", LLMAgentID: "cursor-new", LLMProvider: LLMProviderCline}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
 	}
-	var got string
-	err = store.db.QueryRow(`SELECT llm_provider FROM agents WHERE id = ?`, "migrated").Scan(&got)
+	var llmAgentID string
+	err = store.db.QueryRow(`SELECT llm_provider, llm_agent_id FROM agents WHERE id = ?`, "migrated").Scan(&got, &llmAgentID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != string(LLMProviderCline) {
 		t.Fatalf("llm_provider=%q, want %q", got, LLMProviderCline)
+	}
+	if llmAgentID != "cursor-new" {
+		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-new")
 	}
 }
 
