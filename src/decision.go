@@ -10,6 +10,7 @@ type DecisionContext struct {
 	context.Context
 
 	Task  *Task
+	Agent *Agent
 	World World
 }
 

@@ -44,6 +44,23 @@ func (a *Agent) Close(ctx context.Context) error {
 	return wrapConnectErr(err)
 }
 
+// Delete permanently removes the agent and its durable data via DeleteAgent.
+func (a *Agent) Delete(ctx context.Context) error {
+	if err := a.client.ensure(); err != nil {
+		return err
+	}
+	Trace("DeleteAgent", "rpc begin agent_id=%s", a.ID)
+	started := time.Now()
+	_, err := a.client.agentRPC.DeleteAgent(ctx, connect.NewRequest(&sdkv1.DeleteAgentRequest{
+		AgentId: a.ID,
+	}))
+	if err != nil {
+		Trace("DeleteAgent", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
+		return wrapConnectErr(err)
+	}
+	Trace("DeleteAgent", "rpc ok elapsed=%s", time.Since(started).Round(time.Millisecond))
+	return nil
+}
 
 // Resume re-attaches to an existing agent id.
 func (f *AgentFactory) Resume(ctx context.Context, agentID, model string) (*Agent, error) {
