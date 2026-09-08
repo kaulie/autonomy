@@ -44,16 +44,87 @@ func (a *Agent) Close(ctx context.Context) error {
 	return wrapConnectErr(err)
 }
 
-// Delete permanently removes the agent and its durable data via DeleteAgent.
+func runIsTerminal(status sdkv1.RunLifecycleStatus) bool {
+	switch status {
+	case sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_FINISHED,
+		sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_ERROR,
+		sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_CANCELLED,
+		sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_EXPIRED:
+		return true
+	default:
+		return false
+	}
+}
+
+// CancelActiveRuns cancels non-terminal runs for this agent (required before DeleteAgent).
+func (a *Agent) CancelActiveRuns(ctx context.Context) error {
+	if err := a.client.ensure(); err != nil {
+		return err
+	}
+	Trace("ListRuns", "rpc begin agent_id=%s", a.ID)
+	started := time.Now()
+	resp, err := a.client.agentRPC.ListRuns(ctx, connect.NewRequest(&sdkv1.ListRunsRequest{
+		AgentId: a.ID,
+		Options: &sdkv1.ListRunsOptions{Limit: 50},
+	}))
+	if err != nil {
+		Trace("ListRuns", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
+		return wrapConnectErr(err)
+	}
+	items := resp.Msg.GetItems()
+	Trace("ListRuns", "rpc ok count=%d elapsed=%s", len(items), time.Since(started).Round(time.Millisecond))
+
+	var firstErr error
+	for _, item := range items {
+		if item == nil || runIsTerminal(item.GetStatus()) {
+			continue
+		}
+		runID := item.GetRunId()
+		if runID == "" {
+			continue
+		}
+		Trace("CancelRun", "rpc begin run_id=%s status=%s", runID, item.GetStatus())
+		cStart := time.Now()
+		agentID := a.ID
+		_, err := a.client.agentRPC.CancelRun(ctx, connect.NewRequest(&sdkv1.CancelRunRequest{
+			RunId:   runID,
+			AgentId: &agentID,
+		}))
+		if err != nil {
+			Trace("CancelRun", "rpc error after %s: %v", time.Since(cStart).Round(time.Millisecond), err)
+			if firstErr == nil {
+				firstErr = wrapConnectErr(err)
+			}
+			continue
+		}
+		Trace("CancelRun", "rpc ok elapsed=%s", time.Since(cStart).Round(time.Millisecond))
+	}
+	return firstErr
+}
+
+// Delete cancels any active runs, then permanently removes the agent via DeleteAgent.
 func (a *Agent) Delete(ctx context.Context) error {
 	if err := a.client.ensure(); err != nil {
 		return err
 	}
+	if err := a.CancelActiveRuns(ctx); err != nil {
+		Trace("DeleteAgent", "cancel active runs warning: %v (continuing to Delete)", err)
+	}
+
 	Trace("DeleteAgent", "rpc begin agent_id=%s", a.ID)
 	started := time.Now()
 	_, err := a.client.agentRPC.DeleteAgent(ctx, connect.NewRequest(&sdkv1.DeleteAgentRequest{
 		AgentId: a.ID,
 	}))
+	if err != nil {
+		// One retry after another cancel pass — CreateAgent can leave a run that races ListRuns.
+		Trace("DeleteAgent", "rpc error after %s: %v; retry cancel+delete", time.Since(started).Round(time.Millisecond), err)
+		_ = a.CancelActiveRuns(ctx)
+		started = time.Now()
+		_, err = a.client.agentRPC.DeleteAgent(ctx, connect.NewRequest(&sdkv1.DeleteAgentRequest{
+			AgentId: a.ID,
+		}))
+	}
 	if err != nil {
 		Trace("DeleteAgent", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		return wrapConnectErr(err)

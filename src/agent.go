@@ -155,6 +155,7 @@ func (a *Agent) ensureCursorSession(ctx context.Context, model, cwd string) (*cu
 
 // disposeCursorSession ends the Cursor SDK session for this task.
 // Ephemeral agents are permanently deleted via DeleteAgent; persistent agents are only Closed.
+// Cleanup failures are logged to stderr (they must not hide the original task error).
 func (a *Agent) disposeCursorSession(ctx context.Context) {
 	if a.cursorAgent != nil {
 		if ctx == nil {
@@ -163,16 +164,25 @@ func (a *Agent) disposeCursorSession(ctx context.Context) {
 		// Bound cleanup so task teardown cannot hang forever.
 		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
+		agentID := a.cursorAgent.ID
 		if a.IsEphemeral() {
-			_ = a.cursorAgent.Delete(cctx)
+			if err := a.cursorAgent.Delete(cctx); err != nil {
+				fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s failed: %v\n", agentID, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s ok\n", agentID)
+			}
 			a.CursorAgentID = ""
 		} else {
-			_ = a.cursorAgent.Close(cctx)
+			if err := a.cursorAgent.Close(cctx); err != nil {
+				fmt.Fprintf(os.Stderr, "[autonomy] CloseAgent %s failed: %v\n", agentID, err)
+			}
 		}
 		a.cursorAgent = nil
 	}
 	if a.cursorClient != nil {
-		_ = a.cursorClient.Close()
+		if err := a.cursorClient.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] cursor client Close failed: %v\n", err)
+		}
 		a.cursorClient = nil
 	}
 }
