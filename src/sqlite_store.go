@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS reason_turns (
   agent_id TEXT NOT NULL DEFAULT '',
   step INTEGER NOT NULL DEFAULT 0,
   mode TEXT NOT NULL DEFAULT '',
+  llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
   input TEXT NOT NULL DEFAULT '',
   output TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
@@ -100,6 +102,12 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	}
 	if err := s.ensureColumn("reason_turns", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.mode: %w", err)
+	}
+	if err := s.ensureColumn("reason_turns", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate reason_turns.llm_provider: %w", err)
+	}
+	if err := s.ensureColumn("reason_turns", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate reason_turns.model: %w", err)
 	}
 	return nil
 }
@@ -265,9 +273,9 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		turn.CreatedAt = time.Now()
 	}
 	_, err := s.db.Exec(`
-INSERT INTO reason_turns (task_id, agent_id, step, mode, input, output, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), turn.Input, turn.Output, formatTime(turn.CreatedAt))
+INSERT INTO reason_turns (task_id, agent_id, step, mode, llm_provider, model, input, output, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model, turn.Input, turn.Output, formatTime(turn.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("insert reason turn: %w", err)
 	}

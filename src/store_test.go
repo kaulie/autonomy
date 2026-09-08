@@ -65,7 +65,8 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("model=%q, want %q", model, "composer-2")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
-		TaskID: "t1", AgentID: "a1", Step: 1, Mode: ReasonModeAgent, Input: "in", Output: "out",
+		TaskID: "t1", AgentID: "a1", Step: 1, Mode: ReasonModeAgent,
+		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", Output: "out",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +102,17 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if mode != string(ReasonModeAgent) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
+	}
+	var reasonLLMProvider, reasonModel string
+	err = store.db.QueryRow(`SELECT llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a1").Scan(&reasonLLMProvider, &reasonModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reasonLLMProvider != string(LLMProviderCursor) {
+		t.Fatalf("reason llm_provider=%q, want %q", reasonLLMProvider, LLMProviderCursor)
+	}
+	if reasonModel != "composer-2" {
+		t.Fatalf("reason model=%q, want %q", reasonModel, "composer-2")
 	}
 
 	// Re-upsert clears soft delete.
@@ -258,9 +270,9 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var step int
-	var input, output, mode string
-	err = store.db.QueryRow(`SELECT step, input, output, mode FROM reason_turns WHERE agent_id = ?`, "a-local").
-		Scan(&step, &input, &output, &mode)
+	var input, output, mode, llmProvider, model string
+	err = store.db.QueryRow(`SELECT step, input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-local").
+		Scan(&step, &input, &output, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +281,9 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	}
 	if mode != string(ReasonModePlan) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
+	}
+	if llmProvider != "" || model != "" {
+		t.Fatalf("llm_provider=%q model=%q, want empty for local reasoner", llmProvider, model)
 	}
 }
 
