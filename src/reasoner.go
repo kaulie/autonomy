@@ -129,26 +129,20 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 }
 
 func recordReasonIO(ctx DecisionContext, input, output string) {
-	turn := ReasonTurn{
-		Step:   ctx.Step,
-		Input:  input,
-		Output: output,
-	}
-	if ctx.Agent != nil && ctx.Agent.Backend == AgentBackendCursor {
-		// Cursor runs currently use the SDK's standard agent mode.
-		turn.Mode = ReasonModeAgent
-	} else {
-		turn.Mode = ReasonModePlan
+	var agent *Agent
+	var taskID string
+	mode := ReasonModePlan
+	if ctx.Agent != nil {
+		agent = ctx.Agent
+		if ctx.Agent.Backend == AgentBackendCursor {
+			// Cursor runs currently use the SDK's standard agent mode.
+			mode = ReasonModeAgent
+		}
 	}
 	if ctx.Task != nil {
-		turn.TaskID = ctx.Task.ID
+		taskID = ctx.Task.ID
 	}
-	if ctx.Agent != nil {
-		turn.AgentID = ctx.Agent.ID
-		turn.LLMProvider = ctx.Agent.LLMProvider
-		turn.Model = ctx.Agent.Model
-	}
-	persistReasonTurn(turn)
+	recordReasonTurn(agent, taskID, ctx.Step, mode, input, output)
 }
 
 func llmTimeout() time.Duration {

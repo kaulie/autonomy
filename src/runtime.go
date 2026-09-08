@@ -122,15 +122,7 @@ func recordAgentPrompt(agent *Agent, taskID, input, output string) {
 	if agent == nil {
 		return
 	}
-	persistReasonTurn(ReasonTurn{
-		TaskID:      taskID,
-		AgentID:     agent.ID,
-		Mode:        ReasonModeAgent,
-		LLMProvider: agent.LLMProvider,
-		Model:       agent.Model,
-		Input:       input,
-		Output:      output,
-	})
+	recordReasonTurn(agent, taskID, 0, ReasonModeAgent, input, output)
 }
 
 func (s *runtimeAgentSession) Release(ctx context.Context) error {
