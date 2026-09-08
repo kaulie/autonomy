@@ -97,6 +97,7 @@ buf generate --template src/cursorsdk/buf.gen.yaml
 
 export CURSOR_API_KEY=...
 ./scripts/fetch-bridge.sh          # or set CURSOR_SDK_BRIDGE_BIN
+export PROJECT_ROOT=/absolute/path/to/autonomy   # required; policy at $PROJECT_ROOT/src/agent_policy/AGENT_V1.md
 export AUTONOMY_REASONER=llm
 export AUTONOMY_LLM_MODEL=composer-2
 # Optional: AUTONOMY_LLM_TIMEOUT=3m (default). CreateAgent/Send/Wait share this deadline.
@@ -107,7 +108,7 @@ export AUTONOMY_LLM_MODEL=composer-2
 go run ./cmd/autonomy
 ```
 
-`LLMReasoner` reads `src/agent_policy/AGENT_V1.md` at runtime (`AUTONOMY_AGENT_POLICY` overrides the path), passes it through to the model (replacing `{{CONSTRUCTS}}` and any future `{{...}}` placeholders only), then appends current Goal/World/extra input as an appendix. It expects a JSON decision (`plan` / `done` / `blocked` / `need_input`). `plan` + `asset.change` maps to `SimpleAction`.
+`LLMReasoner` reads `$PROJECT_ROOT/src/agent_policy/AGENT_V1.md` at runtime, passes it through to the model (replacing `{{CONSTRUCTS}}` from bootstrap-registered capabilities, plus any future `{{...}}` placeholders), then appends current Goal/World/extra input as an appendix. Bootstrap registers `asset.change` via `CapabilityFactory`. It expects a JSON decision (`plan` / `done` / `blocked` / `need_input`). `plan` + `asset.change` maps to `SimpleAction`.
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
 

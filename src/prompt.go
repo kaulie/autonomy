@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-const defaultAgentPolicyName = "AGENT_V1.md"
-
-// v1Constructs fills {{CONSTRUCTS}} until CapabilityFactory is populated at bootstrap.
-const v1Constructs = `- asset.change: mutate the task target asset toward Contract.ExpectedState. input: {"target":"<asset id>"} (optional; defaults to task Target)
-`
+const defaultAgentPolicyRel = "src/agent_policy/AGENT_V1.md"
 
 // policyPlaceholders are substituted into AGENT_V1.md; the rest of the file is passed through unchanged.
 func policyPlaceholders() map[string]string {
+	constructs := "(none)"
+	if _autonomy != nil && _autonomy.CapabilityFactory != nil {
+		constructs = _autonomy.CapabilityFactory.FormatConstructs()
+	}
 	return map[string]string{
-		"{{CONSTRUCTS}}": strings.TrimSpace(v1Constructs),
+		"{{CONSTRUCTS}}": constructs,
 	}
 }
 
@@ -28,41 +28,27 @@ func applyPolicyPlaceholders(policy string, values map[string]string) string {
 	return policy
 }
 
-// loadAgentPolicy reads the bootstrap policy markdown at runtime (not embedded).
-// Override path with AUTONOMY_AGENT_POLICY; otherwise search common locations from cwd.
-func loadAgentPolicy() (string, error) {
-	if p := strings.TrimSpace(os.Getenv("AUTONOMY_AGENT_POLICY")); p != "" {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return "", fmt.Errorf("read agent policy %s: %w", p, err)
-		}
-		return string(b), nil
+// projectRoot returns PROJECT_ROOT; empty or unset is an error for callers that need it.
+func projectRoot() (string, error) {
+	root := strings.TrimSpace(os.Getenv("PROJECT_ROOT"))
+	if root == "" {
+		return "", fmt.Errorf("PROJECT_ROOT is required")
 	}
+	return root, nil
+}
 
-	wd, err := os.Getwd()
+// loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V1.md at runtime.
+func loadAgentPolicy() (string, error) {
+	root, err := projectRoot()
 	if err != nil {
-		return "", fmt.Errorf("getwd for agent policy: %w", err)
+		return "", err
 	}
-	candidates := []string{
-		filepath.Join("agent_policy", defaultAgentPolicyName),
-		filepath.Join("src", "agent_policy", defaultAgentPolicyName),
-		filepath.Join(wd, "agent_policy", defaultAgentPolicyName),
-		filepath.Join(wd, "src", "agent_policy", defaultAgentPolicyName),
-		filepath.Join(wd, "..", "src", "agent_policy", defaultAgentPolicyName),
+	path := filepath.Join(root, defaultAgentPolicyRel)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read agent policy %s: %w", path, err)
 	}
-	var tried []string
-	for _, c := range candidates {
-		tried = append(tried, c)
-		b, err := os.ReadFile(c)
-		if err == nil {
-			return string(b), nil
-		}
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("read agent policy %s: %w", c, err)
-		}
-	}
-	return "", fmt.Errorf("agent policy %s not found (set AUTONOMY_AGENT_POLICY); tried: %s",
-		defaultAgentPolicyName, strings.Join(tried, ", "))
+	return string(b), nil
 }
 
 // buildReasoningPrompt sends AGENT_V1.md through to the model (placeholders only),
@@ -84,6 +70,7 @@ func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, er
 	if ctx.Task != nil {
 		fmt.Fprintf(&b, "- task_id: %s\n", ctx.Task.ID)
 		fmt.Fprintf(&b, "- goal: %s\n", ctx.Task.Goal)
+		fmt.Fprintf(&b, "- domain: %s\n", ctx.Task.Domain)
 		fmt.Fprintf(&b, "- description: %s\n", ctx.Task.Description)
 		fmt.Fprintf(&b, "- target: %s\n", ctx.Task.Target)
 		fmt.Fprintf(&b, "- expected_state: %s\n", ctx.Task.Contract.ExpectedState)

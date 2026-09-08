@@ -1,14 +1,22 @@
 package autonomy
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
-	t.Parallel()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECT_ROOT", root)
+	BootstrapAutonomy()
+
 	task := &Task{
 		ID: "t1", Goal: "g", Description: "d", Target: "1",
+		Domain:   TaskDomainServer,
 		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
 	}
 	prompt, err := buildReasoningPrompt(DecisionContext{Task: task}, ReasoningInput{Text: "extra"})
@@ -34,9 +42,11 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	for _, want := range []string{
 		"## Constructs",
 		"asset.change",
+		"mutate the task target asset",
 		`"type": "plan | done | blocked | need_input"`,
 		"## Current Goal",
 		"task_id: t1",
+		"domain: server",
 		"expected_state: changed",
 		"## Current World",
 		"## Additional Input",
@@ -45,6 +55,14 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n%s", want, prompt)
 		}
+	}
+}
+
+func TestLoadAgentPolicyRequiresProjectRoot(t *testing.T) {
+	t.Setenv("PROJECT_ROOT", "")
+	_, err := loadAgentPolicy()
+	if err == nil || !strings.Contains(err.Error(), "PROJECT_ROOT") {
+		t.Fatalf("expected PROJECT_ROOT error, got %v", err)
 	}
 }
 
@@ -109,5 +127,18 @@ func TestParseDecisionJSON(t *testing.T) {
 				t.Fatalf("noop=%v want %v", isNoop, tc.noop)
 			}
 		})
+	}
+}
+
+func TestCapabilityFactoryRegisterAppearsInGetAll(t *testing.T) {
+	t.Parallel()
+	f := NewCapabilityFactory()
+	f.Register(AssetChangeCapability{})
+	all := f.GetAll()
+	if len(all) != 1 || all[0].Name() != "asset.change" {
+		t.Fatalf("GetAll=%v", all)
+	}
+	if got := f.FormatConstructs(); !strings.Contains(got, "asset.change:") {
+		t.Fatalf("constructs=%q", got)
 	}
 }

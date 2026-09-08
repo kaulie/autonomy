@@ -6,6 +6,7 @@ import "time"
 type Goal struct {
 	ID          string
 	Description string
+	Domain      TaskDomain
 	Status      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -15,6 +16,7 @@ type Goal struct {
 type CanonicalGoal struct {
 	ID          string
 	Description string
+	Domain      TaskDomain
 	Status      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
