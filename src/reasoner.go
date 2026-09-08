@@ -134,6 +134,12 @@ func recordReasonIO(ctx DecisionContext, input, output string) {
 		Input:  input,
 		Output: output,
 	}
+	if ctx.Agent != nil && ctx.Agent.Backend == AgentBackendCursor {
+		// Cursor runs currently use the SDK's standard agent mode.
+		turn.Mode = ReasonModeAgent
+	} else {
+		turn.Mode = ReasonModePlan
+	}
 	if ctx.Task != nil {
 		turn.TaskID = ctx.Task.ID
 	}

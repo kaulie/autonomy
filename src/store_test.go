@@ -65,7 +65,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("model=%q, want %q", model, "composer-2")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
-		TaskID: "t1", AgentID: "a1", Step: 1, Input: "in", Output: "out",
+		TaskID: "t1", AgentID: "a1", Step: 1, Mode: ReasonModeAgent, Input: "in", Output: "out",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +93,14 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("reason_turns=%d", n)
+	}
+	var mode string
+	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, "a1").Scan(&mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != string(ReasonModeAgent) {
+		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
 	}
 
 	// Re-upsert clears soft delete.
@@ -250,14 +258,17 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var step int
-	var input, output string
-	err = store.db.QueryRow(`SELECT step, input, output FROM reason_turns WHERE agent_id = ?`, "a-local").
-		Scan(&step, &input, &output)
+	var input, output, mode string
+	err = store.db.QueryRow(`SELECT step, input, output, mode FROM reason_turns WHERE agent_id = ?`, "a-local").
+		Scan(&step, &input, &output, &mode)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if step != 2 || input == "" || output == "" {
 		t.Fatalf("step=%d input=%q output=%q", step, input, output)
+	}
+	if mode != string(ReasonModePlan) {
+		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
 	}
 }
 

@@ -17,11 +17,21 @@ type Store interface {
 	Close() error
 }
 
+// ReasonMode identifies whether a reason turn was produced by the local
+// planning reasoner or a Cursor-backed agent run.
+type ReasonMode string
+
+const (
+	ReasonModePlan  ReasonMode = "plan"
+	ReasonModeAgent ReasonMode = "agent"
+)
+
 // ReasonTurn is one reasoner conversation (input prompt + model/local output).
 type ReasonTurn struct {
 	TaskID    string
 	AgentID   string
 	Step      int
+	Mode      ReasonMode
 	Input     string
 	Output    string
 	CreatedAt time.Time
