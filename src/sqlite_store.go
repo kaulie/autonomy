@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS reason_turns (
   llm_provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   input TEXT NOT NULL DEFAULT '',
-  output TEXT NOT NULL DEFAULT '',
+  raw_output TEXT NOT NULL DEFAULT '',
+  normalized_output TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 
@@ -109,8 +110,17 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	if err := s.ensureColumn("reason_turns", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.model: %w", err)
 	}
-	if err := s.normalizeReasonTurnOutputs(); err != nil {
-		return fmt.Errorf("normalize reason_turns.output: %w", err)
+	// Split the legacy reason_turns.output into raw_output (verbatim) and
+	// normalized_output (derived, typically JSON). Existing output values move
+	// into raw_output as best effort.
+	if err := s.renameColumnIfMissing("reason_turns", "output", "raw_output", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate reason_turns.raw_output: %w", err)
+	}
+	if err := s.ensureColumn("reason_turns", "normalized_output", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate reason_turns.normalized_output: %w", err)
+	}
+	if err := s.backfillReasonTurnNormalizedOutputs(); err != nil {
+		return fmt.Errorf("normalize reason_turns.normalized_output: %w", err)
 	}
 	return nil
 }
@@ -189,30 +199,31 @@ func (s *SQLiteStore) renameColumnIfMissing(table, oldCol, newCol, decl string) 
 	return nil
 }
 
-// normalizeReasonTurnOutputs strips markdown code fences from stored outputs so
-// every reason_turns.output is plain text. It is idempotent.
-func (s *SQLiteStore) normalizeReasonTurnOutputs() error {
-	rows, err := s.db.Query(`SELECT id, output FROM reason_turns`)
+// backfillReasonTurnNormalizedOutputs derives normalized_output for rows that
+// predate the raw_output/normalized_output split. It is idempotent: rows that
+// already have a normalized_output are left untouched.
+func (s *SQLiteStore) backfillReasonTurnNormalizedOutputs() error {
+	rows, err := s.db.Query(`SELECT id, raw_output FROM reason_turns WHERE normalized_output = ''`)
 	if err != nil {
 		return err
 	}
-	type outputUpdate struct {
-		id     int64
-		output string
+	type normalizedUpdate struct {
+		id         int64
+		normalized string
 	}
-	var updates []outputUpdate
+	var updates []normalizedUpdate
 	for rows.Next() {
 		var (
-			id     int64
-			output string
+			id  int64
+			raw string
 		)
-		if err := rows.Scan(&id, &output); err != nil {
+		if err := rows.Scan(&id, &raw); err != nil {
 			rows.Close()
 			return err
 		}
-		normalized := stripCodeFences(output)
-		if normalized != output {
-			updates = append(updates, outputUpdate{id: id, output: normalized})
+		normalized := normalizeReasonOutput(raw)
+		if normalized != "" {
+			updates = append(updates, normalizedUpdate{id: id, normalized: normalized})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -223,7 +234,7 @@ func (s *SQLiteStore) normalizeReasonTurnOutputs() error {
 		return err
 	}
 	for _, u := range updates {
-		if _, err := s.db.Exec(`UPDATE reason_turns SET output = ? WHERE id = ?`, u.output, u.id); err != nil {
+		if _, err := s.db.Exec(`UPDATE reason_turns SET normalized_output = ? WHERE id = ?`, u.normalized, u.id); err != nil {
 			return err
 		}
 	}
@@ -316,11 +327,13 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.CreatedAt.IsZero() {
 		turn.CreatedAt = time.Now()
 	}
-	turn.Output = stripCodeFences(turn.Output)
+	if turn.NormalizedOutput == "" {
+		turn.NormalizedOutput = normalizeReasonOutput(turn.RawOutput)
+	}
 	_, err := s.db.Exec(`
-INSERT INTO reason_turns (task_id, agent_id, step, mode, llm_provider, model, input, output, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model, turn.Input, turn.Output, formatTime(turn.CreatedAt))
+INSERT INTO reason_turns (task_id, agent_id, step, mode, llm_provider, model, input, raw_output, normalized_output, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model, turn.Input, turn.RawOutput, turn.NormalizedOutput, formatTime(turn.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("insert reason turn: %w", err)
 	}

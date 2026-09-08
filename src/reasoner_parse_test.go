@@ -121,6 +121,45 @@ func TestStripCodeFences(t *testing.T) {
 	}
 }
 
+func TestNormalizeReasonOutput(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "prose with fenced json",
+			raw:  "I've observed the workspace.\n\n```json\n{\"type\":\"need_input\",\"reason\":\"missing info\"}\n```",
+			want: `{"type":"need_input","reason":"missing info"}`,
+		},
+		{
+			name: "plain json",
+			raw:  `{"type":"plan","reason":"go","plan":[],"need":{}}`,
+			want: `{"type":"plan","reason":"go","plan":[],"need":{}}`,
+		},
+		{
+			name: "free text without json",
+			raw:  "changed files: a.go",
+			want: "changed files: a.go",
+		},
+		{
+			name: "fenced json",
+			raw:  "```json\n{\"type\":\"plan\"}\n```",
+			want: `{"type":"plan"}`,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeReasonOutput(tc.raw); got != tc.want {
+				t.Fatalf("normalizeReasonOutput()=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseDecisionJSON(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

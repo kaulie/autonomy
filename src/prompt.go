@@ -205,3 +205,14 @@ func stripCodeFences(text string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// normalizeReasonOutput returns the structured, machine-readable form of a
+// model's raw output. It prefers the embedded JSON object (the decision
+// envelope produced by the reasoner) and falls back to the fence-stripped text
+// when no JSON object is present (e.g. free-form code_edit results).
+func normalizeReasonOutput(raw string) string {
+	if j := extractJSONObject(raw); j != "" {
+		return j
+	}
+	return stripCodeFences(raw)
+}

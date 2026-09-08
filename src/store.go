@@ -27,16 +27,20 @@ const (
 )
 
 // ReasonTurn is one reasoner conversation (input prompt + model/local output).
+// The output is stored twice: RawOutput keeps the model's response verbatim,
+// while NormalizedOutput is the structured/plain form (typically JSON) derived
+// from it, which is what downstream consumers should rely on.
 type ReasonTurn struct {
-	TaskID      string
-	AgentID     string
-	Step        int
-	Mode        ReasonMode
-	LLMProvider LLMProvider
-	Model       string
-	Input       string
-	Output      string
-	CreatedAt   time.Time
+	TaskID           string
+	AgentID          string
+	Step             int
+	Mode             ReasonMode
+	LLMProvider      LLMProvider
+	Model            string
+	Input            string
+	RawOutput        string
+	NormalizedOutput string
+	CreatedAt        time.Time
 }
 
 var _store Store
@@ -94,14 +98,15 @@ func persistReasonTurn(turn ReasonTurn) {
 
 // recordReasonTurn is the single entry point for persisting a reasoner or agent
 // conversation turn. Both the decision reasoner and capability agent sessions
-// funnel through here so field handling stays consistent.
-func recordReasonTurn(agent *Agent, taskID string, step int, mode ReasonMode, input, output string) {
+// funnel through here so field handling stays consistent. rawOutput is the
+// model's verbatim response; the normalized form is derived at insert time.
+func recordReasonTurn(agent *Agent, taskID string, step int, mode ReasonMode, input, rawOutput string) {
 	turn := ReasonTurn{
-		TaskID: taskID,
-		Step:   step,
-		Mode:   mode,
-		Input:  input,
-		Output: output,
+		TaskID:    taskID,
+		Step:      step,
+		Mode:      mode,
+		Input:     input,
+		RawOutput: rawOutput,
 	}
 	if agent != nil {
 		turn.AgentID = agent.ID
