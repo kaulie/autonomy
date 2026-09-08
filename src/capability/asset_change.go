@@ -20,6 +20,8 @@ func (AssetChange) Name() string { return "asset.change" }
 
 func (AssetChange) Domain() string { return "server" }
 
+func (AssetChange) Provider() string { return "autonomy" }
+
 func (AssetChange) Description() string {
 	return `mutate the task target asset toward Contract.ExpectedState. input: {"target":"<asset id>"} (optional; defaults to task Target)`
 }

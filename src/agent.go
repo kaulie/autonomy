@@ -40,10 +40,16 @@ func (f *AgentFactory) NewAgent(id string) *Agent {
 	if a, ok := f.agents[id]; ok {
 		return a
 	}
+	ws, err := ensureAgentWorkspace(id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] AGENT_WORKSPACE: %v\n", err)
+		ws = AgentWorkspacePath(id)
+	}
 	agent := &Agent{
 		ID:        id,
 		State:     "idle",
 		Lifecycle: AgentLifecycleEphemeral,
+		Workspace: ws,
 	}
 	f.agents[id] = agent
 	agent.DecideMaker = NewDecideMaker()
@@ -67,6 +73,7 @@ type Agent struct {
 	ID          string
 	State       string // runtime: idle | running | ...
 	Lifecycle   AgentLifecycle
+	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	CurrentTask *Task
 	Context     string
 	DecideMaker *DecisionMaker
@@ -125,6 +132,12 @@ func (a *Agent) IsRunning() bool {
 func (a *Agent) ensureCursorSession(ctx context.Context, model, cwd string) (*cursorsdk.Agent, error) {
 	if a.cursorAgent != nil {
 		return a.cursorAgent, nil
+	}
+	if cwd == "" && a.Workspace != "" {
+		cwd = a.Workspace
+	}
+	if cwd == "" {
+		cwd, _ = os.Getwd()
 	}
 	client := a.cursorClient
 	if client == nil {

@@ -48,6 +48,9 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	}
 
 	cwd := r.cwd
+	if cwd == "" && ctx.Agent != nil && ctx.Agent.Workspace != "" {
+		cwd = ctx.Agent.Workspace
+	}
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
@@ -183,7 +186,7 @@ func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reaso
 	return ReasoningResult{
 		Decision: Decision{
 			Reason: "local reason",
-			Action: SimpleAction{},
+			Action: CapabilityAction{Name: "asset.change", Input: map[string]string{}},
 			Ctx:    ctx,
 		},
 	}, nil
