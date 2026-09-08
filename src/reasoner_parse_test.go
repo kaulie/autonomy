@@ -82,6 +82,45 @@ func TestLoadAgentPolicyRequiresProjectRoot(t *testing.T) {
 	}
 }
 
+func TestStripCodeFences(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "plain json unchanged",
+			in:   `{"type":"plan","reason":"go","plan":[],"need":{}}`,
+			want: `{"type":"plan","reason":"go","plan":[],"need":{}}`,
+		},
+		{
+			name: "json fence stripped",
+			in:   "```json\n{\"type\":\"plan\"}\n```",
+			want: `{"type":"plan"}`,
+		},
+		{
+			name: "generic fence stripped",
+			in:   "```\n{\"type\":\"plan\"}\n```",
+			want: `{"type":"plan"}`,
+		},
+		{
+			name: "whitespace trimmed",
+			in:   "\n  plain text output  \n",
+			want: "plain text output",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stripCodeFences(tc.in); got != tc.want {
+				t.Fatalf("stripCodeFences()=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseDecisionJSON(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

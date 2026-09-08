@@ -180,21 +180,28 @@ func planInputMap(raw json.RawMessage) map[string]string {
 }
 
 func extractJSONObject(text string) string {
-	s := strings.TrimSpace(text)
-	if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSpace(s)
-		if len(s) >= 4 && strings.EqualFold(s[:4], "json") {
-			s = strings.TrimSpace(s[4:])
-		}
-		if i := strings.LastIndex(s, "```"); i >= 0 {
-			s = strings.TrimSpace(s[:i])
-		}
-	}
+	s := stripCodeFences(text)
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")
 	if start < 0 || end < start {
 		return ""
 	}
 	return s[start : end+1]
+}
+
+// stripCodeFences removes a markdown code fence (e.g. ```json ... ```) around
+// text so persisted outputs stay as plain text.
+func stripCodeFences(text string) string {
+	s := strings.TrimSpace(text)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimSpace(strings.TrimPrefix(s, "```"))
+	if len(s) >= 4 && strings.EqualFold(s[:4], "json") {
+		s = strings.TrimSpace(s[4:])
+	}
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
