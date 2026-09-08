@@ -17,7 +17,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 
 | 字段 | 含义 |
 |------|------|
-| Identity | Agent 标识 |
+| Identity | Agent 自有标识（与 Task ID 独立；可无 `current_task_id` 关联当前任务） |
 | Lifecycle | `ephemeral`（默认）：任务结束时先 Cancel 未结束 run，再调用 Cursor SDK `DeleteAgent`；`persistent`：仅 `CloseAgent`，保留可 Resume |
 | Workspace | `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`，创建 Agent 时分配，供 Cursor / `code_edit` 使用 |
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |

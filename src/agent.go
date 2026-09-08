@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
@@ -34,16 +35,31 @@ func NewAgentFactory() *AgentFactory {
 	}
 }
 
+// Create registers a new agent and optionally binds it to a task.
+// Agent ID is independent of Task ID (agents can exist without tasks).
 func (f *AgentFactory) Create(task *Task) *Agent {
-	agentName := fmt.Sprintf("agent-%s", task.ID)
-	agent := f.NewAgent(agentName)
-	agent.CurrentTask = task
-	persistAgent(agent)
+	agent := f.NewAgent(newAgentID("agent"))
+	if task != nil {
+		agent.CurrentTask = task
+		persistAgent(agent)
+	}
 	return agent
 }
 
+// newAgentID allocates a unique autonomy agent identity (not derived from task id).
+func newAgentID(kind string) string {
+	if kind == "" {
+		kind = "agent"
+	}
+	return fmt.Sprintf("%s-%s", kind, uuid.NewString())
+}
+
 // NewAgent registers a local autonomy agent with AGENT_WORKSPACE.
+// If id is empty, a unique id is allocated.
 func (f *AgentFactory) NewAgent(id string) *Agent {
+	if id == "" {
+		id = newAgentID("agent")
+	}
 	if a, ok := f.agents[id]; ok {
 		return a
 	}
