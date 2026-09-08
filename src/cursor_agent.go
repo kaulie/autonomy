@@ -57,6 +57,7 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	a.cursorAgent = cAgent
 	a.CursorAgentID = cAgent.ID
 	a.Backend = AgentBackendCursor
+	a.LLMProvider = LLMProviderCursor
 	persistAgent(a)
 	return nil
 }

@@ -24,6 +24,15 @@ const (
 	AgentBackendCursor AgentBackend = "cursor"
 )
 
+// LLMProvider identifies which LLM provider backs an agent.
+type LLMProvider string
+
+const (
+	LLMProviderCursor          LLMProvider = "cursor"
+	LLMProviderCline           LLMProvider = "cline"
+	LLMProviderDeepseekHarness LLMProvider = "deepseek_harness"
+)
+
 // AgentFactory creates and caches agents by id. All agents (including Cursor-backed) register here.
 type AgentFactory struct {
 	agents map[string]*Agent
@@ -98,6 +107,7 @@ type Agent struct {
 	State       string // runtime: idle | running | ...
 	Lifecycle   AgentLifecycle
 	Backend     AgentBackend
+	LLMProvider LLMProvider
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	CurrentTask *Task
 	Context     string
