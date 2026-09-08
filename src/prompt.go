@@ -14,13 +14,32 @@ var agentPolicyV1 string
 const v1Constructs = `- asset.change: mutate the task target asset toward Contract.ExpectedState. input: {"target":"<asset id>"} (optional; defaults to task Target)
 `
 
+// policyPlaceholders are substituted into AGENT_V1.md; the rest of the file is passed through unchanged.
+func policyPlaceholders() map[string]string {
+	return map[string]string{
+		"{{CONSTRUCTS}}": strings.TrimSpace(v1Constructs),
+	}
+}
+
+func applyPolicyPlaceholders(policy string, values map[string]string) string {
+	for k, v := range values {
+		policy = strings.ReplaceAll(policy, k, v)
+	}
+	return policy
+}
+
+// buildReasoningPrompt sends AGENT_V1.md through to the model (placeholders only),
+// then appends runtime Goal / World / extra input as an appendix.
 func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
-	policy := strings.Replace(agentPolicyV1, "{{CONSTRUCTS}}", strings.TrimSpace(v1Constructs), 1)
+	policy := applyPolicyPlaceholders(agentPolicyV1, policyPlaceholders())
 
 	var b strings.Builder
-	b.WriteString(strings.TrimSpace(policy))
-	b.WriteString("\n\n")
-	b.WriteString("## Current Goal\n\n")
+	b.WriteString(policy)
+	if !strings.HasSuffix(policy, "\n") {
+		b.WriteByte('\n')
+	}
+
+	b.WriteString("\n## Current Goal\n\n")
 	if ctx.Task != nil {
 		fmt.Fprintf(&b, "- task_id: %s\n", ctx.Task.ID)
 		fmt.Fprintf(&b, "- goal: %s\n", ctx.Task.Goal)
@@ -34,7 +53,6 @@ func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
 
 	b.WriteString("\n## Current World\n\n")
 	b.WriteString(formatWorldSnapshot(ctx))
-	b.WriteString("\n")
 
 	if strings.TrimSpace(input.Text) != "" {
 		b.WriteString("\n## Additional Input\n\n")
@@ -42,7 +60,6 @@ func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\nRespond with a single JSON object only (no markdown fences).\n")
 	return b.String()
 }
 
