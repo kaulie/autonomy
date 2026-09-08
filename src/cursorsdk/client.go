@@ -286,7 +286,7 @@ func Prompt(ctx context.Context, text string, opts ...ClientOption) (string, err
 	if err != nil {
 		return "", err
 	}
-	defer agent.Close(ctx)
+	defer func() { _ = agent.Delete(ctx) }()
 
 	run, err := agent.Send(ctx, text)
 	if err != nil {

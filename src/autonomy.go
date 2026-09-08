@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -44,6 +45,7 @@ func (r *Autonomy) SetWorld(world *World) {
 
 func (r *Autonomy) Run(task *Task) error {
 	agent := r.AgentFactory.Create(task)
+	defer r.finishAgent(agent)
 
 	agent.Start()
 
@@ -70,12 +72,24 @@ func (r *Autonomy) Run(task *Task) error {
 		}
 	}
 
-	agent.Stop()
-
 	ret, err := agent.Result()
 	fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 
 	return err
+}
+
+// finishAgent stops the agent and tears down the Cursor SDK session.
+// Ephemeral agents are permanently deleted via Cursor DeleteAgent (and dropped from the local factory).
+// Persistent agents are only Closed so durable Cursor state can be resumed later.
+func (r *Autonomy) finishAgent(agent *Agent) {
+	if agent == nil {
+		return
+	}
+	agent.Stop()
+	agent.disposeCursorSession(context.Background())
+	if agent.IsEphemeral() {
+		r.AgentFactory.Delete(agent.ID)
+	}
 }
 
 func (r *Autonomy) ShouldContinue(agent *Agent) bool {

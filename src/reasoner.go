@@ -32,6 +32,7 @@ type Reason struct {
 
 // LLMReasoner uses the official Cursor SDK Bridge via the Go cursorsdk adapter.
 // Requires CURSOR_API_KEY and cursor-sdk-bridge (CURSOR_SDK_BRIDGE_BIN or third_party/bin).
+// Cursor agent lifetime follows Autonomy Agent.Lifecycle (create once per task; Delete on ephemeral finish).
 type LLMReasoner struct {
 	model string
 	cwd   string
@@ -42,6 +43,10 @@ func NewLLMReasoner(model string) Reasoner {
 }
 
 func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (ReasoningResult, error) {
+	if ctx.Agent == nil {
+		return ReasoningResult{}, fmt.Errorf("llm reasoner requires DecisionContext.Agent")
+	}
+
 	cwd := r.cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -73,38 +78,15 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		)
 	}
 
-	stage("start", "model=%s timeout=%s cwd=%s", model, timeout, cwd)
-	client := cursorsdk.NewClient(
-		cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
-		cursorsdk.WithWorkspace(cwd),
-		cursorsdk.WithBridgeBin(os.Getenv("CURSOR_SDK_BRIDGE_BIN")),
-	)
-	defer func() {
-		stage("close", "shutting down client/bridge")
-		_ = client.Close()
-	}()
+	stage("start", "model=%s timeout=%s cwd=%s lifecycle=%s", model, timeout, cwd, ctx.Agent.Lifecycle)
 
-	stage("ping", "begin")
-	tPing := time.Now()
-	if err := client.Ping(goCtx); err != nil {
-		return ReasoningResult{}, fmt.Errorf("cursor bridge ping: %w", err)
-	}
-	stage("ping", "ok elapsed=%s", time.Since(tPing).Round(time.Millisecond))
-
-	stage("CreateAgent", "begin model=%s", model)
-	tCreate := time.Now()
-	agent, err := client.Agents().Create(goCtx, cursorsdk.CreateOptions{
-		Model: model,
-		CWD:   cwd,
-	})
+	stage("ensureCursor", "begin")
+	tEnsure := time.Now()
+	agent, err := ctx.Agent.ensureCursorSession(goCtx, model, cwd)
 	if err != nil {
-		return ReasoningResult{}, fmt.Errorf("create cursor agent: %w", err)
+		return ReasoningResult{}, err
 	}
-	defer func() {
-		stage("CloseAgent", "begin id=%s", agent.ID)
-		_ = agent.Close(goCtx)
-	}()
-	stage("CreateAgent", "ok id=%s elapsed=%s", agent.ID, time.Since(tCreate).Round(time.Millisecond))
+	stage("ensureCursor", "ok id=%s elapsed=%s", agent.ID, time.Since(tEnsure).Round(time.Millisecond))
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
