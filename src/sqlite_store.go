@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   goal TEXT NOT NULL DEFAULT '',
   expected_state TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT '',
+  agent_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -58,7 +59,9 @@ CREATE TABLE IF NOT EXISTS agents (
   lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
   current_task_id TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
-  cursor_agent_id TEXT NOT NULL DEFAULT '',
+  llm_agent_id TEXT NOT NULL DEFAULT '',
+  llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -69,6 +72,7 @@ CREATE TABLE IF NOT EXISTS reason_turns (
   task_id TEXT NOT NULL DEFAULT '',
   agent_id TEXT NOT NULL DEFAULT '',
   step INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL DEFAULT '',
   input TEXT NOT NULL DEFAULT '',
   output TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
@@ -81,6 +85,95 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	_, err := s.db.Exec(ddl)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := s.ensureColumn("tasks", "agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate tasks.agent_id: %w", err)
+	}
+	if err := s.ensureColumn("agents", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.llm_provider: %w", err)
+	}
+	if err := s.ensureColumn("agents", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.model: %w", err)
+	}
+	if err := s.renameColumnIfMissing("agents", "cursor_agent_id", "llm_agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.llm_agent_id: %w", err)
+	}
+	if err := s.ensureColumn("reason_turns", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate reason_turns.mode: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// ensureColumn adds a column to an existing table when it is missing. CREATE
+// TABLE IF NOT EXISTS only applies to fresh databases, so this keeps older
+// databases usable after schema additions.
+func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
+	exists, err := s.columnExists(table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
+}
+
+// renameColumnIfMissing renames oldCol to newCol for databases that predate the
+// rename. It adds the new column, copies any non-empty values, and drops the
+// old column. Fresh databases already create newCol and skip this entirely.
+func (s *SQLiteStore) renameColumnIfMissing(table, oldCol, newCol, decl string) error {
+	hasNew, err := s.columnExists(table, newCol)
+	if err != nil {
+		return err
+	}
+	if hasNew {
+		return nil
+	}
+	hasOld, err := s.columnExists(table, oldCol)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, newCol, decl)); err != nil {
+		return err
+	}
+	if hasOld {
+		if _, err := s.db.Exec(fmt.Sprintf(
+			"UPDATE %s SET %s = %s WHERE %s <> ''", table, newCol, oldCol, oldCol,
+		)); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, oldCol)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -102,8 +195,8 @@ func (s *SQLiteStore) UpsertTask(task *Task) error {
 	}
 	task.UpdatedAt = now
 	_, err := s.db.Exec(`
-INSERT INTO tasks (id, description, domain, context, target, goal, expected_state, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (id, description, domain, context, target, goal, expected_state, status, agent_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   description=excluded.description,
   domain=excluded.domain,
@@ -112,9 +205,10 @@ ON CONFLICT(id) DO UPDATE SET
   goal=excluded.goal,
   expected_state=excluded.expected_state,
   status=excluded.status,
+  agent_id=excluded.agent_id,
   updated_at=excluded.updated_at
 `, task.ID, task.Description, string(task.Domain), task.Context, task.Target, task.Goal,
-		task.Contract.ExpectedState, task.Status, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
+		task.Contract.ExpectedState, task.Status, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert task: %w", err)
 	}
@@ -135,17 +229,19 @@ func (s *SQLiteStore) UpsertAgent(agent *Agent) error {
 		lifecycle = string(AgentLifecycleEphemeral)
 	}
 	_, err := s.db.Exec(`
-INSERT INTO agents (id, state, lifecycle, current_task_id, context, cursor_agent_id, created_at, updated_at, deleted_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+INSERT INTO agents (id, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
   state=excluded.state,
   lifecycle=excluded.lifecycle,
   current_task_id=excluded.current_task_id,
   context=excluded.context,
-  cursor_agent_id=excluded.cursor_agent_id,
+  llm_agent_id=excluded.llm_agent_id,
+  llm_provider=excluded.llm_provider,
+  model=excluded.model,
   updated_at=excluded.updated_at,
   deleted_at=NULL
-`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.CursorAgentID,
+`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
 		formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)
@@ -169,9 +265,9 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		turn.CreatedAt = time.Now()
 	}
 	_, err := s.db.Exec(`
-INSERT INTO reason_turns (task_id, agent_id, step, input, output, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
-`, turn.TaskID, turn.AgentID, turn.Step, turn.Input, turn.Output, formatTime(turn.CreatedAt))
+INSERT INTO reason_turns (task_id, agent_id, step, mode, input, output, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), turn.Input, turn.Output, formatTime(turn.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("insert reason turn: %w", err)
 	}

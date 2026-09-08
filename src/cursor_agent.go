@@ -40,8 +40,8 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 		cAgent *cursorsdk.Agent
 		err    error
 	)
-	if a.CursorAgentID != "" && !a.IsEphemeral() {
-		cAgent, err = client.Agents().Resume(ctx, a.CursorAgentID, model)
+	if a.LLMAgentID != "" && !a.IsEphemeral() {
+		cAgent, err = client.Agents().Resume(ctx, a.LLMAgentID, model)
 		if err != nil {
 			return fmt.Errorf("resume cursor agent: %w", err)
 		}
@@ -55,8 +55,10 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 		}
 	}
 	a.cursorAgent = cAgent
-	a.CursorAgentID = cAgent.ID
+	a.LLMAgentID = cAgent.ID
 	a.Backend = AgentBackendCursor
+	a.LLMProvider = LLMProviderCursor
+	a.Model = model
 	persistAgent(a)
 	return nil
 }
@@ -107,7 +109,7 @@ func (a *Agent) disposeCursorSession(ctx context.Context) {
 			} else {
 				fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s ok\n", agentID)
 			}
-			a.CursorAgentID = ""
+			a.LLMAgentID = ""
 		} else {
 			if err := a.cursorAgent.Close(cctx); err != nil {
 				fmt.Fprintf(os.Stderr, "[autonomy] CloseAgent %s failed: %v\n", agentID, err)

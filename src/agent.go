@@ -24,6 +24,15 @@ const (
 	AgentBackendCursor AgentBackend = "cursor"
 )
 
+// LLMProvider identifies which LLM provider backs an agent.
+type LLMProvider string
+
+const (
+	LLMProviderCursor          LLMProvider = "cursor"
+	LLMProviderCline           LLMProvider = "cline"
+	LLMProviderDeepseekHarness LLMProvider = "deepseek_harness"
+)
+
 // AgentFactory creates and caches agents by id. All agents (including Cursor-backed) register here.
 type AgentFactory struct {
 	agents map[string]*Agent
@@ -41,6 +50,8 @@ func (f *AgentFactory) Create(task *Task) *Agent {
 	agent := f.NewAgent(newAgentID("agent"))
 	if task != nil {
 		agent.CurrentTask = task
+		task.AgentID = agent.ID
+		persistTask(task)
 		persistAgent(agent)
 	}
 	return agent
@@ -98,6 +109,8 @@ type Agent struct {
 	State       string // runtime: idle | running | ...
 	Lifecycle   AgentLifecycle
 	Backend     AgentBackend
+	LLMProvider LLMProvider
+	Model       string // LLM model in use (e.g. composer-2)
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	CurrentTask *Task
 	Context     string
@@ -105,8 +118,8 @@ type Agent struct {
 
 	cursorClient *cursorsdk.Client
 	cursorAgent  *cursorsdk.Agent
-	// CursorAgentID is retained for persistent agents after Close (Resume later).
-	CursorAgentID string
+	// LLMAgentID is retained for persistent agents after Close (Resume later).
+	LLMAgentID string
 }
 
 func (a *Agent) IsEphemeral() bool {

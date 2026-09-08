@@ -35,6 +35,9 @@ func TestCreateAgentIDIndependentOfTask(t *testing.T) {
 	if a1.CurrentTask != task || a2.CurrentTask != task {
 		t.Fatal("CurrentTask not bound")
 	}
+	if task.AgentID != a2.ID {
+		t.Fatalf("task.AgentID=%q want last created agent %q", task.AgentID, a2.ID)
+	}
 }
 
 func TestFinishAgentDeletesEphemeralFromFactory(t *testing.T) {
@@ -56,7 +59,7 @@ func TestFinishAgentKeepsPersistentInFactory(t *testing.T) {
 	task := &Task{ID: "t-persistent"}
 	agent := auto.AgentFactory.Create(task)
 	agent.Lifecycle = AgentLifecyclePersistent
-	agent.CursorAgentID = "cursor-keep-me"
+	agent.LLMAgentID = "cursor-keep-me"
 	id := agent.ID
 	auto.finishAgent(agent)
 	got := auto.AgentFactory.Get(id)
@@ -66,8 +69,8 @@ func TestFinishAgentKeepsPersistentInFactory(t *testing.T) {
 	if got.State != "idle" {
 		t.Fatalf("State=%q want idle", got.State)
 	}
-	if got.CursorAgentID != "cursor-keep-me" {
-		t.Fatalf("CursorAgentID=%q want retained for Resume", got.CursorAgentID)
+	if got.LLMAgentID != "cursor-keep-me" {
+		t.Fatalf("LLMAgentID=%q want retained for Resume", got.LLMAgentID)
 	}
 }
 
