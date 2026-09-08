@@ -76,7 +76,7 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts sd.AcquireAgentOpts) (s
 		return nil, fmt.Errorf("unknown agent backend %q", opts.Backend)
 	}
 	agent.Start()
-	return &runtimeAgentSession{rt: r, agent: agent}, nil
+	return &runtimeAgentSession{rt: r, agent: agent, taskID: opts.TaskID}, nil
 }
 
 func (r *Runtime) releaseRegistered(agent *Agent) {
@@ -89,8 +89,9 @@ func (r *Runtime) releaseRegistered(agent *Agent) {
 }
 
 type runtimeAgentSession struct {
-	rt    *Runtime
-	agent *Agent
+	rt     *Runtime
+	agent  *Agent
+	taskID string
 }
 
 func (s *runtimeAgentSession) ID() string {
@@ -110,7 +111,18 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	timeout := llmTimeout()
 	goCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return s.agent.PromptCursor(goCtx, prompt)
+	text, err := s.agent.PromptCursor(goCtx, prompt)
+	if err == nil {
+		recordAgentPrompt(s.agent, s.taskID, prompt, text)
+	}
+	return text, err
+}
+
+func recordAgentPrompt(agent *Agent, taskID, input, output string) {
+	if agent == nil {
+		return
+	}
+	recordReasonTurn(agent, taskID, 0, ReasonModeAgent, input, output)
 }
 
 func (s *runtimeAgentSession) Release(ctx context.Context) error {

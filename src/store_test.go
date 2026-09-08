@@ -357,6 +357,42 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	}
 }
 
+func TestRecordAgentPromptPersistsTurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	_store = store
+	t.Cleanup(func() { _store = prev })
+
+	agent := &Agent{
+		ID: "a-code-edit", LLMProvider: LLMProviderCursor, Model: "composer-2",
+	}
+	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
+
+	var taskID, input, output, mode, llmProvider, model string
+	err = store.db.QueryRow(`SELECT task_id, input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
+		Scan(&taskID, &input, &output, &mode, &llmProvider, &model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskID != "task-1" {
+		t.Fatalf("task_id=%q, want %q", taskID, "task-1")
+	}
+	if input != "please edit code" || output != "changed files: a.go" {
+		t.Fatalf("input=%q output=%q", input, output)
+	}
+	if mode != string(ReasonModeAgent) {
+		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
+	}
+	if llmProvider != string(LLMProviderCursor) || model != "composer-2" {
+		t.Fatalf("llm_provider=%q model=%q", llmProvider, model)
+	}
+}
+
 func TestFinishAgentSoftDeletesInStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	store, err := OpenSQLiteStore(path)

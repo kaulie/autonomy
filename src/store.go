@@ -92,6 +92,25 @@ func persistReasonTurn(turn ReasonTurn) {
 	}
 }
 
+// recordReasonTurn is the single entry point for persisting a reasoner or agent
+// conversation turn. Both the decision reasoner and capability agent sessions
+// funnel through here so field handling stays consistent.
+func recordReasonTurn(agent *Agent, taskID string, step int, mode ReasonMode, input, output string) {
+	turn := ReasonTurn{
+		TaskID: taskID,
+		Step:   step,
+		Mode:   mode,
+		Input:  input,
+		Output: output,
+	}
+	if agent != nil {
+		turn.AgentID = agent.ID
+		turn.LLMProvider = agent.LLMProvider
+		turn.Model = agent.Model
+	}
+	persistReasonTurn(turn)
+}
+
 // OpenDefaultStore opens $PROJECT_ROOT/data/autonomy.db.
 func OpenDefaultStore() (Store, error) {
 	root, err := projectRoot()

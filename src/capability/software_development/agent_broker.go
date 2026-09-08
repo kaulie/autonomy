@@ -10,6 +10,9 @@ type AcquireAgentOpts struct {
 	Workspace string
 	// Model overrides AUTONOMY_LLM_MODEL when non-empty.
 	Model string
+	// TaskID, when non-empty, is recorded on reason_turns for prompts made by
+	// the acquired agent.
+	TaskID string
 	// Backend is "cursor" (default) or "local".
 	Backend string
 }

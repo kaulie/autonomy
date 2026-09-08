@@ -55,11 +55,12 @@ func TestCodeEditUsesWorkspaceAndBroker(t *testing.T) {
 	out, err := c.Run(map[string]string{
 		"workspace":   "/Users/gaolei/agent-workspace-sandbox/agent-1/",
 		"instruction": "add hello endpoint",
+		"task_id":     "task-9",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.lastOpts.Workspace == "" || m.lastOpts.Purpose != sd.Name {
+	if m.lastOpts.Workspace == "" || m.lastOpts.Purpose != sd.Name || m.lastOpts.TaskID != "task-9" {
 		t.Fatalf("acquire opts: %+v", m.lastOpts)
 	}
 	if !strings.Contains(sess.prompt, "add hello endpoint") {
