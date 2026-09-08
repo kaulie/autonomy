@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS agents (
   context TEXT NOT NULL DEFAULT '',
   llm_agent_id TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -89,6 +90,9 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	}
 	if err := s.ensureColumn("agents", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate agents.llm_provider: %w", err)
+	}
+	if err := s.ensureColumn("agents", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.model: %w", err)
 	}
 	if err := s.renameColumnIfMissing("agents", "cursor_agent_id", "llm_agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate agents.llm_agent_id: %w", err)
@@ -221,8 +225,8 @@ func (s *SQLiteStore) UpsertAgent(agent *Agent) error {
 		lifecycle = string(AgentLifecycleEphemeral)
 	}
 	_, err := s.db.Exec(`
-INSERT INTO agents (id, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, created_at, updated_at, deleted_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+INSERT INTO agents (id, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
   state=excluded.state,
   lifecycle=excluded.lifecycle,
@@ -230,9 +234,10 @@ ON CONFLICT(id) DO UPDATE SET
   context=excluded.context,
   llm_agent_id=excluded.llm_agent_id,
   llm_provider=excluded.llm_provider,
+  model=excluded.model,
   updated_at=excluded.updated_at,
   deleted_at=NULL
-`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider),
+`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
 		formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)

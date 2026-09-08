@@ -22,6 +22,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | Workspace | `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`，创建 Agent 时分配，供 Cursor / `code_edit` 使用 |
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |
+| Model | 记录当前使用的模型（如 `composer-2`；DB 列 `model`） |
 | Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者 |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |

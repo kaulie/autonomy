@@ -35,6 +35,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	agent := &Agent{
 		ID: "a1", State: "running", Lifecycle: AgentLifecycleEphemeral,
 		CurrentTask: task, LLMAgentID: "cursor-1", LLMProvider: LLMProviderCursor,
+		Model: "composer-2",
 	}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
@@ -54,6 +55,14 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if llmAgentID != "cursor-1" {
 		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-1")
+	}
+	var model string
+	err = store.db.QueryRow(`SELECT model FROM agents WHERE id = ?`, "a1").Scan(&model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "composer-2" {
+		t.Fatalf("model=%q, want %q", model, "composer-2")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "t1", AgentID: "a1", Step: 1, Input: "in", Output: "out",
@@ -167,6 +176,14 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if got != "cursor-keep-me" {
 		t.Fatalf("llm_agent_id=%q, want %q", got, "cursor-keep-me")
 	}
+	var oldModel string
+	err = store.db.QueryRow(`SELECT model FROM agents WHERE id = ?`, "old").Scan(&oldModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldModel != "" {
+		t.Fatalf("model=%q, want empty after migration", oldModel)
+	}
 	exists, err := store.columnExists("agents", "cursor_agent_id")
 	if err != nil {
 		t.Fatal(err)
@@ -194,12 +211,12 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 		t.Fatalf("task agent_id=%q, want %q", taskAgentID, "agent-1")
 	}
 
-	agent := &Agent{ID: "migrated", LLMAgentID: "cursor-new", LLMProvider: LLMProviderCline}
+	agent := &Agent{ID: "migrated", LLMAgentID: "cursor-new", LLMProvider: LLMProviderCline, Model: "composer-2"}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
 	}
 	var llmAgentID string
-	err = store.db.QueryRow(`SELECT llm_provider, llm_agent_id FROM agents WHERE id = ?`, "migrated").Scan(&got, &llmAgentID)
+	err = store.db.QueryRow(`SELECT llm_provider, llm_agent_id, model FROM agents WHERE id = ?`, "migrated").Scan(&got, &llmAgentID, &oldModel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +225,9 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	}
 	if llmAgentID != "cursor-new" {
 		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-new")
+	}
+	if oldModel != "composer-2" {
+		t.Fatalf("model=%q, want %q", oldModel, "composer-2")
 	}
 }
 

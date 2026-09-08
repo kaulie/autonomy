@@ -110,6 +110,7 @@ type Agent struct {
 	Lifecycle   AgentLifecycle
 	Backend     AgentBackend
 	LLMProvider LLMProvider
+	Model       string // LLM model in use (e.g. composer-2)
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	CurrentTask *Task
 	Context     string
