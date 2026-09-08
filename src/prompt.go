@@ -1,14 +1,14 @@
 package autonomy
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
-//go:embed agent_policy/AGENT_V1.md
-var agentPolicyV1 string
+const defaultAgentPolicyName = "AGENT_V1.md"
 
 // v1Constructs fills {{CONSTRUCTS}} until CapabilityFactory is populated at bootstrap.
 const v1Constructs = `- asset.change: mutate the task target asset toward Contract.ExpectedState. input: {"target":"<asset id>"} (optional; defaults to task Target)
@@ -28,10 +28,51 @@ func applyPolicyPlaceholders(policy string, values map[string]string) string {
 	return policy
 }
 
+// loadAgentPolicy reads the bootstrap policy markdown at runtime (not embedded).
+// Override path with AUTONOMY_AGENT_POLICY; otherwise search common locations from cwd.
+func loadAgentPolicy() (string, error) {
+	if p := strings.TrimSpace(os.Getenv("AUTONOMY_AGENT_POLICY")); p != "" {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return "", fmt.Errorf("read agent policy %s: %w", p, err)
+		}
+		return string(b), nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getwd for agent policy: %w", err)
+	}
+	candidates := []string{
+		filepath.Join("agent_policy", defaultAgentPolicyName),
+		filepath.Join("src", "agent_policy", defaultAgentPolicyName),
+		filepath.Join(wd, "agent_policy", defaultAgentPolicyName),
+		filepath.Join(wd, "src", "agent_policy", defaultAgentPolicyName),
+		filepath.Join(wd, "..", "src", "agent_policy", defaultAgentPolicyName),
+	}
+	var tried []string
+	for _, c := range candidates {
+		tried = append(tried, c)
+		b, err := os.ReadFile(c)
+		if err == nil {
+			return string(b), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("read agent policy %s: %w", c, err)
+		}
+	}
+	return "", fmt.Errorf("agent policy %s not found (set AUTONOMY_AGENT_POLICY); tried: %s",
+		defaultAgentPolicyName, strings.Join(tried, ", "))
+}
+
 // buildReasoningPrompt sends AGENT_V1.md through to the model (placeholders only),
 // then appends runtime Goal / World / extra input as an appendix.
-func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
-	policy := applyPolicyPlaceholders(agentPolicyV1, policyPlaceholders())
+func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
+	raw, err := loadAgentPolicy()
+	if err != nil {
+		return "", err
+	}
+	policy := applyPolicyPlaceholders(raw, policyPlaceholders())
 
 	var b strings.Builder
 	b.WriteString(policy)
@@ -60,7 +101,7 @@ func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) string {
 		b.WriteString("\n")
 	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 func formatWorldSnapshot(ctx DecisionContext) string {

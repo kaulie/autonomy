@@ -11,10 +11,16 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		ID: "t1", Goal: "g", Description: "d", Target: "1",
 		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
 	}
-	prompt := buildReasoningPrompt(DecisionContext{Task: task}, ReasoningInput{Text: "extra"})
+	prompt, err := buildReasoningPrompt(DecisionContext{Task: task}, ReasoningInput{Text: "extra"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Full AGENT_V1.md is passed through (only placeholders replaced).
-	filledPolicy := applyPolicyPlaceholders(agentPolicyV1, policyPlaceholders())
+	raw, err := loadAgentPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	filledPolicy := applyPolicyPlaceholders(raw, policyPlaceholders())
 	if !strings.HasPrefix(prompt, filledPolicy) {
 		t.Fatalf("prompt must start with full AGENT_V1.md (placeholders only)")
 	}

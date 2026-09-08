@@ -108,7 +108,10 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
-	prompt := buildReasoningPrompt(ctx, input)
+	prompt, err := buildReasoningPrompt(ctx, input)
+	if err != nil {
+		return ReasoningResult{}, fmt.Errorf("build prompt: %w", err)
+	}
 	stage("prompt", "ready bytes=%d elapsed=%s", len(prompt), time.Since(tPrompt).Round(time.Millisecond))
 	if cursorsdk.TraceVerbose() {
 		stage("prompt", "body:\n%s", prompt)
