@@ -12,24 +12,33 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
 	}
 	prompt := buildReasoningPrompt(DecisionContext{Task: task}, ReasoningInput{Text: "extra"})
+
+	// Full AGENT_V1.md is passed through (only placeholders replaced).
+	filledPolicy := applyPolicyPlaceholders(agentPolicyV1, policyPlaceholders())
+	if !strings.HasPrefix(prompt, filledPolicy) {
+		t.Fatalf("prompt must start with full AGENT_V1.md (placeholders only)")
+	}
+	if strings.Contains(prompt, "{{CONSTRUCTS}}") {
+		t.Fatal("{{CONSTRUCTS}} was not replaced")
+	}
+	if strings.Contains(prompt, "Respond with a single JSON object only") {
+		t.Fatal("must not append extra output instructions beyond AGENT_V1.md")
+	}
+
 	for _, want := range []string{
-		"You are an autonomous agent running inside an Autonomy Runtime.",
 		"## Constructs",
 		"asset.change",
+		`"type": "plan | done | blocked | need_input"`,
 		"## Current Goal",
 		"task_id: t1",
 		"expected_state: changed",
 		"## Current World",
 		"## Additional Input",
 		"extra",
-		`"type": "plan | done | blocked | need_input"`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n%s", want, prompt)
 		}
-	}
-	if strings.Contains(prompt, "{{CONSTRUCTS}}") {
-		t.Fatal("{{CONSTRUCTS}} was not replaced")
 	}
 }
 
