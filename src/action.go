@@ -65,6 +65,9 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 		if in["target"] == "" && ctx.Task.Target != "" {
 			in["target"] = ctx.Task.Target
 		}
+		if in["task_id"] == "" && ctx.Task.ID != "" {
+			in["task_id"] = ctx.Task.ID
+		}
 		if in["instruction"] == "" && in["goal"] == "" {
 			if ctx.Task.Goal != "" {
 				in["goal"] = ctx.Task.Goal

@@ -371,13 +371,16 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	agent := &Agent{
 		ID: "a-code-edit", LLMProvider: LLMProviderCursor, Model: "composer-2",
 	}
-	recordAgentPrompt(agent, "please edit code", "changed files: a.go")
+	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
 
-	var input, output, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
-		Scan(&input, &output, &mode, &llmProvider, &model)
+	var taskID, input, output, mode, llmProvider, model string
+	err = store.db.QueryRow(`SELECT task_id, input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
+		Scan(&taskID, &input, &output, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if taskID != "task-1" {
+		t.Fatalf("task_id=%q, want %q", taskID, "task-1")
 	}
 	if input != "please edit code" || output != "changed files: a.go" {
 		t.Fatalf("input=%q output=%q", input, output)

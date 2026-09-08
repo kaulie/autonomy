@@ -36,6 +36,7 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("code_edit: missing workspace (set Agent.Workspace or pass workspace/cwd)")
 	}
+	taskID := firstNonEmpty(in["task_id"])
 	if c.Agents == nil {
 		return nil, fmt.Errorf("code_edit: agent broker not configured (use Runtime.AcquireAgent)")
 	}
@@ -45,6 +46,7 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 		Purpose:   Name,
 		Workspace: workspace,
 		Backend:   Provider, // cursor
+		TaskID:    taskID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("code_edit: acquire agent: %w", err)
