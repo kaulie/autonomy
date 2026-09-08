@@ -3,11 +3,13 @@ package autonomy
 import (
 	"context"
 	"fmt"
+
+	"github.com/kaulie/autonomy/src/capability"
 )
 
 type Autonomy struct {
 	AgentFactory      *AgentFactory
-	CapabilityFactory *CapabilityFactory
+	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	Varifier          *Verifier
 	World             *World
@@ -30,8 +32,13 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	}
 	_store = store
 
-	capabilityFactory := NewCapabilityFactory()
-	capabilityFactory.Register(AssetChangeCapability{})
+	// World must exist before registering capabilities that mutate assets.
+	world := buildWorld()
+
+	capabilityFactory := capability.NewFactory()
+	capability.RegisterDefaults(capabilityFactory, capability.Deps{
+		Assets: worldAssetMutator(),
+	})
 
 	_autonomy = &Autonomy{
 		AgentFactory:      NewAgentFactory(),
@@ -41,7 +48,6 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		Store:             store,
 		MaxSteps:          DefaultMaxSteps,
 	}
-	world := buildWorld()
 	_autonomy.SetWorld(world)
 	bootstrapFlag = true
 	return _autonomy, nil

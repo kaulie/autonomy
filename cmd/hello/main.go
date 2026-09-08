@@ -27,7 +27,7 @@ type HealthCheck struct {
 
 func (h *HealthCheck) Name() string { return "service.health_check" }
 
-func (h *HealthCheck) Domain() autonomy.TaskDomain { return autonomy.TaskDomainServer }
+func (h *HealthCheck) Domain() string { return string(autonomy.TaskDomainServer) }
 
 func (h *HealthCheck) Description() string {
 	return "probe fake service health; returns status healthy|unhealthy"
