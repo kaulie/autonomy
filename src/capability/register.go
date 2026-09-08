@@ -7,7 +7,8 @@ import (
 // Deps are runtime hooks built-in capabilities need from the Autonomy host.
 type Deps struct {
 	Assets AssetMutator
-	Editor sd.CursorRunner
+	// Agents is Runtime (or a test double): capabilities acquire agents through it.
+	Agents sd.AgentBroker
 }
 
 // RegisterDefaults registers all built-in capabilities.
@@ -17,5 +18,5 @@ func RegisterDefaults(f *Factory, deps Deps) {
 		return
 	}
 	f.Register(AssetChange{Assets: deps.Assets})
-	f.Register(sd.CodeEdit{Runner: deps.Editor})
+	f.Register(sd.CodeEdit{Agents: deps.Agents})
 }

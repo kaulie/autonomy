@@ -8,8 +8,8 @@ Runtime 是**可靠执行层**：落实 Action 的生命周期、调度 Provider
 
 ## 职责
 
-- **负责**：排队、执行、超时、取消、重试策略的机械部分；隔离失败；产出 Action 结果与 Event。
-- **不负责**：理解业务 Goal；自主规划；裁定 Completion Contract 是否满足（可触发 Verification，但不取代 Contract）。
+- **负责**：排队、执行、超时、取消、重试策略的机械部分；隔离失败；产出 Action 结果与 Event；向 Capability 暴露 `AcquireAgent`（经 `AgentFactory` 注册并按需挂 Cursor 后端）。
+- **不负责**：理解业务 Goal；自主规划；裁定 Completion Contract 是否满足（可触发 Verification，但不取代 Contract）；也不允许 Capability 私下 `NewClient` / CreateAgent。
 
 ## 核心字段（逻辑）
 

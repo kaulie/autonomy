@@ -85,11 +85,11 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("ensureCursor", "begin")
 	tEnsure := time.Now()
-	agent, err := ctx.Agent.ensureCursorSession(goCtx, model, cwd)
+	cAgent, err := ctx.Agent.ensureCursorSession(goCtx, model, cwd)
 	if err != nil {
 		return ReasoningResult{}, err
 	}
-	stage("ensureCursor", "ok id=%s elapsed=%s", agent.ID, time.Since(tEnsure).Round(time.Millisecond))
+	stage("ensureCursor", "ok id=%s elapsed=%s", cAgent.ID, time.Since(tEnsure).Round(time.Millisecond))
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
@@ -102,27 +102,14 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		stage("prompt", "body:\n%s", prompt)
 	}
 
-	stage("Send", "begin agent_id=%s (opening stream; may block until bridge accepts)", agent.ID)
+	stage("PromptCursor", "begin agent_id=%s", cAgent.ID)
 	tSend := time.Now()
-	run, err := agent.Send(goCtx, prompt)
+	text, err := ctx.Agent.PromptCursor(goCtx, prompt)
 	if err != nil {
-		return ReasoningResult{}, fmt.Errorf("cursor send: %w", err)
+		return ReasoningResult{}, err
 	}
-	stage("Send", "stream opened elapsed=%s", time.Since(tSend).Round(time.Millisecond))
-
-	stage("Wait", "begin draining run stream (model inference usually lives here)")
-	tWait := time.Now()
-	result, err := run.Wait(goCtx)
-	if err != nil {
-		return ReasoningResult{}, fmt.Errorf("cursor wait: %w", err)
-	}
-	stage("Wait", "done status=%s text_bytes=%d elapsed=%s total=%s",
-		result.Status, len(result.Text), time.Since(tWait).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
-
-	text := strings.TrimSpace(result.Text)
-	if text == "" {
-		return ReasoningResult{}, fmt.Errorf("cursor run returned empty text (status=%s msg=%s)", result.Status, result.ErrorMessage)
-	}
+	stage("PromptCursor", "done text_bytes=%d elapsed=%s total=%s",
+		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
 	stage("parse", "begin")
 	reason, action, err := parseDecision(text)

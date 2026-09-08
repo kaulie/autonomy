@@ -12,14 +12,9 @@ const (
 	Provider = "cursor"
 )
 
-// CursorRunner runs a one-shot Cursor agent against a workspace.
-type CursorRunner interface {
-	RunEdit(ctx context.Context, workspace, instruction string) (summary string, err error)
-}
-
-// CodeEdit edits code in the agent workspace via Cursor SDK to implement a given feature.
+// CodeEdit edits code in the agent workspace via a Runtime-acquired Cursor-backed agent.
 type CodeEdit struct {
-	Runner CursorRunner
+	Agents AgentBroker
 }
 
 func (CodeEdit) Name() string { return Name }
@@ -41,10 +36,32 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("code_edit: missing workspace (set Agent.Workspace or pass workspace/cwd)")
 	}
-	if c.Runner == nil {
-		return nil, fmt.Errorf("code_edit: cursor runner not configured")
+	if c.Agents == nil {
+		return nil, fmt.Errorf("code_edit: agent broker not configured (use Runtime.AcquireAgent)")
 	}
-	summary, err := c.Runner.RunEdit(context.Background(), workspace, instruction)
+
+	ctx := context.Background()
+	sess, err := c.Agents.AcquireAgent(ctx, AcquireAgentOpts{
+		Purpose:   Name,
+		Workspace: workspace,
+		Backend:   Provider, // cursor
+	})
+	if err != nil {
+		return nil, fmt.Errorf("code_edit: acquire agent: %w", err)
+	}
+	defer func() { _ = sess.Release(ctx) }()
+
+	prompt := fmt.Sprintf(`You are editing a software project at workspace:
+%s
+
+Implement the following feature by modifying the codebase as needed. Make only necessary changes. Prefer small, focused edits.
+
+Feature / instruction:
+%s
+
+When done, briefly summarize which files you changed and why.`, workspace, instruction)
+
+	summary, err := sess.Prompt(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("code_edit: %w", err)
 	}
@@ -53,6 +70,7 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 		"summary":     summary,
 		"workspace":   workspace,
 		"provider":    Provider,
+		"agent_id":    sess.ID(),
 		"instruction": instruction,
 	}, nil
 }

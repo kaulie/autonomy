@@ -35,16 +35,20 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// World must exist before registering capabilities that mutate assets.
 	world := buildWorld()
 
+	agentFactory := NewAgentFactory()
+	rt := NewRuntime(agentFactory)
+
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
 		Assets: worldAssetMutator(),
-		Editor: CursorCodeEditor{},
+		Agents: rt, // capabilities acquire Cursor-backed agents via Runtime
 	})
+	rt.SetCapabilities(capabilityFactory.GetAll()...)
 
 	_autonomy = &Autonomy{
-		AgentFactory:      NewAgentFactory(),
+		AgentFactory:      agentFactory,
 		CapabilityFactory: capabilityFactory,
-		Runtime:           NewRuntime(capabilityFactory.GetAll()...),
+		Runtime:           rt,
 		Varifier:          NewVerifier(),
 		Store:             store,
 		MaxSteps:          DefaultMaxSteps,
