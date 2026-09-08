@@ -110,7 +110,25 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	timeout := llmTimeout()
 	goCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return s.agent.PromptCursor(goCtx, prompt)
+	text, err := s.agent.PromptCursor(goCtx, prompt)
+	if err == nil {
+		recordAgentPrompt(s.agent, prompt, text)
+	}
+	return text, err
+}
+
+func recordAgentPrompt(agent *Agent, input, output string) {
+	if agent == nil {
+		return
+	}
+	persistReasonTurn(ReasonTurn{
+		AgentID:     agent.ID,
+		Mode:        ReasonModeAgent,
+		LLMProvider: agent.LLMProvider,
+		Model:       agent.Model,
+		Input:       input,
+		Output:      output,
+	})
 }
 
 func (s *runtimeAgentSession) Release(ctx context.Context) error {
