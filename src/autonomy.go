@@ -5,11 +5,12 @@ import (
 )
 
 type Autonomy struct {
-	AgentFactory *AgentFactory
-	Runtime      *Runtime
-	Varifier     *Verifier
-	World        *World
-	MaxSteps     int
+	AgentFactory      *AgentFactory
+	CapabilityFactory *CapabilityFactory
+	Runtime           *Runtime
+	Varifier          *Verifier
+	World             *World
+	MaxSteps          int
 }
 
 var bootstrapFlag bool
@@ -22,11 +23,14 @@ func BootstrapAutonomy() *Autonomy {
 		return _autonomy
 	}
 	capabilityFactory := NewCapabilityFactory()
+	capabilityFactory.Register(AssetChangeCapability{})
+
 	_autonomy = &Autonomy{
-		AgentFactory: NewAgentFactory(),
-		Runtime:      NewRuntime(capabilityFactory.GetAll()...),
-		Varifier:     NewVerifier(),
-		MaxSteps:     DefaultMaxSteps,
+		AgentFactory:      NewAgentFactory(),
+		CapabilityFactory: capabilityFactory,
+		Runtime:           NewRuntime(capabilityFactory.GetAll()...),
+		Varifier:          NewVerifier(),
+		MaxSteps:          DefaultMaxSteps,
 	}
 	world := buildWorld()
 	_autonomy.SetWorld(world)

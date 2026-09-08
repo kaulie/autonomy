@@ -27,6 +27,12 @@ type HealthCheck struct {
 
 func (h *HealthCheck) Name() string { return "service.health_check" }
 
+func (h *HealthCheck) Domain() autonomy.TaskDomain { return autonomy.TaskDomainServer }
+
+func (h *HealthCheck) Description() string {
+	return "probe fake service health; returns status healthy|unhealthy"
+}
+
 func (h *HealthCheck) Run(map[string]string) (map[string]string, error) {
 	return map[string]string{"status": h.Service.Get(h.Service.ID)}, nil
 }
@@ -40,9 +46,9 @@ func (fixedHealthCheck) Decide(ctx autonomy.DecisionContext) (autonomy.Decision,
 
 func main() {
 	svc := &FakeService{ID: "demo-api", Healthy: true}
-	task := autonomy.Task{
+	_ = autonomy.Task{
 		ID:      "hello-health",
-		Domain:  "software-service",
+		Domain:  autonomy.TaskDomainServer,
 		Context: "demo",
 		Target:  svc.ID,
 		Goal:    "demo-api is healthy",
@@ -50,25 +56,5 @@ func main() {
 			ExpectedState: "healthy",
 		},
 	}
-
-	// loop := autonomy.Loop{
-	// 	Agent: autonomy.Agent{
-	// 		ID:      "owner-1",
-	// 		State:   "idle",
-	// 		Context: "demo",
-	// 	},
-		// Runtime:  autonomy.NewRuntime(&HealthCheck{Service: svc}),
-		// World:    svc,
-		// Verifier: autonomy.StateVerifier{},
-		// MaxSteps: 3,
-		// OnEvent: func(e autonomy.Event) {
-		// 	fmt.Printf("[%s] %s\n", e.Type, e.Message)
-		// },
-	}
-
-	// if err := loop.Run(task); err != nil {
-	// 	fmt.Fprintln(os.Stderr, err)
-	// 	os.Exit(1)
-	// }
-	// fmt.Println("completion contract satisfied")
+	_ = &HealthCheck{Service: svc}
 }
