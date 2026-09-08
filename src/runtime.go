@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kaulie/autonomy/src/capability"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
@@ -55,8 +54,7 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts sd.AcquireAgentOpts) (s
 	if purpose == "" {
 		purpose = "cap"
 	}
-	id := fmt.Sprintf("agent-%s-%d", purpose, time.Now().UnixNano())
-	agent := r.agents.NewAgent(id)
+	agent := r.agents.NewAgent(newAgentID(purpose))
 	agent.Lifecycle = AgentLifecycleEphemeral
 	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
 		agent.Workspace = ws

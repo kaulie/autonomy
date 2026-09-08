@@ -17,6 +17,26 @@ func TestAgentDefaultLifecycleEphemeral(t *testing.T) {
 	}
 }
 
+func TestCreateAgentIDIndependentOfTask(t *testing.T) {
+	t.Parallel()
+	f := NewAgentFactory()
+	task := &Task{ID: "1"}
+	a1 := f.Create(task)
+	a2 := f.Create(task)
+	if a1.ID == "" || a2.ID == "" {
+		t.Fatal("empty agent id")
+	}
+	if a1.ID == a2.ID {
+		t.Fatalf("expected distinct agent ids, both %q", a1.ID)
+	}
+	if a1.ID == "agent-1" || a2.ID == "agent-1" {
+		t.Fatalf("agent id must not be derived from task id; got %q %q", a1.ID, a2.ID)
+	}
+	if a1.CurrentTask != task || a2.CurrentTask != task {
+		t.Fatal("CurrentTask not bound")
+	}
+}
+
 func TestFinishAgentDeletesEphemeralFromFactory(t *testing.T) {
 	t.Parallel()
 	auto := &Autonomy{AgentFactory: NewAgentFactory()}
