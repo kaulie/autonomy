@@ -1,0 +1,64 @@
+// Package capability holds the Capability interface, factory, and built-in abilities.
+// Add new abilities as files in this package and register them in RegisterDefaults.
+package capability
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Capability is a named thing the system can do to or with the world.
+type Capability interface {
+	Name() string
+	Domain() string
+	Description() string
+	Run(in map[string]string) (map[string]string, error)
+}
+
+// Factory creates and caches capabilities by name.
+type Factory struct {
+	capabilities       []Capability
+	capabilitiesByName map[string]Capability
+}
+
+func NewFactory() *Factory {
+	return &Factory{
+		capabilities:       make([]Capability, 0),
+		capabilitiesByName: make(map[string]Capability),
+	}
+}
+
+func (f *Factory) GetAll() []Capability {
+	return f.capabilities
+}
+
+func (f *Factory) Register(c Capability) {
+	name := c.Name()
+	if _, exists := f.capabilitiesByName[name]; exists {
+		for i, existing := range f.capabilities {
+			if existing.Name() == name {
+				f.capabilities[i] = c
+				break
+			}
+		}
+	} else {
+		f.capabilities = append(f.capabilities, c)
+	}
+	f.capabilitiesByName[name] = c
+}
+
+func (f *Factory) Get(name string) Capability {
+	return f.capabilitiesByName[name]
+}
+
+// FormatConstructs renders registered capabilities for AGENT_V1 {{CONSTRUCTS}}.
+func (f *Factory) FormatConstructs() string {
+	if f == nil || len(f.capabilities) == 0 {
+		return "(none)"
+	}
+	var b strings.Builder
+	for _, c := range f.capabilities {
+		fmt.Fprintf(&b, "- %s: %s\n", c.Name(), c.Description())
+	}
+	return strings.TrimSpace(b.String())
+}

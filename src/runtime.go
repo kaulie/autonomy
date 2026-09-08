@@ -1,13 +1,15 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/capability"
+
 // Runtime reliably executes actions. It does not decide what to do next.
 type Runtime struct {
-	caps  map[string]Capability
+	caps  map[string]capability.Capability
 	world *World
 }
 
-func NewRuntime(caps ...Capability) *Runtime {
-	m := make(map[string]Capability, len(caps))
+func NewRuntime(caps ...capability.Capability) *Runtime {
+	m := make(map[string]capability.Capability, len(caps))
 	for _, c := range caps {
 		m[c.Name()] = c
 	}
@@ -15,7 +17,6 @@ func NewRuntime(caps ...Capability) *Runtime {
 }
 
 func (r *Runtime) Execute(decision Decision) (Result, error) {
-	// fmt.Println("Executing decision: ", decision)
 	action := decision.Action
 	err := action.Execute(decision.Ctx)
 	if err != nil {

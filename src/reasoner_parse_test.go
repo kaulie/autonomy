@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaulie/autonomy/src/capability"
 )
 
 func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
@@ -18,8 +20,9 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	prevStore, prevAuto, prevFlag := _store, _autonomy, bootstrapFlag
 	_store = store
-	_autonomy = &Autonomy{CapabilityFactory: NewCapabilityFactory(), Store: store}
-	_autonomy.CapabilityFactory.Register(AssetChangeCapability{})
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f, Store: store}
 	bootstrapFlag = true
 	t.Cleanup(func() {
 		_store = prevStore
@@ -140,18 +143,5 @@ func TestParseDecisionJSON(t *testing.T) {
 				t.Fatalf("noop=%v want %v", isNoop, tc.noop)
 			}
 		})
-	}
-}
-
-func TestCapabilityFactoryRegisterAppearsInGetAll(t *testing.T) {
-	t.Parallel()
-	f := NewCapabilityFactory()
-	f.Register(AssetChangeCapability{})
-	all := f.GetAll()
-	if len(all) != 1 || all[0].Name() != "asset.change" {
-		t.Fatalf("GetAll=%v", all)
-	}
-	if got := f.FormatConstructs(); !strings.Contains(got, "asset.change:") {
-		t.Fatalf("constructs=%q", got)
 	}
 }
