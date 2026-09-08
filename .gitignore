@@ -33,3 +33,6 @@ go.work.sum
 
 # Cursor SDK Bridge standalone binary (download via scripts/fetch-bridge.sh)
 third_party/
+
+# Local SQLite persistence ($PROJECT_ROOT/data/autonomy.db)
+data/

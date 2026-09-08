@@ -7,12 +7,25 @@ import (
 )
 
 func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
-	root, err := filepath.Abs("..")
+	root := preparePolicyRoot(t)
+	t.Setenv("PROJECT_ROOT", root)
+
+	path := filepath.Join(root, "data", "autonomy.db")
+	store, err := OpenSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PROJECT_ROOT", root)
-	BootstrapAutonomy()
+	t.Cleanup(func() { _ = store.Close() })
+	prevStore, prevAuto, prevFlag := _store, _autonomy, bootstrapFlag
+	_store = store
+	_autonomy = &Autonomy{CapabilityFactory: NewCapabilityFactory(), Store: store}
+	_autonomy.CapabilityFactory.Register(AssetChangeCapability{})
+	bootstrapFlag = true
+	t.Cleanup(func() {
+		_store = prevStore
+		_autonomy = prevAuto
+		bootstrapFlag = prevFlag
+	})
 
 	task := &Task{
 		ID: "t1", Goal: "g", Description: "d", Target: "1",

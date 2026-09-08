@@ -124,9 +124,11 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	stage("parse", "begin")
 	reason, action, err := parseDecision(text)
 	if err != nil {
+		recordReasonIO(ctx, prompt, text)
 		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", err, text)
 	}
 	stage("parse", "ok reason=%q total=%s", reason, time.Since(t0).Round(time.Millisecond))
+	recordReasonIO(ctx, prompt, text)
 	return ReasoningResult{
 		Decision: Decision{
 			Reason: reason,
@@ -134,6 +136,21 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 			Ctx:    ctx,
 		},
 	}, nil
+}
+
+func recordReasonIO(ctx DecisionContext, input, output string) {
+	turn := ReasonTurn{
+		Step:   ctx.Step,
+		Input:  input,
+		Output: output,
+	}
+	if ctx.Task != nil {
+		turn.TaskID = ctx.Task.ID
+	}
+	if ctx.Agent != nil {
+		turn.AgentID = ctx.Agent.ID
+	}
+	persistReasonTurn(turn)
 }
 
 func llmTimeout() time.Duration {
@@ -154,6 +171,15 @@ func NewLocalReasoner(model string) Reasoner {
 }
 
 func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (ReasoningResult, error) {
+	in := strings.TrimSpace(input.Text)
+	if in == "" {
+		in = "local-reasoner: no additional input"
+		if ctx.Task != nil {
+			in = fmt.Sprintf("local-reasoner task_id=%s goal=%s target=%s", ctx.Task.ID, ctx.Task.Goal, ctx.Task.Target)
+		}
+	}
+	out := `{"type":"plan","reason":"local reason","plan":[{"capability":"asset.change","input":{}}],"need":{}}`
+	recordReasonIO(ctx, in, out)
 	return ReasoningResult{
 		Decision: Decision{
 			Reason: "local reason",

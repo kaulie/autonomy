@@ -12,6 +12,7 @@ type DecisionContext struct {
 	Task  *Task
 	Agent *Agent
 	World World
+	Step  int // 1-based loop step when set by Autonomy.Run
 }
 
 type DecisionMaker struct {

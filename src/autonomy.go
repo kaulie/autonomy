@@ -11,6 +11,7 @@ type Autonomy struct {
 	Runtime           *Runtime
 	Varifier          *Verifier
 	World             *World
+	Store             Store
 	MaxSteps          int
 }
 
@@ -19,10 +20,16 @@ var _autonomy *Autonomy
 
 const DefaultMaxSteps = 10
 
-func BootstrapAutonomy() *Autonomy {
+func BootstrapAutonomy() (*Autonomy, error) {
 	if bootstrapFlag {
-		return _autonomy
+		return _autonomy, nil
 	}
+	store, err := OpenDefaultStore()
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+	_store = store
+
 	capabilityFactory := NewCapabilityFactory()
 	capabilityFactory.Register(AssetChangeCapability{})
 
@@ -31,12 +38,13 @@ func BootstrapAutonomy() *Autonomy {
 		CapabilityFactory: capabilityFactory,
 		Runtime:           NewRuntime(capabilityFactory.GetAll()...),
 		Varifier:          NewVerifier(),
+		Store:             store,
 		MaxSteps:          DefaultMaxSteps,
 	}
 	world := buildWorld()
 	_autonomy.SetWorld(world)
 	bootstrapFlag = true
-	return _autonomy
+	return _autonomy, nil
 }
 
 func (r *Autonomy) SetWorld(world *World) {
@@ -44,10 +52,19 @@ func (r *Autonomy) SetWorld(world *World) {
 }
 
 func (r *Autonomy) Run(task *Task) error {
+	if task == nil {
+		return fmt.Errorf("nil task")
+	}
+	if task.Status == "" {
+		task.Status = "running"
+	}
+	persistTask(task)
+
 	agent := r.AgentFactory.Create(task)
 	defer r.finishAgent(agent)
 
 	agent.Start()
+	persistAgent(agent)
 
 	steps := 0
 
@@ -56,30 +73,43 @@ func (r *Autonomy) Run(task *Task) error {
 		if steps > r.MaxSteps {
 			break
 		}
-		decision, err := agent.Decide()
+		decision, err := agent.DecideAtStep(steps)
 		if err != nil {
+			task.Status = "error"
+			persistTask(task)
 			return fmt.Errorf("decide: %w", err)
 		}
 		result, err := r.Runtime.Execute(decision)
 		if err != nil {
+			task.Status = "error"
+			persistTask(task)
 			return fmt.Errorf("execute decision: %w", err)
 		}
 		agent.Observe(result)
 
 		if r.Varifier.Verify(task, r.World) {
 			fmt.Printf("Task verified\n")
+			task.Status = "done"
+			persistTask(task)
 			break
 		}
 	}
 
 	ret, err := agent.Result()
 	fmt.Printf("Agent result: %v, error: %v\n", ret, err)
-
+	if task.Status == "running" || task.Status == "pending" {
+		if err != nil {
+			task.Status = "error"
+		} else {
+			task.Status = "completed"
+		}
+		persistTask(task)
+	}
 	return err
 }
 
 // finishAgent stops the agent and tears down the Cursor SDK session.
-// Ephemeral agents are permanently deleted via Cursor DeleteAgent (and dropped from the local factory).
+// Ephemeral agents are permanently deleted via Cursor DeleteAgent; DB row is soft-deleted.
 // Persistent agents are only Closed so durable Cursor state can be resumed later.
 func (r *Autonomy) finishAgent(agent *Agent) {
 	if agent == nil {
@@ -88,7 +118,10 @@ func (r *Autonomy) finishAgent(agent *Agent) {
 	agent.Stop()
 	agent.disposeCursorSession(context.Background())
 	if agent.IsEphemeral() {
+		softDeleteAgent(agent.ID)
 		r.AgentFactory.Delete(agent.ID)
+	} else {
+		persistAgent(agent)
 	}
 }
 
