@@ -129,6 +129,76 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 }
 
+func TestInsertReasonTurnStripsCodeFences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	fenced := "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":[],\"need\":{}}\n```"
+	if err := store.InsertReasonTurn(ReasonTurn{TaskID: "t-fence", AgentID: "a-fence", Output: fenced}); err != nil {
+		t.Fatal(err)
+	}
+	var out string
+	err = store.db.QueryRow(`SELECT output FROM reason_turns WHERE agent_id = ?`, "a-fence").Scan(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"plan","reason":"go","plan":[],"need":{}}`
+	if out != want {
+		t.Fatalf("output=%q, want %q", out, want)
+	}
+}
+
+func TestSQLiteStoreMigratesNormalizesReasonTurnOutputs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE reason_turns (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id TEXT NOT NULL DEFAULT '',
+		agent_id TEXT NOT NULL DEFAULT '',
+		step INTEGER NOT NULL DEFAULT 0,
+		input TEXT NOT NULL DEFAULT '',
+		output TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fenced := "```json\n{\"type\":\"plan\"}\n```"
+	_, err = db.Exec(`INSERT INTO reason_turns
+		(task_id, agent_id, step, input, output, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		"t-old", "a-old", 1, "in", fenced, "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	var out string
+	err = store.db.QueryRow(`SELECT output FROM reason_turns WHERE agent_id = ?`, "a-old").Scan(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"plan"}`
+	if out != want {
+		t.Fatalf("output=%q, want %q", out, want)
+	}
+}
+
 func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	db, err := sql.Open("sqlite", path)

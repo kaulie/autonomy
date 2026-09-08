@@ -109,6 +109,9 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	if err := s.ensureColumn("reason_turns", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.model: %w", err)
 	}
+	if err := s.normalizeReasonTurnOutputs(); err != nil {
+		return fmt.Errorf("normalize reason_turns.output: %w", err)
+	}
 	return nil
 }
 
@@ -180,6 +183,47 @@ func (s *SQLiteStore) renameColumnIfMissing(table, oldCol, newCol, decl string) 
 			return err
 		}
 		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, oldCol)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// normalizeReasonTurnOutputs strips markdown code fences from stored outputs so
+// every reason_turns.output is plain text. It is idempotent.
+func (s *SQLiteStore) normalizeReasonTurnOutputs() error {
+	rows, err := s.db.Query(`SELECT id, output FROM reason_turns`)
+	if err != nil {
+		return err
+	}
+	type outputUpdate struct {
+		id     int64
+		output string
+	}
+	var updates []outputUpdate
+	for rows.Next() {
+		var (
+			id     int64
+			output string
+		)
+		if err := rows.Scan(&id, &output); err != nil {
+			rows.Close()
+			return err
+		}
+		normalized := stripCodeFences(output)
+		if normalized != output {
+			updates = append(updates, outputUpdate{id: id, output: normalized})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, u := range updates {
+		if _, err := s.db.Exec(`UPDATE reason_turns SET output = ? WHERE id = ?`, u.output, u.id); err != nil {
 			return err
 		}
 	}
@@ -272,6 +316,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.CreatedAt.IsZero() {
 		turn.CreatedAt = time.Now()
 	}
+	turn.Output = stripCodeFences(turn.Output)
 	_, err := s.db.Exec(`
 INSERT INTO reason_turns (task_id, agent_id, step, mode, llm_provider, model, input, output, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
