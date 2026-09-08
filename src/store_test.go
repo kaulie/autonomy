@@ -66,7 +66,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "t1", AgentID: "a1", Step: 1, Mode: ReasonModeAgent,
-		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", Output: "out",
+		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", RawOutput: "out",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 }
 
-func TestInsertReasonTurnStripsCodeFences(t *testing.T) {
+func TestInsertReasonTurnSplitsRawAndNormalizedOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	store, err := OpenSQLiteStore(path)
 	if err != nil {
@@ -138,21 +138,25 @@ func TestInsertReasonTurnStripsCodeFences(t *testing.T) {
 	defer store.Close()
 
 	fenced := "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":[],\"need\":{}}\n```"
-	if err := store.InsertReasonTurn(ReasonTurn{TaskID: "t-fence", AgentID: "a-fence", Output: fenced}); err != nil {
+	if err := store.InsertReasonTurn(ReasonTurn{TaskID: "t-fence", AgentID: "a-fence", RawOutput: fenced}); err != nil {
 		t.Fatal(err)
 	}
-	var out string
-	err = store.db.QueryRow(`SELECT output FROM reason_turns WHERE agent_id = ?`, "a-fence").Scan(&out)
+	var rawOut, normalizedOut string
+	err = store.db.QueryRow(`SELECT raw_output, normalized_output FROM reason_turns WHERE agent_id = ?`, "a-fence").
+		Scan(&rawOut, &normalizedOut)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if rawOut != fenced {
+		t.Fatalf("raw_output=%q, want original fenced output %q", rawOut, fenced)
+	}
 	want := `{"type":"plan","reason":"go","plan":[],"need":{}}`
-	if out != want {
-		t.Fatalf("output=%q, want %q", out, want)
+	if normalizedOut != want {
+		t.Fatalf("normalized_output=%q, want %q", normalizedOut, want)
 	}
 }
 
-func TestSQLiteStoreMigratesNormalizesReasonTurnOutputs(t *testing.T) {
+func TestSQLiteStoreMigratesSplitsReasonTurnOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -188,14 +192,18 @@ func TestSQLiteStoreMigratesNormalizesReasonTurnOutputs(t *testing.T) {
 	}
 	defer store.Close()
 
-	var out string
-	err = store.db.QueryRow(`SELECT output FROM reason_turns WHERE agent_id = ?`, "a-old").Scan(&out)
+	var rawOut, normalizedOut string
+	err = store.db.QueryRow(`SELECT raw_output, normalized_output FROM reason_turns WHERE agent_id = ?`, "a-old").
+		Scan(&rawOut, &normalizedOut)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if rawOut != fenced {
+		t.Fatalf("raw_output=%q, want legacy output preserved as %q", rawOut, fenced)
+	}
 	want := `{"type":"plan"}`
-	if out != want {
-		t.Fatalf("output=%q, want %q", out, want)
+	if normalizedOut != want {
+		t.Fatalf("normalized_output=%q, want %q", normalizedOut, want)
 	}
 }
 
@@ -340,14 +348,14 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var step int
-	var input, output, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT step, input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-local").
-		Scan(&step, &input, &output, &mode, &llmProvider, &model)
+	var input, rawOutput, normalizedOutput, mode, llmProvider, model string
+	err = store.db.QueryRow(`SELECT step, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-local").
+		Scan(&step, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step != 2 || input == "" || output == "" {
-		t.Fatalf("step=%d input=%q output=%q", step, input, output)
+	if step != 2 || input == "" || rawOutput == "" || normalizedOutput == "" {
+		t.Fatalf("step=%d input=%q raw_output=%q normalized_output=%q", step, input, rawOutput, normalizedOutput)
 	}
 	if mode != string(ReasonModePlan) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
@@ -373,17 +381,20 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	}
 	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
 
-	var taskID, input, output, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT task_id, input, output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
-		Scan(&taskID, &input, &output, &mode, &llmProvider, &model)
+	var taskID, input, rawOutput, normalizedOutput, mode, llmProvider, model string
+	err = store.db.QueryRow(`SELECT task_id, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
+		Scan(&taskID, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if taskID != "task-1" {
 		t.Fatalf("task_id=%q, want %q", taskID, "task-1")
 	}
-	if input != "please edit code" || output != "changed files: a.go" {
-		t.Fatalf("input=%q output=%q", input, output)
+	if input != "please edit code" || rawOutput != "changed files: a.go" {
+		t.Fatalf("input=%q raw_output=%q", input, rawOutput)
+	}
+	if normalizedOutput != "changed files: a.go" {
+		t.Fatalf("normalized_output=%q, want raw text for non-JSON output", normalizedOutput)
 	}
 	if mode != string(ReasonModeAgent) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
