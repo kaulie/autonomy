@@ -44,6 +44,7 @@ func (r *Autonomy) SetWorld(world *World) {
 
 func (r *Autonomy) Run(task *Task) error {
 	agent := r.AgentFactory.Create(task)
+	defer r.finishAgent(agent)
 
 	agent.Start()
 
@@ -70,12 +71,21 @@ func (r *Autonomy) Run(task *Task) error {
 		}
 	}
 
-	agent.Stop()
-
 	ret, err := agent.Result()
 	fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 
 	return err
+}
+
+// finishAgent stops the agent and deletes it when lifecycle is ephemeral (default).
+func (r *Autonomy) finishAgent(agent *Agent) {
+	if agent == nil {
+		return
+	}
+	agent.Stop()
+	if agent.IsEphemeral() {
+		r.AgentFactory.Delete(agent.ID)
+	}
 }
 
 func (r *Autonomy) ShouldContinue(agent *Agent) bool {

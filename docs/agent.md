@@ -18,6 +18,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | 字段 | 含义 |
 |------|------|
 | Identity | Agent 标识 |
+| Lifecycle | `ephemeral`（默认）任务结束后删除；`persistent` 保留可复用 |
 | Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者 |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |
