@@ -1,7 +1,9 @@
 package cursorsdk
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -102,4 +104,18 @@ func mapRpcError(code, message, sdkCode, requestID string) error {
 		return &RateLimitError{RpcError: base}
 	}
 	return &base
+}
+
+// IsNotFound reports whether err means the agent/resource is already gone.
+// DeleteAgent sometimes returns code=internal with a "not found" message.
+func IsNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nf *NotFoundError
+	if errors.As(err, &nf) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not_found") || strings.Contains(msg, "not found")
 }

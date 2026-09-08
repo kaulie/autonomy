@@ -68,8 +68,13 @@ func (a *Agent) CancelActiveRuns(ctx context.Context) error {
 		Options: &sdkv1.ListRunsOptions{Limit: 50},
 	}))
 	if err != nil {
-		Trace("ListRuns", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
-		return wrapConnectErr(err)
+		werr := wrapConnectErr(err)
+		Trace("ListRuns", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), werr)
+		// Agent already gone — nothing to cancel.
+		if IsNotFound(werr) {
+			return nil
+		}
+		return werr
 	}
 	items := resp.Msg.GetItems()
 	Trace("ListRuns", "rpc ok count=%d elapsed=%s", len(items), time.Since(started).Round(time.Millisecond))
@@ -91,9 +96,13 @@ func (a *Agent) CancelActiveRuns(ctx context.Context) error {
 			AgentId: &agentID,
 		}))
 		if err != nil {
-			Trace("CancelRun", "rpc error after %s: %v", time.Since(cStart).Round(time.Millisecond), err)
+			werr := wrapConnectErr(err)
+			Trace("CancelRun", "rpc error after %s: %v", time.Since(cStart).Round(time.Millisecond), werr)
+			if IsNotFound(werr) {
+				continue
+			}
 			if firstErr == nil {
-				firstErr = wrapConnectErr(err)
+				firstErr = werr
 			}
 			continue
 		}
@@ -103,6 +112,7 @@ func (a *Agent) CancelActiveRuns(ctx context.Context) error {
 }
 
 // Delete cancels any active runs, then permanently removes the agent via DeleteAgent.
+// If the agent is already gone (not_found), Delete succeeds (idempotent cleanup).
 func (a *Agent) Delete(ctx context.Context) error {
 	if err := a.client.ensure(); err != nil {
 		return err
@@ -117,8 +127,13 @@ func (a *Agent) Delete(ctx context.Context) error {
 		AgentId: a.ID,
 	}))
 	if err != nil {
+		werr := wrapConnectErr(err)
+		if IsNotFound(werr) {
+			Trace("DeleteAgent", "already gone after %s (ok)", time.Since(started).Round(time.Millisecond))
+			return nil
+		}
 		// One retry after another cancel pass — CreateAgent can leave a run that races ListRuns.
-		Trace("DeleteAgent", "rpc error after %s: %v; retry cancel+delete", time.Since(started).Round(time.Millisecond), err)
+		Trace("DeleteAgent", "rpc error after %s: %v; retry cancel+delete", time.Since(started).Round(time.Millisecond), werr)
 		_ = a.CancelActiveRuns(ctx)
 		started = time.Now()
 		_, err = a.client.agentRPC.DeleteAgent(ctx, connect.NewRequest(&sdkv1.DeleteAgentRequest{
@@ -126,8 +141,13 @@ func (a *Agent) Delete(ctx context.Context) error {
 		}))
 	}
 	if err != nil {
-		Trace("DeleteAgent", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
-		return wrapConnectErr(err)
+		werr := wrapConnectErr(err)
+		if IsNotFound(werr) {
+			Trace("DeleteAgent", "already gone after %s (ok)", time.Since(started).Round(time.Millisecond))
+			return nil
+		}
+		Trace("DeleteAgent", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), werr)
+		return werr
 	}
 	Trace("DeleteAgent", "rpc ok elapsed=%s", time.Since(started).Round(time.Millisecond))
 	return nil
