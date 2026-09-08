@@ -9,8 +9,11 @@ import (
 )
 
 func main() {
-
-	a := autonomy.BootstrapAutonomy()
+	a, err := autonomy.BootstrapAutonomy()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	task := &autonomy.Task{
 		ID:          "1",
 		Description: "Develop a new feature",
@@ -20,7 +23,7 @@ func main() {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	err := a.Run(task)
+	err = a.Run(task)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

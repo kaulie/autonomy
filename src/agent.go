@@ -32,6 +32,7 @@ func (f *AgentFactory) Create(task *Task) *Agent {
 	agentName := fmt.Sprintf("agent-%s", task.ID)
 	agent := f.NewAgent(agentName)
 	agent.CurrentTask = task
+	persistAgent(agent)
 	return agent
 }
 
@@ -46,6 +47,7 @@ func (f *AgentFactory) NewAgent(id string) *Agent {
 	}
 	f.agents[id] = agent
 	agent.DecideMaker = NewDecideMaker()
+	persistAgent(agent)
 	return agent
 }
 
@@ -85,9 +87,14 @@ func (a *Agent) Observe(result Result) {
 }
 
 func (a *Agent) Decide() (Decision, error) {
+	return a.DecideAtStep(0)
+}
+
+func (a *Agent) DecideAtStep(step int) (Decision, error) {
 	decision, err := a.DecideMaker.Decide(DecisionContext{
 		Task:  a.CurrentTask,
 		Agent: a,
+		Step:  step,
 	})
 	if err != nil {
 		return Decision{}, err
@@ -102,10 +109,12 @@ func (a *Agent) Result() (bool, error) {
 
 func (a *Agent) Start() {
 	a.State = "running"
+	persistAgent(a)
 }
 
 func (a *Agent) Stop() {
 	a.State = "idle"
+	persistAgent(a)
 }
 
 func (a *Agent) IsRunning() bool {
@@ -150,6 +159,7 @@ func (a *Agent) ensureCursorSession(ctx context.Context, model, cwd string) (*cu
 	}
 	a.cursorAgent = agent
 	a.CursorAgentID = agent.ID
+	persistAgent(a)
 	return agent, nil
 }
 
