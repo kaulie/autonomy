@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   goal TEXT NOT NULL DEFAULT '',
   expected_state TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT '',
+  agent_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -82,6 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	_, err := s.db.Exec(ddl)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := s.ensureColumn("tasks", "agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate tasks.agent_id: %w", err)
 	}
 	if err := s.ensureColumn("agents", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate agents.llm_provider: %w", err)
@@ -183,8 +187,8 @@ func (s *SQLiteStore) UpsertTask(task *Task) error {
 	}
 	task.UpdatedAt = now
 	_, err := s.db.Exec(`
-INSERT INTO tasks (id, description, domain, context, target, goal, expected_state, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (id, description, domain, context, target, goal, expected_state, status, agent_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   description=excluded.description,
   domain=excluded.domain,
@@ -193,9 +197,10 @@ ON CONFLICT(id) DO UPDATE SET
   goal=excluded.goal,
   expected_state=excluded.expected_state,
   status=excluded.status,
+  agent_id=excluded.agent_id,
   updated_at=excluded.updated_at
 `, task.ID, task.Description, string(task.Domain), task.Context, task.Target, task.Goal,
-		task.Contract.ExpectedState, task.Status, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
+		task.Contract.ExpectedState, task.Status, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert task: %w", err)
 	}

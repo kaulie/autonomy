@@ -35,6 +35,9 @@ func TestCreateAgentIDIndependentOfTask(t *testing.T) {
 	if a1.CurrentTask != task || a2.CurrentTask != task {
 		t.Fatal("CurrentTask not bound")
 	}
+	if task.AgentID != a2.ID {
+		t.Fatalf("task.AgentID=%q want last created agent %q", task.AgentID, a2.ID)
+	}
 }
 
 func TestFinishAgentDeletesEphemeralFromFactory(t *testing.T) {

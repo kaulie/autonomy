@@ -50,6 +50,8 @@ func (f *AgentFactory) Create(task *Task) *Agent {
 	agent := f.NewAgent(newAgentID("agent"))
 	if task != nil {
 		agent.CurrentTask = task
+		task.AgentID = agent.ID
+		persistTask(task)
 		persistAgent(agent)
 	}
 	return agent

@@ -13,6 +13,7 @@ type Task struct {
 	Goal        string
 	Contract    Contract //completion contract for verification
 	Status      string
+	AgentID     string // current agent responsible for executing this task
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

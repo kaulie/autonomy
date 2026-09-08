@@ -19,10 +19,18 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	task := &Task{
 		ID: "t1", Description: "d", Domain: TaskDomainServer, Target: "1",
 		Goal: "g", Status: "running", Contract: Contract{ExpectedState: "changed"},
-		CreatedAt: time.Now(),
+		AgentID: "a1", CreatedAt: time.Now(),
 	}
 	if err := store.UpsertTask(task); err != nil {
 		t.Fatal(err)
+	}
+	var taskAgentID string
+	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "t1").Scan(&taskAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskAgentID != "a1" {
+		t.Fatalf("task agent_id=%q, want %q", taskAgentID, "a1")
 	}
 	agent := &Agent{
 		ID: "a1", State: "running", Lifecycle: AgentLifecycleEphemeral,
@@ -113,9 +121,31 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Old tasks schema predates agent_id.
+	_, err = db.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY,
+		description TEXT NOT NULL DEFAULT '',
+		domain TEXT NOT NULL DEFAULT '',
+		context TEXT NOT NULL DEFAULT '',
+		target TEXT NOT NULL DEFAULT '',
+		goal TEXT NOT NULL DEFAULT '',
+		expected_state TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = db.Exec(`INSERT INTO agents
 		(id, state, lifecycle, current_task_id, context, cursor_agent_id, created_at, updated_at, deleted_at)
 		VALUES ('old', 'idle', 'ephemeral', '', '', 'cursor-keep-me', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO tasks
+		(id, description, domain, context, target, goal, expected_state, status, created_at, updated_at)
+		VALUES ('old-task', '', '', '', '', '', '', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +173,25 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	}
 	if exists {
 		t.Fatal("cursor_agent_id column still exists after migration")
+	}
+
+	var taskAgentID string
+	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "old-task").Scan(&taskAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskAgentID != "" {
+		t.Fatalf("task agent_id=%q, want empty after migration", taskAgentID)
+	}
+	if err := store.UpsertTask(&Task{ID: "old-task", AgentID: "agent-1", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "old-task").Scan(&taskAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskAgentID != "agent-1" {
+		t.Fatalf("task agent_id=%q, want %q", taskAgentID, "agent-1")
 	}
 
 	agent := &Agent{ID: "migrated", LLMAgentID: "cursor-new", LLMProvider: LLMProviderCline}
