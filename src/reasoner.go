@@ -145,6 +145,8 @@ func recordReasonIO(ctx DecisionContext, input, output string) {
 	}
 	if ctx.Agent != nil {
 		turn.AgentID = ctx.Agent.ID
+		turn.LLMProvider = ctx.Agent.LLMProvider
+		turn.Model = ctx.Agent.Model
 	}
 	persistReasonTurn(turn)
 }

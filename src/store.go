@@ -28,13 +28,15 @@ const (
 
 // ReasonTurn is one reasoner conversation (input prompt + model/local output).
 type ReasonTurn struct {
-	TaskID    string
-	AgentID   string
-	Step      int
-	Mode      ReasonMode
-	Input     string
-	Output    string
-	CreatedAt time.Time
+	TaskID      string
+	AgentID     string
+	Step        int
+	Mode        ReasonMode
+	LLMProvider LLMProvider
+	Model       string
+	Input       string
+	Output      string
+	CreatedAt   time.Time
 }
 
 var _store Store
