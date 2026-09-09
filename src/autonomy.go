@@ -130,7 +130,7 @@ func (r *Autonomy) finishAgent(agent *Agent) {
 	agent.disposeCursorSession(context.Background())
 	if agent.IsEphemeral() {
 		softDeleteAgent(agent.ID)
-		r.AgentFactory.Delete(agent.ID)
+		r.AgentFactory.Delete(agent.Name)
 	} else {
 		persistAgent(agent)
 	}

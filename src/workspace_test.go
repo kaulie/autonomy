@@ -24,12 +24,12 @@ func TestAgentWorkspacePath(t *testing.T) {
 func TestNewAgentSetsWorkspace(t *testing.T) {
 	t.Parallel()
 	f := NewAgentFactory()
-	a := f.NewAgent("agent-ws-test")
+	a := f.NewAgent()
 	if a.Workspace == "" {
 		t.Fatal("empty Workspace")
 	}
-	if !strings.Contains(a.Workspace, "agent-ws-test") {
-		t.Fatalf("Workspace=%q", a.Workspace)
+	if a.Name == "" || !strings.Contains(a.Workspace, a.Name) {
+		t.Fatalf("Workspace=%q must contain agent name %q", a.Workspace, a.Name)
 	}
 }
 

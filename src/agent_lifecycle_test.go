@@ -8,7 +8,7 @@ import (
 func TestAgentDefaultLifecycleEphemeral(t *testing.T) {
 	t.Parallel()
 	f := NewAgentFactory()
-	a := f.NewAgent("a1")
+	a := f.NewAgent()
 	if a.Lifecycle != AgentLifecycleEphemeral {
 		t.Fatalf("Lifecycle=%q want %q", a.Lifecycle, AgentLifecycleEphemeral)
 	}
@@ -23,20 +23,20 @@ func TestCreateAgentIDIndependentOfTask(t *testing.T) {
 	task := &Task{ID: "1"}
 	a1 := f.Create(task)
 	a2 := f.Create(task)
-	if a1.ID == "" || a2.ID == "" {
+	if a1.ID == 0 || a2.ID == 0 {
 		t.Fatal("empty agent id")
 	}
 	if a1.ID == a2.ID {
-		t.Fatalf("expected distinct agent ids, both %q", a1.ID)
+		t.Fatalf("expected distinct agent ids, both %d", a1.ID)
 	}
-	if a1.ID == "agent-1" || a2.ID == "agent-1" {
-		t.Fatalf("agent id must not be derived from task id; got %q %q", a1.ID, a2.ID)
+	if a1.Name != fmt.Sprintf("agent-%d", a1.ID) || a2.Name != fmt.Sprintf("agent-%d", a2.ID) {
+		t.Fatalf("agent names must follow agent-{id}; got %q %q", a1.Name, a2.Name)
 	}
 	if a1.CurrentTask != task || a2.CurrentTask != task {
 		t.Fatal("CurrentTask not bound")
 	}
 	if task.AgentID != a2.ID {
-		t.Fatalf("task.AgentID=%q want last created agent %q", task.AgentID, a2.ID)
+		t.Fatalf("task.AgentID=%d want last created agent %d", task.AgentID, a2.ID)
 	}
 }
 
@@ -45,10 +45,10 @@ func TestFinishAgentDeletesEphemeralFromFactory(t *testing.T) {
 	auto := &Autonomy{AgentFactory: NewAgentFactory()}
 	task := &Task{ID: "t-ephemeral"}
 	agent := auto.AgentFactory.Create(task)
-	id := agent.ID
+	name := agent.Name
 	// No Cursor session attached — disposeCursorSession is a no-op; factory still drops ephemeral.
 	auto.finishAgent(agent)
-	if got := auto.AgentFactory.Get(id); got != nil {
+	if got := auto.AgentFactory.Get(name); got != nil {
 		t.Fatalf("ephemeral agent still cached: %+v", got)
 	}
 }
@@ -60,9 +60,9 @@ func TestFinishAgentKeepsPersistentInFactory(t *testing.T) {
 	agent := auto.AgentFactory.Create(task)
 	agent.Lifecycle = AgentLifecyclePersistent
 	agent.LLMAgentID = "cursor-keep-me"
-	id := agent.ID
+	name := agent.Name
 	auto.finishAgent(agent)
-	got := auto.AgentFactory.Get(id)
+	got := auto.AgentFactory.Get(name)
 	if got == nil {
 		t.Fatal("persistent agent was deleted from factory")
 	}

@@ -4,7 +4,7 @@ import "context"
 
 // AcquireAgentOpts tells Runtime how to register and back an agent for a capability.
 type AcquireAgentOpts struct {
-	// Purpose is a short label included in the registered agent id (e.g. "code_edit").
+	// Purpose is a short label describing why the agent is acquired.
 	Purpose string
 	// Workspace is the AGENT_WORKSPACE / Cursor CWD; required for cursor backends.
 	Workspace string

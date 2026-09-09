@@ -12,7 +12,7 @@ import (
 type Store interface {
 	UpsertTask(task *Task) error
 	UpsertAgent(agent *Agent) error
-	SoftDeleteAgent(id string) error
+	SoftDeleteAgent(id int64) error
 	InsertReasonTurn(turn ReasonTurn) error
 	Close() error
 }
@@ -32,7 +32,7 @@ const (
 // from it, which is what downstream consumers should rely on.
 type ReasonTurn struct {
 	TaskID           string
-	AgentID          string
+	AgentID          int64
 	Step             int
 	Mode             ReasonMode
 	LLMProvider      LLMProvider
@@ -72,15 +72,15 @@ func persistAgent(agent *Agent) {
 	}
 	if s := activeStore(); s != nil {
 		if err := s.UpsertAgent(agent); err != nil {
-			fmt.Fprintf(os.Stderr, "[autonomy] persist agent %s: %v\n", agent.ID, err)
+			fmt.Fprintf(os.Stderr, "[autonomy] persist agent %s: %v\n", agent.Name, err)
 		}
 	}
 }
 
-func softDeleteAgent(id string) {
+func softDeleteAgent(id int64) {
 	if s := activeStore(); s != nil {
 		if err := s.SoftDeleteAgent(id); err != nil {
-			fmt.Fprintf(os.Stderr, "[autonomy] soft-delete agent %s: %v\n", id, err)
+			fmt.Fprintf(os.Stderr, "[autonomy] soft-delete agent %d: %v\n", id, err)
 		}
 	}
 }
