@@ -50,11 +50,7 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts sd.AcquireAgentOpts) (s
 	if r == nil || r.agents == nil {
 		return nil, fmt.Errorf("runtime agent factory not ready")
 	}
-	purpose := strings.TrimSpace(opts.Purpose)
-	if purpose == "" {
-		purpose = "cap"
-	}
-	agent := r.agents.NewAgent(newAgentID(purpose))
+	agent := r.agents.NewAgent()
 	agent.Lifecycle = AgentLifecycleEphemeral
 	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
 		agent.Workspace = ws
@@ -85,7 +81,7 @@ func (r *Runtime) releaseRegistered(agent *Agent) {
 	}
 	agent.disposeCursorSession(context.Background())
 	softDeleteAgent(agent.ID)
-	r.agents.Delete(agent.ID)
+	r.agents.Delete(agent.Name)
 }
 
 type runtimeAgentSession struct {
@@ -98,7 +94,7 @@ func (s *runtimeAgentSession) ID() string {
 	if s == nil || s.agent == nil {
 		return ""
 	}
-	return s.agent.ID
+	return s.agent.Name
 }
 
 func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string, error) {
@@ -136,7 +132,7 @@ func (s *runtimeAgentSession) Release(ctx context.Context) error {
 	s.agent.disposeCursorSession(ctx)
 	if s.agent.IsEphemeral() {
 		softDeleteAgent(s.agent.ID)
-		s.rt.agents.Delete(s.agent.ID)
+		s.rt.agents.Delete(s.agent.Name)
 	} else {
 		persistAgent(s.agent)
 	}

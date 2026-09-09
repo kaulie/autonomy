@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -38,6 +39,20 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) migrate() error {
+	// This schema change replaces the legacy uuid-based TEXT agents.id with an
+	// INTEGER AUTOINCREMENT id and a derived name. Existing data is discarded.
+	legacy, err := s.agentsUseTextID()
+	if err != nil {
+		return err
+	}
+	if legacy {
+		for _, table := range []string{"reason_turns", "tasks", "agents"} {
+			if _, err := s.db.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+				return fmt.Errorf("drop legacy %s: %w", table, err)
+			}
+		}
+	}
+
 	const ddl = `
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
@@ -48,13 +63,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   goal TEXT NOT NULL DEFAULT '',
   expected_state TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT '',
-  agent_id TEXT NOT NULL DEFAULT '',
+  agent_id INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS agents (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL DEFAULT '',
   lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
   current_task_id TEXT NOT NULL DEFAULT '',
@@ -70,7 +86,7 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS reason_turns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL DEFAULT '',
-  agent_id TEXT NOT NULL DEFAULT '',
+  agent_id INTEGER NOT NULL DEFAULT 0,
   step INTEGER NOT NULL DEFAULT 0,
   mode TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
@@ -85,22 +101,15 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, step
 CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, step);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 `
-	_, err := s.db.Exec(ddl)
-	if err != nil {
+	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := s.ensureColumn("tasks", "agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate tasks.agent_id: %w", err)
+	if err := s.ensureAgentsIDSequence(); err != nil {
+		return fmt.Errorf("migrate agents.id sequence: %w", err)
 	}
-	if err := s.ensureColumn("agents", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate agents.llm_provider: %w", err)
-	}
-	if err := s.ensureColumn("agents", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate agents.model: %w", err)
-	}
-	if err := s.renameColumnIfMissing("agents", "cursor_agent_id", "llm_agent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate agents.llm_agent_id: %w", err)
-	}
+
+	// reason_turns additions for databases that predate these columns. Fresh
+	// databases already create them above; this keeps older DBs usable.
 	if err := s.ensureColumn("reason_turns", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.mode: %w", err)
 	}
@@ -121,6 +130,53 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	}
 	if err := s.backfillReasonTurnNormalizedOutputs(); err != nil {
 		return fmt.Errorf("normalize reason_turns.normalized_output: %w", err)
+	}
+	return nil
+}
+
+// agentsUseTextID reports whether the agents table still uses the legacy TEXT
+// primary key. A missing agents table reports false (fresh database).
+func (s *SQLiteStore) agentsUseTextID() (bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == "id" {
+			return strings.Contains(strings.ToUpper(ctype), "TEXT"), nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// ensureAgentsIDSequence makes agents.id start at 10000 (and never reset it
+// below the current max). It is idempotent across opens.
+func (s *SQLiteStore) ensureAgentsIDSequence() error {
+	var maxID int64
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM agents`).Scan(&maxID); err != nil {
+		return err
+	}
+	seq := int64(9999)
+	if maxID > seq {
+		seq = maxID
+	}
+	if _, err := s.db.Exec(`DELETE FROM sqlite_sequence WHERE name = 'agents'`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`INSERT INTO sqlite_sequence(name, seq) VALUES('agents', ?)`, seq); err != nil {
+		return err
 	}
 	return nil
 }
@@ -291,10 +347,35 @@ func (s *SQLiteStore) UpsertAgent(agent *Agent) error {
 	if lifecycle == "" {
 		lifecycle = string(AgentLifecycleEphemeral)
 	}
-	_, err := s.db.Exec(`
-INSERT INTO agents (id, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
+
+	// New agent: let SQLite allocate the AUTOINCREMENT id (starting at 10000)
+	// and derive the name from it.
+	if agent.ID == 0 {
+		res, err := s.db.Exec(`
+INSERT INTO agents (name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+`, "", agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
+			formatTime(now), formatTime(now))
+		if err != nil {
+			return fmt.Errorf("insert agent: %w", err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("agent last insert id: %w", err)
+		}
+		agent.ID = id
+		agent.Name = fmt.Sprintf("agent-%d", id)
+		if _, err := s.db.Exec(`UPDATE agents SET name = ? WHERE id = ?`, agent.Name, agent.ID); err != nil {
+			return fmt.Errorf("set agent name: %w", err)
+		}
+		return nil
+	}
+
+	_, err := s.db.Exec(`
+INSERT INTO agents (id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
+  name=excluded.name,
   state=excluded.state,
   lifecycle=excluded.lifecycle,
   current_task_id=excluded.current_task_id,
@@ -304,7 +385,7 @@ ON CONFLICT(id) DO UPDATE SET
   model=excluded.model,
   updated_at=excluded.updated_at,
   deleted_at=NULL
-`, agent.ID, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
+`, agent.ID, agent.Name, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
 		formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)
@@ -312,7 +393,7 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
-func (s *SQLiteStore) SoftDeleteAgent(id string) error {
+func (s *SQLiteStore) SoftDeleteAgent(id int64) error {
 	_, err := s.db.Exec(`
 UPDATE agents SET deleted_at = ?, updated_at = ?, state = 'deleted'
 WHERE id = ? AND deleted_at IS NULL

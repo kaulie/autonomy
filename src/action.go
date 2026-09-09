@@ -99,9 +99,9 @@ func copyStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-// ensureAgentWorkspace creates AGENT_WORKSPACE for the agent id and returns the path with trailing separator.
-func ensureAgentWorkspace(agentID string) (string, error) {
-	ws := AgentWorkspacePath(agentID)
+// ensureAgentWorkspace creates AGENT_WORKSPACE for the agent name and returns the path with trailing separator.
+func ensureAgentWorkspace(agentName string) (string, error) {
+	ws := AgentWorkspacePath(agentName)
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir AGENT_WORKSPACE %s: %w", ws, err)
 	}

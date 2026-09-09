@@ -19,21 +19,21 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	task := &Task{
 		ID: "t1", Description: "d", Domain: TaskDomainServer, Target: "1",
 		Goal: "g", Status: "running", Contract: Contract{ExpectedState: "changed"},
-		AgentID: "a1", CreatedAt: time.Now(),
+		AgentID: 1, CreatedAt: time.Now(),
 	}
 	if err := store.UpsertTask(task); err != nil {
 		t.Fatal(err)
 	}
-	var taskAgentID string
+	var taskAgentID int64
 	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "t1").Scan(&taskAgentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if taskAgentID != "a1" {
-		t.Fatalf("task agent_id=%q, want %q", taskAgentID, "a1")
+	if taskAgentID != 1 {
+		t.Fatalf("task agent_id=%d, want %d", taskAgentID, 1)
 	}
 	agent := &Agent{
-		ID: "a1", State: "running", Lifecycle: AgentLifecycleEphemeral,
+		ID: 1, Name: "agent-1", State: "running", Lifecycle: AgentLifecycleEphemeral,
 		CurrentTask: task, LLMAgentID: "cursor-1", LLMProvider: LLMProviderCursor,
 		Model: "composer-2",
 	}
@@ -41,7 +41,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	var llmProvider string
-	err = store.db.QueryRow(`SELECT llm_provider FROM agents WHERE id = ?`, "a1").Scan(&llmProvider)
+	err = store.db.QueryRow(`SELECT llm_provider FROM agents WHERE id = ?`, 1).Scan(&llmProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("llm_provider=%q, want %q", llmProvider, LLMProviderCursor)
 	}
 	var llmAgentID string
-	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, "a1").Scan(&llmAgentID)
+	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, 1).Scan(&llmAgentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-1")
 	}
 	var model string
-	err = store.db.QueryRow(`SELECT model FROM agents WHERE id = ?`, "a1").Scan(&model)
+	err = store.db.QueryRow(`SELECT model FROM agents WHERE id = ?`, 1).Scan(&model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,18 +65,18 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("model=%q, want %q", model, "composer-2")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
-		TaskID: "t1", AgentID: "a1", Step: 1, Mode: ReasonModeAgent,
+		TaskID: "t1", AgentID: 1, Step: 1, Mode: ReasonModeAgent,
 		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", RawOutput: "out",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SoftDeleteAgent("a1"); err != nil {
+	if err := store.SoftDeleteAgent(1); err != nil {
 		t.Fatal(err)
 	}
 
 	var deletedAt sql.NullString
 	var state string
-	err = store.db.QueryRow(`SELECT deleted_at, state FROM agents WHERE id = ?`, "a1").Scan(&deletedAt, &state)
+	err = store.db.QueryRow(`SELECT deleted_at, state FROM agents WHERE id = ?`, 1).Scan(&deletedAt, &state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 
 	var n int
-	err = store.db.QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE agent_id = ?`, "a1").Scan(&n)
+	err = store.db.QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE agent_id = ?`, 1).Scan(&n)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("reason_turns=%d", n)
 	}
 	var mode string
-	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, "a1").Scan(&mode)
+	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, 1).Scan(&mode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
 	}
 	var reasonLLMProvider, reasonModel string
-	err = store.db.QueryRow(`SELECT llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a1").Scan(&reasonLLMProvider, &reasonModel)
+	err = store.db.QueryRow(`SELECT llm_provider, model FROM reason_turns WHERE agent_id = ?`, 1).Scan(&reasonLLMProvider, &reasonModel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
 	}
-	err = store.db.QueryRow(`SELECT deleted_at FROM agents WHERE id = ?`, "a1").Scan(&deletedAt)
+	err = store.db.QueryRow(`SELECT deleted_at FROM agents WHERE id = ?`, 1).Scan(&deletedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,11 +138,11 @@ func TestInsertReasonTurnSplitsRawAndNormalizedOutput(t *testing.T) {
 	defer store.Close()
 
 	fenced := "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":[],\"need\":{}}\n```"
-	if err := store.InsertReasonTurn(ReasonTurn{TaskID: "t-fence", AgentID: "a-fence", RawOutput: fenced}); err != nil {
+	if err := store.InsertReasonTurn(ReasonTurn{TaskID: "t-fence", AgentID: 1, RawOutput: fenced}); err != nil {
 		t.Fatal(err)
 	}
 	var rawOut, normalizedOut string
-	err = store.db.QueryRow(`SELECT raw_output, normalized_output FROM reason_turns WHERE agent_id = ?`, "a-fence").
+	err = store.db.QueryRow(`SELECT raw_output, normalized_output FROM reason_turns WHERE agent_id = ?`, 1).
 		Scan(&rawOut, &normalizedOut)
 	if err != nil {
 		t.Fatal(err)
@@ -207,13 +207,13 @@ func TestSQLiteStoreMigratesSplitsReasonTurnOutput(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
+func TestSQLiteStoreRebuildsLegacyAgentsSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old schema predates llm_provider and llm_agent_id.
+	// Legacy schema: TEXT agents.id and old tasks without agent_id.
 	_, err = db.Exec(`CREATE TABLE agents (
 		id TEXT PRIMARY KEY,
 		state TEXT NOT NULL DEFAULT '',
@@ -228,15 +228,9 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old tasks schema predates agent_id.
 	_, err = db.Exec(`CREATE TABLE tasks (
 		id TEXT PRIMARY KEY,
 		description TEXT NOT NULL DEFAULT '',
-		domain TEXT NOT NULL DEFAULT '',
-		context TEXT NOT NULL DEFAULT '',
-		target TEXT NOT NULL DEFAULT '',
-		goal TEXT NOT NULL DEFAULT '',
-		expected_state TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -250,12 +244,6 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`INSERT INTO tasks
-		(id, description, domain, context, target, goal, expected_state, status, created_at, updated_at)
-		VALUES ('old-task', '', '', '', '', '', '', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -266,66 +254,46 @@ func TestSQLiteStoreMigratesExistingAgentsTable(t *testing.T) {
 	}
 	defer store.Close()
 
-	var got string
-	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, "old").Scan(&got)
+	// Legacy data is intentionally discarded; tables are rebuilt with int ids.
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("agents rows=%d, want 0 after rebuild", n)
+	}
+	legacy, err := store.agentsUseTextID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "cursor-keep-me" {
-		t.Fatalf("llm_agent_id=%q, want %q", got, "cursor-keep-me")
+	if legacy {
+		t.Fatal("agents.id should be INTEGER after rebuild")
 	}
-	var oldModel string
-	err = store.db.QueryRow(`SELECT model FROM agents WHERE id = ?`, "old").Scan(&oldModel)
+	exists, err := store.columnExists("agents", "name")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if oldModel != "" {
-		t.Fatalf("model=%q, want empty after migration", oldModel)
-	}
-	exists, err := store.columnExists("agents", "cursor_agent_id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if exists {
-		t.Fatal("cursor_agent_id column still exists after migration")
+	if !exists {
+		t.Fatal("agents.name column missing after rebuild")
 	}
 
-	var taskAgentID string
-	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "old-task").Scan(&taskAgentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if taskAgentID != "" {
-		t.Fatalf("task agent_id=%q, want empty after migration", taskAgentID)
-	}
-	if err := store.UpsertTask(&Task{ID: "old-task", AgentID: "agent-1", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	err = store.db.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, "old-task").Scan(&taskAgentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if taskAgentID != "agent-1" {
-		t.Fatalf("task agent_id=%q, want %q", taskAgentID, "agent-1")
-	}
-
-	agent := &Agent{ID: "migrated", LLMAgentID: "cursor-new", LLMProvider: LLMProviderCline, Model: "composer-2"}
+	// First new agent gets id 10000 and name agent-10000.
+	agent := &Agent{State: "idle"}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
 	}
-	var llmAgentID string
-	err = store.db.QueryRow(`SELECT llm_provider, llm_agent_id, model FROM agents WHERE id = ?`, "migrated").Scan(&got, &llmAgentID, &oldModel)
-	if err != nil {
+	if agent.ID != 10000 {
+		t.Fatalf("first agent id=%d, want 10000", agent.ID)
+	}
+	if agent.Name != "agent-10000" {
+		t.Fatalf("agent name=%q, want agent-10000", agent.Name)
+	}
+	var name string
+	if err := store.db.QueryRow(`SELECT name FROM agents WHERE id = ?`, agent.ID).Scan(&name); err != nil {
 		t.Fatal(err)
 	}
-	if got != string(LLMProviderCline) {
-		t.Fatalf("llm_provider=%q, want %q", got, LLMProviderCline)
-	}
-	if llmAgentID != "cursor-new" {
-		t.Fatalf("llm_agent_id=%q, want %q", llmAgentID, "cursor-new")
-	}
-	if oldModel != "composer-2" {
-		t.Fatalf("model=%q, want %q", oldModel, "composer-2")
+	if name != "agent-10000" {
+		t.Fatalf("stored name=%q, want agent-10000", name)
 	}
 }
 
@@ -341,7 +309,7 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	t.Cleanup(func() { _store = prev })
 
 	task := &Task{ID: "t-local", Goal: "g", Target: "1"}
-	agent := &Agent{ID: "a-local", CurrentTask: task}
+	agent := &Agent{ID: 42, CurrentTask: task}
 	r := NewLocalReasoner("local")
 	_, err = r.Reason(DecisionContext{Task: task, Agent: agent, Step: 2}, ReasoningInput{})
 	if err != nil {
@@ -349,7 +317,7 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	}
 	var step int
 	var input, rawOutput, normalizedOutput, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT step, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-local").
+	err = store.db.QueryRow(`SELECT step, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 42).
 		Scan(&step, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
@@ -377,12 +345,12 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	t.Cleanup(func() { _store = prev })
 
 	agent := &Agent{
-		ID: "a-code-edit", LLMProvider: LLMProviderCursor, Model: "composer-2",
+		ID: 7, LLMProvider: LLMProviderCursor, Model: "composer-2",
 	}
 	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
 
 	var taskID, input, rawOutput, normalizedOutput, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT task_id, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, "a-code-edit").
+	err = store.db.QueryRow(`SELECT task_id, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 7).
 		Scan(&taskID, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
@@ -419,8 +387,9 @@ func TestFinishAgentSoftDeletesInStore(t *testing.T) {
 	task := &Task{ID: "t-soft"}
 	agent := auto.AgentFactory.Create(task)
 	id := agent.ID
+	name := agent.Name
 	auto.finishAgent(agent)
-	if got := auto.AgentFactory.Get(id); got != nil {
+	if got := auto.AgentFactory.Get(name); got != nil {
 		t.Fatal("still in factory")
 	}
 	var deletedAt sql.NullString

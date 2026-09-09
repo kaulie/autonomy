@@ -21,7 +21,7 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := sess.ID()
-	if id == "" || !strings.Contains(id, "test") {
+	if id == "" || !strings.HasPrefix(id, "agent-") {
 		t.Fatalf("id=%q", id)
 	}
 	if f.Get(id) == nil {
