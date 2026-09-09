@@ -14,6 +14,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := a.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}()
 	task := &autonomy.Task{
 		ID:          "1",
 		Description: "Develop a new feature",
