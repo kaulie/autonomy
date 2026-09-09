@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kaulie/autonomy/src/capability/broker"
 )
 
 const (
@@ -14,7 +16,7 @@ const (
 
 // CodeEdit edits code in the agent workspace via a Runtime-acquired Cursor-backed agent.
 type CodeEdit struct {
-	Agents AgentBroker
+	Agents broker.AgentBroker
 }
 
 func (CodeEdit) Name() string { return Name }
@@ -42,7 +44,7 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	}
 
 	ctx := context.Background()
-	sess, err := c.Agents.AcquireAgent(ctx, AcquireAgentOpts{
+	sess, err := c.Agents.AcquireAgent(ctx, broker.AcquireAgentOpts{
 		Purpose:   Name,
 		Workspace: workspace,
 		Backend:   Provider, // cursor

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kaulie/autonomy/src/capability/broker"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
@@ -25,12 +26,12 @@ func (m *mockSession) Prompt(_ context.Context, prompt string) (string, error) {
 func (m *mockSession) Release(context.Context) error { return nil }
 
 type mockBroker struct {
-	lastOpts sd.AcquireAgentOpts
+	lastOpts broker.AcquireAgentOpts
 	sess     *mockSession
 	err      error
 }
 
-func (m *mockBroker) AcquireAgent(_ context.Context, opts sd.AcquireAgentOpts) (sd.AgentSession, error) {
+func (m *mockBroker) AcquireAgent(_ context.Context, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
 	m.lastOpts = opts
 	if m.err != nil {
 		return nil, m.err

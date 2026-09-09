@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"github.com/kaulie/autonomy/src/capability/broker"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
@@ -8,7 +9,7 @@ import (
 type Deps struct {
 	Assets AssetMutator
 	// Agents is Runtime (or a test double): capabilities acquire agents through it.
-	Agents sd.AgentBroker
+	Agents broker.AgentBroker
 }
 
 // RegisterDefaults registers all built-in capabilities.

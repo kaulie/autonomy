@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/kaulie/autonomy/src/capability"
-	sd "github.com/kaulie/autonomy/src/capability/software_development"
+	"github.com/kaulie/autonomy/src/capability/broker"
 )
 
 // Runtime reliably executes actions and exposes agent acquisition to capabilities.
@@ -46,7 +46,7 @@ func (r *Runtime) Execute(decision Decision) (Result, error) {
 
 // AcquireAgent registers an agent via AgentFactory and attaches the requested backend.
 // Capabilities call this instead of creating Cursor clients themselves.
-func (r *Runtime) AcquireAgent(ctx context.Context, opts sd.AcquireAgentOpts) (sd.AgentSession, error) {
+func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
 	if r == nil || r.agents == nil {
 		return nil, fmt.Errorf("runtime agent factory not ready")
 	}
@@ -140,4 +140,4 @@ func (s *runtimeAgentSession) Release(ctx context.Context) error {
 	return nil
 }
 
-var _ sd.AgentBroker = (*Runtime)(nil)
+var _ broker.AgentBroker = (*Runtime)(nil)

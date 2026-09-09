@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	sd "github.com/kaulie/autonomy/src/capability/software_development"
+	"github.com/kaulie/autonomy/src/capability/broker"
 )
 
 func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	t.Parallel()
 	f := NewAgentFactory()
 	rt := NewRuntime(f)
-	sess, err := rt.AcquireAgent(context.Background(), sd.AcquireAgentOpts{
+	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
 		Purpose:   "test",
 		Workspace: t.TempDir(),
 		Backend:   string(AgentBackendLocal),
