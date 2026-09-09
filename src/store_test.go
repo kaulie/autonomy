@@ -254,13 +254,21 @@ func TestSQLiteStoreRebuildsLegacyAgentsSchema(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Legacy data is intentionally discarded; tables are rebuilt with int ids.
+	// Legacy data is archived to *_legacy; live tables are rebuilt with int ids.
 	var n int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
 		t.Fatalf("agents rows=%d, want 0 after rebuild", n)
+	}
+	var legacyID, legacyCursor string
+	if err := store.db.QueryRow(`SELECT id, cursor_agent_id FROM agents_legacy WHERE id = ?`, "old").
+		Scan(&legacyID, &legacyCursor); err != nil {
+		t.Fatalf("legacy agents not archived: %v", err)
+	}
+	if legacyID != "old" || legacyCursor != "cursor-keep-me" {
+		t.Fatalf("archived legacy row mismatch: id=%q cursor_agent_id=%q", legacyID, legacyCursor)
 	}
 	legacy, err := store.agentsUseTextID()
 	if err != nil {

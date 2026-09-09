@@ -40,16 +40,15 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) migrate() error {
 	// This schema change replaces the legacy uuid-based TEXT agents.id with an
-	// INTEGER AUTOINCREMENT id and a derived name. Existing data is discarded.
+	// INTEGER AUTOINCREMENT id and a derived name. The old tables are archived
+	// to *_legacy before being rebuilt so existing data is not lost.
 	legacy, err := s.agentsUseTextID()
 	if err != nil {
 		return err
 	}
 	if legacy {
-		for _, table := range []string{"reason_turns", "tasks", "agents"} {
-			if _, err := s.db.Exec("DROP TABLE IF EXISTS " + table); err != nil {
-				return fmt.Errorf("drop legacy %s: %w", table, err)
-			}
+		if err := s.archiveLegacyTables(); err != nil {
+			return err
 		}
 	}
 
@@ -179,6 +178,42 @@ func (s *SQLiteStore) ensureAgentsIDSequence() error {
 		return err
 	}
 	return nil
+}
+
+// archiveLegacyTables renames the pre-migration tables to *_legacy so their
+// data survives the schema rebuild. It only runs during the legacy -> integer
+// agents.id transition.
+func (s *SQLiteStore) archiveLegacyTables() error {
+	for _, table := range []string{"agents", "tasks", "reason_turns"} {
+		exists, err := s.tableExists(table)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		archive := table + "_legacy"
+		if _, err := s.db.Exec("DROP TABLE IF EXISTS " + archive); err != nil {
+			return fmt.Errorf("drop stale %s: %w", archive, err)
+		}
+		if _, err := s.db.Exec("ALTER TABLE " + table + " RENAME TO " + archive); err != nil {
+			return fmt.Errorf("archive %s: %w", table, err)
+		}
+	}
+	// Free the old index names so the DDL below can recreate them on the new
+	// tables (SQLite index names are global; renamed tables keep their indexes).
+	for _, idx := range []string{"idx_reason_turns_agent", "idx_reason_turns_task", "idx_agents_task"} {
+		if _, err := s.db.Exec("DROP INDEX IF EXISTS " + idx); err != nil {
+			return fmt.Errorf("drop legacy index %s: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) tableExists(table string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n)
+	return n > 0, err
 }
 
 func (s *SQLiteStore) columnExists(table, column string) (bool, error) {
