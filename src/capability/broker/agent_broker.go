@@ -1,4 +1,7 @@
-package software_development
+// Package broker defines the generic agent-acquisition hooks shared by
+// capabilities and the autonomy runtime. It is capability-agnostic and must
+// not import any concrete capability package.
+package broker
 
 import "context"
 
