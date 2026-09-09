@@ -62,6 +62,22 @@ func (r *Autonomy) SetWorld(world *World) {
 	r.World = world
 }
 
+// Close releases process-wide resources: the shared Cursor bridge client and
+// the Store. Call it at runtime teardown (e.g. deferred in main) once all
+// agents have finished.
+func (r *Autonomy) Close() error {
+	var first error
+	if err := closeSharedCursorClient(); err != nil && first == nil {
+		first = err
+	}
+	if r != nil && r.Store != nil {
+		if err := r.Store.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 func (r *Autonomy) Run(task *Task) error {
 	if task == nil {
 		return fmt.Errorf("nil task")

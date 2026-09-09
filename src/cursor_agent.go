@@ -11,7 +11,8 @@ import (
 )
 
 // AttachCursor binds a Cursor SDK session to this autonomy agent (registered in AgentFactory).
-// All Cursor-backed agents must go through this path so NewClient appears only via newCursorClient.
+// All Cursor-backed agents must go through this path so the shared bridge client
+// (one per process) is the only bridge used.
 func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	if a == nil {
 		return fmt.Errorf("nil agent")
@@ -27,11 +28,7 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 		model = defaultCursorModel()
 	}
 
-	client := a.cursorClient
-	if client == nil {
-		client = newCursorClient(cwd)
-		a.cursorClient = client
-	}
+	client := sharedCursorClient()
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("cursor bridge ping: %w", err)
 	}
@@ -117,10 +114,5 @@ func (a *Agent) disposeCursorSession(ctx context.Context) {
 		}
 		a.cursorAgent = nil
 	}
-	if a.cursorClient != nil {
-		if err := a.cursorClient.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "[autonomy] cursor client Close failed: %v\n", err)
-		}
-		a.cursorClient = nil
-	}
+	// The shared bridge client is process-wide and must NOT be closed here.
 }

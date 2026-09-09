@@ -116,8 +116,7 @@ type Agent struct {
 	Context     string
 	DecideMaker *DecisionMaker
 
-	cursorClient *cursorsdk.Client
-	cursorAgent  *cursorsdk.Agent
+	cursorAgent *cursorsdk.Agent
 	// LLMAgentID is retained for persistent agents after Close (Resume later).
 	LLMAgentID string
 }
