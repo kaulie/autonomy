@@ -206,17 +206,6 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 		Type        string `json:"type"`
 		Domain      string `json:"domain"`
 	}
-	type repoJSON struct {
-		URL        string `json:"url"`
-		MainBranch string `json:"main_branch"`
-	}
-	type entityJSON struct {
-		ID          string    `json:"id"`
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		Type        string    `json:"type"`
-		Repository  *repoJSON `json:"repository,omitempty"`
-	}
 	type assetJSON struct {
 		ID    string `json:"id"`
 		Kind  string `json:"kind"`
@@ -226,7 +215,7 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 		ID              string              `json:"id"`
 		Type            string              `json:"type"`
 		ContextEntities []contextEntityJSON `json:"context_entities"`
-		Entities        []entityJSON        `json:"entities"`
+		Entities        []map[string]any    `json:"entities"`
 		Assets          []assetJSON         `json:"assets"`
 	}
 
@@ -240,7 +229,7 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 				ID:              id,
 				Type:            string(ctype),
 				ContextEntities: []contextEntityJSON{},
-				Entities:        []entityJSON{},
+				Entities:        []map[string]any{},
 				Assets:          []assetJSON{},
 			}
 			if _autonomy != nil && _autonomy.ContextContainerManager != nil {
@@ -261,20 +250,12 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 					if _autonomy.DomainEntityManager != nil {
 						for _, entityID := range cc.EntityReferences {
 							if de, found := _autonomy.DomainEntityManager.DomainEntities[entityID]; found {
-								meta := de.Entity()
-								out := entityJSON{
-									ID:          meta.ID,
-									Name:        meta.Name,
-									Description: meta.Description,
-									Type:        de.Type(),
+								if raw, err := json.Marshal(de); err == nil {
+									var obj map[string]any
+									if err := json.Unmarshal(raw, &obj); err == nil {
+										entry.Entities = append(entry.Entities, obj)
+									}
 								}
-								switch src := de.(type) {
-								case SourceCodeEntity:
-									out.Repository = &repoJSON{URL: src.Repository.URL, MainBranch: src.Repository.MainBranch}
-								case *SourceCodeEntity:
-									out.Repository = &repoJSON{URL: src.Repository.URL, MainBranch: src.Repository.MainBranch}
-								}
-								entry.Entities = append(entry.Entities, out)
 							}
 						}
 					}
