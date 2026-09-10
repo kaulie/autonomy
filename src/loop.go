@@ -28,7 +28,6 @@ type Loop struct {
 	Agent    Agent
 	Runtime  Runtime
 	World    World
-	Verifier Verifier
 	MaxSteps int
 	History  []Result
 	OnEvent  func(Event)

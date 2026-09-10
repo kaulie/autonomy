@@ -15,7 +15,6 @@ type Task struct {
 	Target      string
 	Goal        string
 	GoalType    GoalType
-	Contract    Contract //completion contract for verification
 	Status      string
 	AgentID     int64 // current agent responsible for executing this task
 	CreatedAt   time.Time
@@ -52,11 +51,6 @@ func ConvertToTaskDomain(externalDomain string) (TaskDomain, error) {
 	default:
 		return TaskDomainSoftwareDevelopment, fmt.Errorf("invalid external domain: %s", externalDomain)
 	}
-}
-
-// Contract is the completion anchor. Agents may choose any path; they may not rewrite this.
-type Contract struct {
-	ExpectedState string
 }
 
 // TaskResult is the outcome of running a task through Autonomy.

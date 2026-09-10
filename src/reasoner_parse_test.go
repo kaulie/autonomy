@@ -35,7 +35,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		ID: "t1", Goal: "g", Description: "d", Target: "1",
 		Domain:   TaskDomainServer,
 		GoalType: GoalType_FEATURE,
-		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
+		Status:   "pending",
 	}
 	agent := &Agent{
 		ID: 10001, Name: "agent-10001", Lifecycle: AgentLifecycleEphemeral,

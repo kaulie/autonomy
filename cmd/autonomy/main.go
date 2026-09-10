@@ -87,7 +87,6 @@ func main() {
 		Description: "Develop a new feature",
 		Status:      "pending",
 		GoalType:    autonomy.GoalType_FEATURE,
-		Contract:    autonomy.Contract{ExpectedState: "changed"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ContextRef: map[autonomy.ContextEntityType]string{

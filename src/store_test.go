@@ -18,7 +18,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 
 	task := &Task{
 		ID: "t1", Description: "d", Domain: TaskDomainServer, Target: "1",
-		Goal: "g", Status: "running", Contract: Contract{ExpectedState: "changed"},
+		Goal: "g", Status: "running",
 		AgentID: 1, CreatedAt: time.Now(),
 	}
 	if err := store.UpsertTask(task); err != nil {

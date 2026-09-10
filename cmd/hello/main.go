@@ -54,9 +54,6 @@ func main() {
 		Context: "demo",
 		Target:  svc.ID,
 		Goal:    "demo-api is healthy",
-		Contract: autonomy.Contract{
-			ExpectedState: "healthy",
-		},
 	}
 	_ = &HealthCheck{Service: svc}
 }

@@ -11,7 +11,7 @@ type AssetMutator interface {
 	SetState(id, state string) error
 }
 
-// AssetChange mutates the task target asset toward Contract.ExpectedState.
+// AssetChange mutates the task target asset state.
 type AssetChange struct {
 	Assets AssetMutator
 }
@@ -23,7 +23,7 @@ func (AssetChange) Domain() string { return "server" }
 func (AssetChange) Provider() string { return "autonomy" }
 
 func (AssetChange) Description() string {
-	return `mutate the task target asset toward Contract.ExpectedState. input: {"target":"<asset id>"} (optional; defaults to task Target)`
+	return `mutate the task target asset state. input: {"target":"<asset id>"} (optional; defaults to task Target)`
 }
 
 func (c AssetChange) Run(in map[string]string) (map[string]string, error) {
