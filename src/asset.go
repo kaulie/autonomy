@@ -17,11 +17,7 @@ type AssetManager struct {
 func NewAssetManager() *AssetManager {
 
 	//asset registry
-	assets := []Asset{
-		{ID: "1", Kind: "person", State: "alive"},
-		{ID: "2", Kind: "person", State: "alive"},
-		{ID: "3", Kind: "person", State: "alive"},
-	}
+	assets := []Asset{}
 	assetsByID := make(map[string]Asset)
 	for _, asset := range assets {
 		assetsByID[asset.ID] = asset

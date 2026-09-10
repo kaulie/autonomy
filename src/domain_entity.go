@@ -6,6 +6,7 @@ type Entity struct {
 	ID          string
 	Name        string
 	Description string
+	Type        string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -26,7 +27,8 @@ const (
 )
 
 type SourceCodeEntity struct {
-	Meta Entity
+	Meta       Entity
+	Repository Repository
 }
 
 func (e SourceCodeEntity) Entity() Entity {
@@ -40,4 +42,19 @@ func (e SourceCodeEntity) Type() string {
 type Repository struct {
 	URL        string `json:"url"`
 	MainBranch string `json:"main_branch"`
+}
+
+func BindEntityToContextContainer(entity Entity, contextEntity ContextContainer) error {
+	contextEntity.EntityReferences = append(contextEntity.EntityReferences, entity.ID)
+	return nil
+}
+
+func BindAssetToContextContainer(asset Asset, contextEntity ContextContainer) error {
+	contextEntity.AssetReferences = append(contextEntity.AssetReferences, asset.ID)
+	return nil
+}
+
+func BindContextToContextContainer(contextEntity ContextEntity, contextContainer ContextContainer) error {
+	contextContainer.ContextReferences = append(contextContainer.ContextReferences, contextEntity.ID)
+	return nil
 }

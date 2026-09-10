@@ -129,7 +129,7 @@ func formatTaskJSON(task *Task) []byte {
 	})
 }
 
-func formatContextRefMap(ref map[ContextEntityType]string) map[string]string {
+func formatContextRefMap(ref map[ContextContainerType]string) map[string]string {
 	out := map[string]string{}
 	for ctype, id := range ref {
 		if id == "" {

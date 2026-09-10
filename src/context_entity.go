@@ -5,25 +5,29 @@ import (
 	"time"
 )
 
-// ContextEntity is a entity that is used to anchor/mount the context of the task in a real world context, which is
+// ContextContainer is a entity that is used to anchor/mount the context of the task in a real world context, which is
 // essential for the agent to understand the task and the real world context.
 // it can be a project, a team, a user.
 // it greatly release burden for a task to enter into the automony.
-type ContextEntity struct {
-	ID                string
-	Name              string
-	Description       string
-	DomainType        TaskDomain
-	ContextEntityType ContextEntityType
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+type ContextContainer struct {
+	ID                   string
+	Name                 string
+	Description          string
+	DomainType           TaskDomain
+	ContextContainerType ContextContainerType
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+
+	ContextReferences []string
+	EntityReferences  []string
+	AssetReferences   []string
 }
 
-type ContextEntityType string
+type ContextContainerType string
 
 const (
-	ContextEntityTypeProject ContextEntityType = "project"
-	ContextEntityTypeTeam    ContextEntityType = "team"
+	ContextContainerTypeProject ContextContainerType = "project"
+	ContextContainerTypeTeam    ContextContainerType = "team"
 )
 
 type ContextDomainMapping struct {
@@ -34,13 +38,25 @@ type ContextDomainMapping struct {
 	DomainEntityType DomainEntityType
 }
 
-func ConvertToContextEntityType(externalEntityType string) (ContextEntityType, error) {
-	switch externalEntityType {
+func ConvertToContextContainerType(externalContainerType string) (ContextContainerType, error) {
+	switch externalContainerType {
 	case "project":
-		return ContextEntityTypeProject, nil
+		return ContextContainerTypeProject, nil
 	case "team":
-		return ContextEntityTypeTeam, nil
+		return ContextContainerTypeTeam, nil
 	default:
-		return ContextEntityTypeProject, fmt.Errorf("invalid external entity type: %s", externalEntityType)
+		return ContextContainerTypeProject, fmt.Errorf("invalid external entity type: %s", externalContainerType)
 	}
+}
+
+// ContextEntity is a concrete context implementation for a context entity.
+// it is different from context_entity, which is a global context container for a task
+type ContextEntity struct {
+	ID                   string
+	Name                 string
+	Description          string
+	DomainType           TaskDomain
+	ContextContainerType ContextContainerType
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }

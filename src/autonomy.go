@@ -9,6 +9,8 @@ import (
 
 type Autonomy struct {
 	AgentFactory *AgentFactory
+	// used to manage context containers registration
+	ContextContainerManager *ContextContainerManager
 	// used to manage context entities registration
 	ContextEntityManager *ContextEntityManager
 	// used to manage domain entities registration
@@ -25,7 +27,7 @@ type Autonomy struct {
 var bootstrapFlag bool
 var _autonomy *Autonomy
 
-const DefaultMaxSteps = 2
+const DefaultMaxSteps = 1
 
 func GetAutonomy() *Autonomy {
 	if _autonomy == nil {
@@ -65,6 +67,9 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		MaxSteps:          DefaultMaxSteps,
 	}
 	_autonomy.SetWorld(world)
+
+	contextContainerManager := NewContextContainerManager()
+	_autonomy.ContextContainerManager = contextContainerManager
 
 	contextEntityManager := NewContextEntityManager()
 	_autonomy.ContextEntityManager = contextEntityManager

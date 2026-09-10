@@ -16,7 +16,7 @@ type Task struct {
 	AgentID     int64 // current agent responsible for executing this task
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	ContextRef  map[ContextEntityType]string // context references
+	ContextRef  map[ContextContainerType]string // context references
 }
 
 type TaskDomain string
