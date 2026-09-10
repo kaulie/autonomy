@@ -8,28 +8,28 @@ import (
 	autonomy "github.com/kaulie/autonomy/src"
 )
 
-func convertToContextEntity(entity ExternalEntity) (autonomy.ContextEntity, error) {
+func convertToContextContainer(entity ExternalEntity) (autonomy.ContextContainer, error) {
 	var err error
 	var domainType autonomy.TaskDomain
-	var contextEntityType autonomy.ContextEntityType
+	var contextContainerType autonomy.ContextContainerType
 
 	domainType, err = autonomy.ConvertToTaskDomain(entity.EntityDomain)
 	if err != nil {
-		return autonomy.ContextEntity{}, err
+		return autonomy.ContextContainer{}, err
 	}
-	contextEntityType, err = autonomy.ConvertToContextEntityType(entity.EntityType)
+	contextContainerType, err = autonomy.ConvertToContextContainerType(entity.EntityType)
 	if err != nil {
-		return autonomy.ContextEntity{}, err
+		return autonomy.ContextContainer{}, err
 	}
 
-	return autonomy.ContextEntity{
-		ID:                entity.ID,
-		Name:              entity.Name,
-		Description:       entity.Description,
-		CreatedAt:         entity.CreatedAt,
-		UpdatedAt:         entity.UpdatedAt,
-		DomainType:        domainType,
-		ContextEntityType: contextEntityType,
+	return autonomy.ContextContainer{
+		ID:                   entity.ID,
+		Name:                 entity.Name,
+		Description:          entity.Description,
+		CreatedAt:            entity.CreatedAt,
+		UpdatedAt:            entity.UpdatedAt,
+		DomainType:           domainType,
+		ContextContainerType: contextContainerType,
 	}, nil
 }
 
@@ -60,13 +60,13 @@ func main() {
 		UpdatedAt:    time.Now(),
 	}
 
-	projectContextEntity, err := convertToContextEntity(projectExternalEntity)
+	projectContextContainer, err := convertToContextContainer(projectExternalEntity)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	err = autonomy.RegisterContextEntity(projectContextEntity)
+	err = autonomy.RegisterContextContainer(projectContextContainer)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -76,13 +76,23 @@ func main() {
 		Meta: autonomy.Entity{
 			ID:          "src-1",
 			Name:        "source code",
-			Description: "source code",
+			Description: "a agent autonomy project",
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
+		},
+		Repository: autonomy.Repository{
+			URL:        "https://github.com/kaulie/autonomy",
+			MainBranch: "main",
 		},
 	}
 
 	err = autonomy.RegisterDomainEntity(sourceCodeEntity)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	err = autonomy.BindEntityToContextContainer(sourceCodeEntity.Entity(), projectContextContainer)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -95,8 +105,8 @@ func main() {
 		GoalType:    autonomy.GoalType_FEATURE,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
-		ContextRef: map[autonomy.ContextEntityType]string{
-			autonomy.ContextEntityTypeProject: projectContextEntity.ID,
+		ContextRef: map[autonomy.ContextContainerType]string{
+			autonomy.ContextContainerTypeProject: projectContextContainer.ID,
 		},
 	}
 

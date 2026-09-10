@@ -108,29 +108,29 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 
 func TestFormatContextEntitiesJSON(t *testing.T) {
 	prevAuto := _autonomy
-	mgr := NewContextEntityManager()
-	mgr.ContextEntities["project-1"] = ContextEntity{
-		ID:                "project-1",
-		Name:              "Project One",
-		Description:       "main project",
-		DomainType:        TaskDomainSoftwareDevelopment,
-		ContextEntityType: ContextEntityTypeProject,
+	mgr := NewContextContainerManager()
+	mgr.ContextContainers["project-1"] = ContextContainer{
+		ID:                   "project-1",
+		Name:                 "Project One",
+		Description:          "main project",
+		DomainType:           TaskDomainSoftwareDevelopment,
+		ContextContainerType: ContextContainerTypeProject,
 	}
-	mgr.ContextEntities["team-1"] = ContextEntity{
-		ID:                "team-1",
-		Name:              "Team One",
-		Description:       "core team",
-		DomainType:        TaskDomainSoftwareDevelopment,
-		ContextEntityType: ContextEntityTypeTeam,
+	mgr.ContextContainers["team-1"] = ContextContainer{
+		ID:                   "team-1",
+		Name:                 "Team One",
+		Description:          "core team",
+		DomainType:           TaskDomainSoftwareDevelopment,
+		ContextContainerType: ContextContainerTypeTeam,
 	}
-	_autonomy = &Autonomy{ContextEntityManager: mgr}
+	_autonomy = &Autonomy{ContextContainerManager: mgr}
 	t.Cleanup(func() { _autonomy = prevAuto })
 
 	task := &Task{
 		ID: "t1",
-		ContextRef: map[ContextEntityType]string{
-			ContextEntityTypeProject: "project-1",
-			ContextEntityTypeTeam:    "team-1",
+		ContextRef: map[ContextContainerType]string{
+			ContextContainerTypeProject: "project-1",
+			ContextContainerTypeTeam:    "team-1",
 		},
 	}
 	raw := formatContextEntitiesJSON(DecisionContext{Task: task})
@@ -152,7 +152,7 @@ func TestFormatContextEntitiesJSON(t *testing.T) {
 		t.Fatalf("nil task raw=%s", raw)
 	}
 
-	emptyTask := &Task{ContextRef: map[ContextEntityType]string{ContextEntityTypeProject: ""}}
+	emptyTask := &Task{ContextRef: map[ContextContainerType]string{ContextContainerTypeProject: ""}}
 	if raw := formatContextEntitiesJSON(DecisionContext{Task: emptyTask}); string(raw) != "[]" {
 		t.Fatalf("empty id raw=%s", raw)
 	}
@@ -165,9 +165,9 @@ func TestFormatTaskJSONIncludesContextRef(t *testing.T) {
 		Description: "d",
 		Status:      "pending",
 		GoalType:    GoalType_FEATURE,
-		ContextRef: map[ContextEntityType]string{
-			ContextEntityTypeProject: "project-1",
-			ContextEntityTypeTeam:    "team-1",
+		ContextRef: map[ContextContainerType]string{
+			ContextContainerTypeProject: "project-1",
+			ContextContainerTypeTeam:    "team-1",
 		},
 	}
 	raw := formatTaskJSON(task)
