@@ -125,7 +125,19 @@ func formatTaskJSON(task *Task) []byte {
 		"description": task.Description,
 		"status":      task.Status,
 		"goal_type":   string(task.GoalType),
+		"context_ref": formatContextRefMap(task.ContextRef),
 	})
+}
+
+func formatContextRefMap(ref map[ContextEntityType]string) map[string]string {
+	out := map[string]string{}
+	for ctype, id := range ref {
+		if id == "" {
+			continue
+		}
+		out[string(ctype)] = id
+	}
+	return out
 }
 
 func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte {
@@ -167,6 +179,9 @@ func formatContextEntitiesJSON(ctx DecisionContext) []byte {
 	entries := []contextEntityJSON{}
 	if ctx.Task != nil && ctx.Task.ContextRef != nil {
 		for ctype, id := range ctx.Task.ContextRef {
+			if id == "" {
+				continue
+			}
 			entry := contextEntityJSON{ID: id, Type: string(ctype)}
 			if _autonomy != nil && _autonomy.ContextEntityManager != nil {
 				if e, ok := _autonomy.ContextEntityManager.ContextEntities[id]; ok {

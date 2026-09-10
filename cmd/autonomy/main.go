@@ -51,14 +51,20 @@ func main() {
 
 	// init context entity
 	projectExternalEntity := ExternalEntity{
-		ID:          "project-1",
-		Name:        "Project 1",
-		Description: "Project 1 description",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:           "project-1",
+		Name:         "Project 1",
+		Description:  "Project 1 description",
+		EntityType:   "project",
+		EntityDomain: "software_development",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	projectContextEntity, err := convertToContextEntity(projectExternalEntity)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	err = autonomy.RegisterContextEntity(projectContextEntity)
 	if err != nil {
