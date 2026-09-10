@@ -151,6 +151,37 @@ func TestFormatContextEntitiesJSON(t *testing.T) {
 	if raw := formatContextEntitiesJSON(DecisionContext{}); string(raw) != "[]" {
 		t.Fatalf("nil task raw=%s", raw)
 	}
+
+	emptyTask := &Task{ContextRef: map[ContextEntityType]string{ContextEntityTypeProject: ""}}
+	if raw := formatContextEntitiesJSON(DecisionContext{Task: emptyTask}); string(raw) != "[]" {
+		t.Fatalf("empty id raw=%s", raw)
+	}
+}
+
+func TestFormatTaskJSONIncludesContextRef(t *testing.T) {
+	task := &Task{
+		ID:          "t1",
+		Domain:      TaskDomainSoftwareDevelopment,
+		Description: "d",
+		Status:      "pending",
+		GoalType:    GoalType_FEATURE,
+		ContextRef: map[ContextEntityType]string{
+			ContextEntityTypeProject: "project-1",
+			ContextEntityTypeTeam:    "team-1",
+		},
+	}
+	raw := formatTaskJSON(task)
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, raw)
+	}
+	ref, ok := got["context_ref"].(map[string]any)
+	if !ok {
+		t.Fatalf("context_ref missing or wrong type: %s", raw)
+	}
+	if ref["project"] != "project-1" || ref["team"] != "team-1" {
+		t.Fatalf("context_ref=%v", ref)
+	}
 }
 
 func extractFencedJSON(prompt, heading string) string {
