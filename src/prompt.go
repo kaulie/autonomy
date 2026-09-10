@@ -11,13 +11,22 @@ import (
 const defaultAgentPolicyRel = "src/agent_policy/AGENT_V2.md"
 
 // policyPlaceholders are substituted into AGENT_V2.md; the rest of the file is passed through unchanged.
-func policyPlaceholders() map[string]string {
-	constructs := "(none)"
+func policyPlaceholders(ctx DecisionContext, input ReasoningInput) map[string]string {
+	constructs := "[]"
 	if _autonomy != nil && _autonomy.CapabilityFactory != nil {
 		constructs = _autonomy.CapabilityFactory.FormatConstructs()
 	}
+	var goalType GoalType = GoalType_FEATURE
+	if ctx.Task != nil && strings.TrimSpace(string(ctx.Task.GoalType)) != "" {
+		goalType = ctx.Task.GoalType
+	}
 	return map[string]string{
-		"{{CONSTRUCTS}}": constructs,
+		"{{TASK}}":                  fencedJSON(formatTaskJSON(ctx.Task)),
+		"{{GOAL_TYPE}}":             string(goalType),
+		"{{WORLD}}":                 fencedJSON(formatWorldJSON(ctx)),
+		"{{RUNTIME_CONTEXT}}":       fencedJSON(formatRuntimeContextJSON(ctx, input)),
+		"{{COMPLETION_PRINCIPLES}}": CompletionPrinciplesFor(goalType),
+		"{{CONSTRUCTS}}":            fencedJSON([]byte(constructs)),
 	}
 }
 
@@ -51,40 +60,27 @@ func loadAgentPolicy() (string, error) {
 	return string(b), nil
 }
 
-// buildReasoningPrompt sends AGENT_V2.md through to the model (placeholders only),
-// then appends a structured Runtime Context appendix (Agent / Goal / World JSON).
+// buildReasoningPrompt sends AGENT_V2.md through to the model, filling every
+// {{...}} placeholder (Task / GoalType / World / Runtime Context / Completion
+// Principles / Constructs). No extra appendix is appended; the policy already
+// contains the ## Runtime Context section.
 func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
 	raw, err := loadAgentPolicy()
 	if err != nil {
 		return "", err
 	}
-	policy := applyPolicyPlaceholders(raw, policyPlaceholders())
+	policy := applyPolicyPlaceholders(raw, policyPlaceholders(ctx, input))
 
 	var b strings.Builder
 	b.WriteString(policy)
 	if !strings.HasSuffix(policy, "\n") {
 		b.WriteByte('\n')
 	}
-
-	b.WriteString("\n## Runtime Context\n")
-	appendJSONSection(&b, "Agent", formatAgentContextJSON(ctx))
-	appendJSONSection(&b, "Goal", formatGoalJSON(ctx.Task))
-	appendJSONSection(&b, "World", formatWorldJSON(ctx))
-
-	if text := strings.TrimSpace(input.Text); text != "" {
-		appendJSONSection(&b, "Additional Input", mustJSON(map[string]string{"text": text}))
-	}
-
 	return b.String(), nil
 }
 
-func appendJSONSection(b *strings.Builder, title string, raw []byte) {
-	fmt.Fprintf(b, "\n### %s\n\n```json\n", title)
-	b.Write(raw)
-	if len(raw) == 0 || raw[len(raw)-1] != '\n' {
-		b.WriteByte('\n')
-	}
-	b.WriteString("```\n")
+func fencedJSON(raw []byte) string {
+	return "```json\n" + string(raw) + "\n```"
 }
 
 func mustJSON(v any) []byte {
@@ -117,26 +113,31 @@ func formatAgentContextJSON(ctx DecisionContext) []byte {
 	})
 }
 
-func formatGoalJSON(task *Task) []byte {
+func formatTaskJSON(task *Task) []byte {
 	if task == nil {
 		return []byte("null")
 	}
 	return mustJSON(map[string]any{
-		"task": map[string]any{
-			"id":          task.ID,
-			"domain":      string(task.Domain),
-			"description": task.Description,
-			"status":      task.Status,
-			"context":     task.Context,
-		},
-		"intent": map[string]any{
-			"goal":            task.Goal,
-			"target_asset_id": task.Target,
-		},
-		"completion_contract": map[string]any{
-			"expected_state": task.Contract.ExpectedState,
-		},
+		"id":              task.ID,
+		"domain":          string(task.Domain),
+		"description":     task.Description,
+		"status":          task.Status,
+		"context":         task.Context,
+		"goal":            task.Goal,
+		"target_asset_id": task.Target,
+		"goal_type":       string(task.GoalType),
 	})
+}
+
+func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte {
+	m := map[string]any{}
+	if ctx.Agent != nil {
+		m["agent"] = json.RawMessage(formatAgentContextJSON(ctx))
+	}
+	if text := strings.TrimSpace(input.Text); text != "" {
+		m["additional_input"] = map[string]string{"text": text}
+	}
+	return mustJSON(m)
 }
 
 func formatWorldJSON(ctx DecisionContext) []byte {
@@ -164,13 +165,32 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 type agentDecisionJSON struct {
 	Type   string          `json:"type"`
 	Reason string          `json:"reason"`
-	Plan   []planStepJSON  `json:"plan"`
+	Plan   json.RawMessage `json:"plan"`
 	Need   json.RawMessage `json:"need"`
 }
 
 type planStepJSON struct {
 	Capability string          `json:"capability"`
 	Input      json.RawMessage `json:"input"`
+}
+
+// parsePlanSteps accepts both legacy "plan": [...] and the AGENT_V2
+// "plan": {"steps": [...]} shapes.
+func parsePlanSteps(raw json.RawMessage) []planStepJSON {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var steps []planStepJSON
+	if err := json.Unmarshal(raw, &steps); err == nil {
+		return steps
+	}
+	var obj struct {
+		Steps []planStepJSON `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.Steps
+	}
+	return nil
 }
 
 // parseDecision maps AGENT_V2 JSON into a Decision reason + Action.
@@ -191,7 +211,7 @@ func parseDecision(text string) (string, Action, error) {
 	}
 	switch typ {
 	case "plan":
-		for _, step := range d.Plan {
+		for _, step := range parsePlanSteps(d.Plan) {
 			capName := strings.ToLower(strings.TrimSpace(step.Capability))
 			switch capName {
 			case "noop", "nothing", "none", "":

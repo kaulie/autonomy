@@ -14,6 +14,7 @@ type Task struct {
 	Context     string
 	Target      string
 	Goal        string
+	GoalType    GoalType
 	Contract    Contract //completion contract for verification
 	Status      string
 	AgentID     int64 // current agent responsible for executing this task
