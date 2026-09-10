@@ -11,7 +11,6 @@ type Task struct {
 	ID          string
 	Description string
 	Domain      TaskDomain
-	Context     string
 	GoalType    GoalType
 	Status      string
 	AgentID     int64 // current agent responsible for executing this task

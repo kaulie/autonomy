@@ -49,9 +49,8 @@ func (fixedHealthCheck) Decide(ctx autonomy.DecisionContext) (autonomy.Decision,
 func main() {
 	svc := &FakeService{ID: "demo-api", Healthy: true}
 	_ = autonomy.Task{
-		ID:      "hello-health",
-		Domain:  autonomy.TaskDomainServer,
-		Context: "demo",
+		ID:     "hello-health",
+		Domain: autonomy.TaskDomainServer,
 	}
 	_ = &HealthCheck{Service: svc}
 }
