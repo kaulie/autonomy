@@ -18,8 +18,7 @@ func TestLLMReasonerLive(t *testing.T) {
 	}
 	r := autonomy.NewLLMReasoner("composer-2")
 	task := &autonomy.Task{
-		ID: "live", Goal: "acknowledge", Description: "smoke",
-		Target: "demo", Contract: autonomy.Contract{ExpectedState: "ok"},
+		ID: "live", Description: "smoke",
 	}
 	done := make(chan struct{})
 	var out autonomy.ReasoningResult

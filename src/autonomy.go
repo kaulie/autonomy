@@ -17,7 +17,6 @@ type Autonomy struct {
 	TaskCtxManager    *TaskCtxManager
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
-	Varifier          *Verifier
 	World             *World
 	Store             Store
 	MaxSteps          int
@@ -62,7 +61,6 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		AgentFactory:      agentFactory,
 		CapabilityFactory: capabilityFactory,
 		Runtime:           rt,
-		Varifier:          NewVerifier(),
 		Store:             store,
 		MaxSteps:          DefaultMaxSteps,
 	}
@@ -138,15 +136,6 @@ func (r *Autonomy) Run(task *Task) error {
 			return fmt.Errorf("execute decision: %w", err)
 		}
 		agent.Observe(result)
-
-		if r.Varifier.Verify(task, r.World) {
-			fmt.Printf("Task verified\n")
-			task.Status = "done"
-			persistTask(task)
-			break
-		} else {
-			fmt.Printf("Task not verified\n")
-		}
 	}
 
 	// ret, err := agent.Result()

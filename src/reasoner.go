@@ -167,7 +167,7 @@ func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reaso
 	if in == "" {
 		in = "local-reasoner: no additional input"
 		if ctx.Task != nil {
-			in = fmt.Sprintf("local-reasoner task_id=%s goal=%s target=%s", ctx.Task.ID, ctx.Task.Goal, ctx.Task.Target)
+			in = fmt.Sprintf("local-reasoner task_id=%s", ctx.Task.ID)
 		}
 	}
 	out := `{"type":"plan","reason":"local reason","plan":[{"capability":"asset.change","input":{}}],"need":{}}`

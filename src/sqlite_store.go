@@ -58,10 +58,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   description TEXT NOT NULL DEFAULT '',
   domain TEXT NOT NULL DEFAULT '',
-  context TEXT NOT NULL DEFAULT '',
-  target TEXT NOT NULL DEFAULT '',
-  goal TEXT NOT NULL DEFAULT '',
-  expected_state TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT '',
   agent_id INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -314,20 +310,16 @@ func (s *SQLiteStore) UpsertTask(task *Task) error {
 	}
 	task.UpdatedAt = now
 	_, err := s.db.Exec(`
-INSERT INTO tasks (id, description, domain, context, target, goal, expected_state, status, agent_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (id, description, domain, status, agent_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   description=excluded.description,
   domain=excluded.domain,
-  context=excluded.context,
-  target=excluded.target,
-  goal=excluded.goal,
-  expected_state=excluded.expected_state,
   status=excluded.status,
   agent_id=excluded.agent_id,
   updated_at=excluded.updated_at
-`, task.ID, task.Description, string(task.Domain), task.Context, task.Target, task.Goal,
-		task.Contract.ExpectedState, task.Status, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
+`, task.ID, task.Description, string(task.Domain),
+		task.Status, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert task: %w", err)
 	}

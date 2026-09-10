@@ -44,4 +44,4 @@ V1 可用单一 Project Context。类型上应允许未来出现 Organization / 
 
 ## Prompt Runtime Context
 
-Reasoner 在策略正文后追加结构化附录（JSON）：`Agent`（执行主体）、`Goal`（task / intent / completion_contract）、`World`（assets + focus_target_id）。这是当下可观察世界与契约的快照，不是把整个 Context 嵌进 Task。
+Reasoner 在策略正文后追加结构化附录（JSON）：`Agent`（执行主体）、`Goal`（task / intent / completion_contract）、`World`（assets）。这是当下可观察世界与契约的快照，不是把整个 Context 嵌进 Task。
