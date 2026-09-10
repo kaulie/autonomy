@@ -21,21 +21,6 @@ func (a NothingAction) Execute(ctx DecisionContext) error {
 	return nil
 }
 
-// SimpleAction is a legacy demo action that mutates the in-memory target asset.
-type SimpleAction struct{}
-
-func (a SimpleAction) Execute(ctx DecisionContext) error {
-	assetID := ctx.Task.Target
-	asset, err := _world.getWorld().assetManager.Get(assetID)
-	if err != nil {
-		return err
-	}
-	asset.State = "changed"
-	_world.getWorld().assetManager.Set(assetID, asset)
-	fmt.Println("SimpleAction: Execute: ", asset.State)
-	return nil
-}
-
 // CapabilityAction looks up a registered capability and runs it.
 type CapabilityAction struct {
 	Name  string
@@ -59,9 +44,6 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 		}
 	}
 	if ctx.Task != nil {
-		if in["target"] == "" && ctx.Task.Target != "" {
-			in["target"] = ctx.Task.Target
-		}
 		if in["task_id"] == "" && ctx.Task.ID != "" {
 			in["task_id"] = ctx.Task.ID
 		}

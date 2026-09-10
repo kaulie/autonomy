@@ -32,7 +32,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	})
 
 	task := &Task{
-		ID: "t1", Goal: "g", Description: "d", Target: "1",
+		ID: "t1", Goal: "g", Description: "d",
 		Domain:   TaskDomainServer,
 		GoalType: GoalType_FEATURE,
 		Status:   "pending",
@@ -80,8 +80,6 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		"## Constructs",
 		`"id": "t1"`,
 		`"goal": "g"`,
-		`"target_asset_id": "1"`,
-		`"focus_target_id"`,
 		`"assets"`,
 		`"agent-10001"`,
 		`"dev_feature"`,

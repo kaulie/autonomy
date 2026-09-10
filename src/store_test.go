@@ -17,7 +17,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	defer store.Close()
 
 	task := &Task{
-		ID: "t1", Description: "d", Domain: TaskDomainServer, Target: "1",
+		ID: "t1", Description: "d", Domain: TaskDomainServer,
 		Goal: "g", Status: "running",
 		AgentID: 1, CreatedAt: time.Now(),
 	}
@@ -308,7 +308,7 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	_store = store
 	t.Cleanup(func() { _store = prev })
 
-	task := &Task{ID: "t-local", Goal: "g", Target: "1"}
+	task := &Task{ID: "t-local", Goal: "g"}
 	agent := &Agent{ID: 42, CurrentTask: task}
 	r := NewLocalReasoner("local")
 	_, err = r.Reason(DecisionContext{Task: task, Agent: agent, Step: 2}, ReasoningInput{})

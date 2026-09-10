@@ -118,14 +118,13 @@ func formatTaskJSON(task *Task) []byte {
 		return []byte("null")
 	}
 	return mustJSON(map[string]any{
-		"id":              task.ID,
-		"domain":          string(task.Domain),
-		"description":     task.Description,
-		"status":          task.Status,
-		"context":         task.Context,
-		"goal":            task.Goal,
-		"target_asset_id": task.Target,
-		"goal_type":       string(task.GoalType),
+		"id":          task.ID,
+		"domain":      string(task.Domain),
+		"description": task.Description,
+		"status":      task.Status,
+		"context":     task.Context,
+		"goal":        task.Goal,
+		"goal_type":   string(task.GoalType),
 	})
 }
 
@@ -141,10 +140,6 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 }
 
 func formatWorldJSON(ctx DecisionContext) []byte {
-	focus := ""
-	if ctx.Task != nil {
-		focus = ctx.Task.Target
-	}
 	type assetJSON struct {
 		ID    string `json:"id"`
 		Kind  string `json:"kind"`
@@ -157,8 +152,7 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 		}
 	}
 	return mustJSON(map[string]any{
-		"focus_target_id": focus,
-		"assets":          assets,
+		"assets": assets,
 	})
 }
 

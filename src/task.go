@@ -12,7 +12,6 @@ type Task struct {
 	Description string
 	Domain      TaskDomain
 	Context     string
-	Target      string
 	Goal        string
 	GoalType    GoalType
 	Status      string

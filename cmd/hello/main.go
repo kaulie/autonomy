@@ -52,7 +52,6 @@ func main() {
 		ID:      "hello-health",
 		Domain:  autonomy.TaskDomainServer,
 		Context: "demo",
-		Target:  svc.ID,
 		Goal:    "demo-api is healthy",
 	}
 	_ = &HealthCheck{Service: svc}
