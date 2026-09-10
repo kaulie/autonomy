@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +36,11 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		Domain:   TaskDomainServer,
 		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
 	}
-	prompt, err := buildReasoningPrompt(DecisionContext{Task: task}, ReasoningInput{Text: "extra"})
+	agent := &Agent{
+		ID: 10001, Name: "agent-10001", Lifecycle: AgentLifecycleEphemeral,
+		Backend: AgentBackendCursor, Workspace: "/tmp/ws/",
+	}
+	prompt, err := buildReasoningPrompt(DecisionContext{Task: task, Agent: agent, Step: 2}, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,24 +59,63 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	if strings.Contains(prompt, "Respond with a single JSON object only") {
 		t.Fatal("must not append extra output instructions beyond AGENT_V2.md")
 	}
+	if strings.Contains(prompt, "task_id: t1") || strings.Contains(prompt, "## Current Goal") {
+		t.Fatal("legacy bullet Goal/World appendix must not appear")
+	}
 
 	for _, want := range []string{
 		"## Constructs",
 		"asset.change",
 		"mutate the task target asset",
 		`"type": "plan | done | blocked | need_input"`,
-		"## Current Goal",
-		"task_id: t1",
-		"domain: server",
-		"expected_state: changed",
-		"## Current World",
-		"## Additional Input",
-		"extra",
+		"## Runtime Context",
+		"### Agent",
+		"### Goal",
+		"### World",
+		"### Additional Input",
+		`"completion_contract"`,
+		`"focus_target_id"`,
+		`"assets"`,
+		`"expected_state"`,
+		`"agent-10001"`,
+		`"text": "extra"`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n%s", want, prompt)
 		}
 	}
+
+	goalRaw := extractFencedJSON(prompt, "### Goal")
+	var goal map[string]any
+	if err := json.Unmarshal([]byte(goalRaw), &goal); err != nil {
+		t.Fatalf("goal json: %v\n%s", err, goalRaw)
+	}
+	taskObj, _ := goal["task"].(map[string]any)
+	if taskObj["id"] != "t1" || taskObj["domain"] != "server" {
+		t.Fatalf("goal.task=%v", taskObj)
+	}
+	contract, _ := goal["completion_contract"].(map[string]any)
+	if contract["expected_state"] != "changed" {
+		t.Fatalf("contract=%v", contract)
+	}
+}
+
+func extractFencedJSON(prompt, heading string) string {
+	i := strings.Index(prompt, heading)
+	if i < 0 {
+		return ""
+	}
+	rest := prompt[i:]
+	start := strings.Index(rest, "```json")
+	if start < 0 {
+		return ""
+	}
+	rest = rest[start+len("```json"):]
+	end := strings.Index(rest, "```")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 func TestLoadAgentPolicyRequiresProjectRoot(t *testing.T) {

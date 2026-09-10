@@ -52,7 +52,7 @@ func loadAgentPolicy() (string, error) {
 }
 
 // buildReasoningPrompt sends AGENT_V2.md through to the model (placeholders only),
-// then appends runtime Goal / World / extra input as an appendix.
+// then appends a structured Runtime Context appendix (Agent / Goal / World JSON).
 func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
 	raw, err := loadAgentPolicy()
 	if err != nil {
@@ -66,47 +66,99 @@ func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, er
 		b.WriteByte('\n')
 	}
 
-	b.WriteString("\n## Current Goal\n\n")
-	if ctx.Task != nil {
-		fmt.Fprintf(&b, "- task_id: %s\n", ctx.Task.ID)
-		fmt.Fprintf(&b, "- goal: %s\n", ctx.Task.Goal)
-		fmt.Fprintf(&b, "- domain: %s\n", ctx.Task.Domain)
-		fmt.Fprintf(&b, "- description: %s\n", ctx.Task.Description)
-		fmt.Fprintf(&b, "- target: %s\n", ctx.Task.Target)
-		fmt.Fprintf(&b, "- expected_state: %s\n", ctx.Task.Contract.ExpectedState)
-		fmt.Fprintf(&b, "- status: %s\n", ctx.Task.Status)
-	} else {
-		b.WriteString("(no task)\n")
-	}
+	b.WriteString("\n## Runtime Context\n")
+	appendJSONSection(&b, "Agent", formatAgentContextJSON(ctx))
+	appendJSONSection(&b, "Goal", formatGoalJSON(ctx.Task))
+	appendJSONSection(&b, "World", formatWorldJSON(ctx))
 
-	b.WriteString("\n## Current World\n\n")
-	b.WriteString(formatWorldSnapshot(ctx))
-
-	if strings.TrimSpace(input.Text) != "" {
-		b.WriteString("\n## Additional Input\n\n")
-		b.WriteString(strings.TrimSpace(input.Text))
-		b.WriteString("\n")
+	if text := strings.TrimSpace(input.Text); text != "" {
+		appendJSONSection(&b, "Additional Input", mustJSON(map[string]string{"text": text}))
 	}
 
 	return b.String(), nil
 }
 
-func formatWorldSnapshot(ctx DecisionContext) string {
-	var assets []Asset
+func appendJSONSection(b *strings.Builder, title string, raw []byte) {
+	fmt.Fprintf(b, "\n### %s\n\n```json\n", title)
+	b.Write(raw)
+	if len(raw) == 0 || raw[len(raw)-1] != '\n' {
+		b.WriteByte('\n')
+	}
+	b.WriteString("```\n")
+}
+
+func mustJSON(v any) []byte {
+	raw, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return []byte("null")
+	}
+	return raw
+}
+
+func formatAgentContextJSON(ctx DecisionContext) []byte {
+	if ctx.Agent == nil {
+		return []byte("null")
+	}
+	lifecycle := string(ctx.Agent.Lifecycle)
+	if lifecycle == "" {
+		lifecycle = string(AgentLifecycleEphemeral)
+	}
+	backend := string(ctx.Agent.Backend)
+	if backend == "" {
+		backend = string(AgentBackendLocal)
+	}
+	return mustJSON(map[string]any{
+		"id":        ctx.Agent.ID,
+		"name":      ctx.Agent.Name,
+		"lifecycle": lifecycle,
+		"backend":   backend,
+		"workspace": ctx.Agent.Workspace,
+		"step":      ctx.Step,
+	})
+}
+
+func formatGoalJSON(task *Task) []byte {
+	if task == nil {
+		return []byte("null")
+	}
+	return mustJSON(map[string]any{
+		"task": map[string]any{
+			"id":          task.ID,
+			"domain":      string(task.Domain),
+			"description": task.Description,
+			"status":      task.Status,
+			"context":     task.Context,
+		},
+		"intent": map[string]any{
+			"goal":            task.Goal,
+			"target_asset_id": task.Target,
+		},
+		"completion_contract": map[string]any{
+			"expected_state": task.Contract.ExpectedState,
+		},
+	})
+}
+
+func formatWorldJSON(ctx DecisionContext) []byte {
+	focus := ""
+	if ctx.Task != nil {
+		focus = ctx.Task.Target
+	}
+	type assetJSON struct {
+		ID    string `json:"id"`
+		Kind  string `json:"kind"`
+		State string `json:"state"`
+	}
+	assets := []assetJSON{}
 	if _world != nil && _world.assetManager != nil {
-		assets = _world.assetManager.List()
+		for _, a := range _world.assetManager.List() {
+			assets = append(assets, assetJSON{ID: a.ID, Kind: a.Kind, State: a.State})
+		}
 	}
-	if len(assets) == 0 {
-		return "(empty)\n"
-	}
-	var b strings.Builder
-	for _, a := range assets {
-		fmt.Fprintf(&b, "- id=%s kind=%s state=%s\n", a.ID, a.Kind, a.State)
-	}
-	if ctx.Task != nil && ctx.Task.Target != "" {
-		fmt.Fprintf(&b, "focus_target: %s\n", ctx.Task.Target)
-	}
-	return b.String()
+	return mustJSON(map[string]any{
+		"focus_target_id": focus,
+		"assets":          assets,
+	})
 }
 
 type agentDecisionJSON struct {
