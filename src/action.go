@@ -48,9 +48,6 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 		return fmt.Errorf("capability factory not ready")
 	}
 	name := strings.ToLower(strings.TrimSpace(a.Name))
-	if name == "change" {
-		name = "asset.change"
-	}
 	cap := f.Get(name)
 	if cap == nil {
 		return fmt.Errorf("unknown capability %q", a.Name)

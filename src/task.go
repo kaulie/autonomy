@@ -16,17 +16,19 @@ type Task struct {
 	AgentID     int64 // current agent responsible for executing this task
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	ContextRef  map[ContextEntityType]string // context references
 }
 
 type TaskDomain string
 
 const (
-	TaskDomainAI       TaskDomain = "ai"
-	TaskDomainWeb      TaskDomain = "web"
-	TaskDomainMobile   TaskDomain = "mobile"
-	TaskDomainDesktop  TaskDomain = "desktop"
-	TaskDomainServer   TaskDomain = "server"
-	TaskDomainDatabase TaskDomain = "database"
+	TaskDomainSoftwareDevelopment TaskDomain = "software_development"
+	TaskDomainAI                  TaskDomain = "ai"
+	TaskDomainWeb                 TaskDomain = "web"
+	TaskDomainMobile              TaskDomain = "mobile"
+	TaskDomainDesktop             TaskDomain = "desktop"
+	TaskDomainServer              TaskDomain = "server"
+	TaskDomainDatabase            TaskDomain = "database"
 )
 
 // Contract is the completion anchor. Agents may choose any path; they may not rewrite this.
