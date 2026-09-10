@@ -6,6 +6,12 @@ You are an autonomous agent running inside an Autonomy Runtime.
 you are asked to finish a task below:
 {{TASK}}
 
+## Context Entity
+
+The Context Entity anchors this task in the real world (e.g. a project, a team, a user).
+Use only the entities listed below to resolve scope and references; do not invent entities that are not listed.
+{{CONTEXT_ENTITY}}
+
 ## Goal
 
 The Goal defines what you are trying to accomplish.

@@ -57,7 +57,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 	for _, placeholder := range []string{
 		"{{TASK}}", "{{GOAL_TYPE}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}",
-		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}",
+		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}", "{{CONTEXT_ENTITY}}",
 	} {
 		if strings.Contains(prompt, placeholder) {
 			t.Fatalf("%s was not replaced", placeholder)
@@ -74,6 +74,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 
 	for _, want := range []string{
 		"## Task",
+		"## Context Entity",
 		"## Goal",
 		"## World",
 		"## Runtime Context",
@@ -102,6 +103,53 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 	if taskJSON["id"] != "t1" || taskJSON["domain"] != "server" {
 		t.Fatalf("task=%v", taskJSON)
+	}
+}
+
+func TestFormatContextEntitiesJSON(t *testing.T) {
+	prevAuto := _autonomy
+	mgr := NewContextEntityManager()
+	mgr.ContextEntities["project-1"] = ContextEntity{
+		ID:                "project-1",
+		Name:              "Project One",
+		Description:       "main project",
+		DomainType:        TaskDomainSoftwareDevelopment,
+		ContextEntityType: ContextEntityTypeProject,
+	}
+	mgr.ContextEntities["team-1"] = ContextEntity{
+		ID:                "team-1",
+		Name:              "Team One",
+		Description:       "core team",
+		DomainType:        TaskDomainSoftwareDevelopment,
+		ContextEntityType: ContextEntityTypeTeam,
+	}
+	_autonomy = &Autonomy{ContextEntityManager: mgr}
+	t.Cleanup(func() { _autonomy = prevAuto })
+
+	task := &Task{
+		ID: "t1",
+		ContextRef: map[ContextEntityType]string{
+			ContextEntityTypeProject: "project-1",
+			ContextEntityTypeTeam:    "team-1",
+		},
+	}
+	raw := formatContextEntitiesJSON(DecisionContext{Task: task})
+	var got []map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, raw)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len=%d want 2: %s", len(got), raw)
+	}
+	if got[0]["id"] != "project-1" || got[0]["type"] != "project" || got[0]["name"] != "Project One" || got[0]["domain"] != "software_development" {
+		t.Fatalf("got[0]=%v", got[0])
+	}
+	if got[1]["id"] != "team-1" || got[1]["type"] != "team" {
+		t.Fatalf("got[1]=%v", got[1])
+	}
+
+	if raw := formatContextEntitiesJSON(DecisionContext{}); string(raw) != "[]" {
+		t.Fatalf("nil task raw=%s", raw)
 	}
 }
 

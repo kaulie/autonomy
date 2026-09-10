@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -22,6 +23,7 @@ func policyPlaceholders(ctx DecisionContext, input ReasoningInput) map[string]st
 	}
 	return map[string]string{
 		"{{TASK}}":                  fencedJSON(formatTaskJSON(ctx.Task)),
+		"{{CONTEXT_ENTITY}}":        fencedJSON(formatContextEntitiesJSON(ctx)),
 		"{{GOAL_TYPE}}":             string(goalType),
 		"{{WORLD}}":                 fencedJSON(formatWorldJSON(ctx)),
 		"{{RUNTIME_CONTEXT}}":       fencedJSON(formatRuntimeContextJSON(ctx, input)),
@@ -152,6 +154,32 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 	return mustJSON(map[string]any{
 		"assets": assets,
 	})
+}
+
+func formatContextEntitiesJSON(ctx DecisionContext) []byte {
+	type contextEntityJSON struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+		Domain      string `json:"domain"`
+	}
+	entries := []contextEntityJSON{}
+	if ctx.Task != nil && ctx.Task.ContextRef != nil {
+		for ctype, id := range ctx.Task.ContextRef {
+			entry := contextEntityJSON{ID: id, Type: string(ctype)}
+			if _autonomy != nil && _autonomy.ContextEntityManager != nil {
+				if e, ok := _autonomy.ContextEntityManager.ContextEntities[id]; ok {
+					entry.Name = e.Name
+					entry.Description = e.Description
+					entry.Domain = string(e.DomainType)
+				}
+			}
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	return mustJSON(entries)
 }
 
 type agentDecisionJSON struct {
