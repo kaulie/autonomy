@@ -42,10 +42,10 @@ func TestRegisterDefaultsIncludesAssetChange(t *testing.T) {
 		t.Fatalf("GetAll=%v", all)
 	}
 	got := f.FormatConstructs()
-	if !strings.Contains(got, "asset.change [provider=autonomy]") {
+	if !strings.Contains(got, `"name": "asset.change"`) {
 		t.Fatalf("constructs=%q", got)
 	}
-	if !strings.Contains(got, "code_edit [provider=cursor]") {
+	if !strings.Contains(got, `"name": "code_edit"`) {
 		t.Fatalf("expected code_edit in constructs: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})

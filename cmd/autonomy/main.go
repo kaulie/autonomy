@@ -86,6 +86,7 @@ func main() {
 		ID:          "task-1",
 		Description: "Develop a new feature",
 		Status:      "pending",
+		GoalType:    autonomy.GoalType_FEATURE,
 		Contract:    autonomy.Contract{ExpectedState: "changed"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),

@@ -3,8 +3,7 @@
 package capability
 
 import (
-	"fmt"
-	"strings"
+	"encoding/json"
 )
 
 // Capability is a named thing the system can do to or with the world.
@@ -61,14 +60,30 @@ func (f *Factory) Has(name string) bool {
 	return ok
 }
 
-// FormatConstructs renders registered capabilities for AGENT_V2 {{CONSTRUCTS}}.
+// FormatConstructs renders registered capabilities for AGENT_V2 {{CONSTRUCTS}}
+// as a JSON array.
 func (f *Factory) FormatConstructs() string {
 	if f == nil || len(f.capabilities) == 0 {
-		return "(none)"
+		return "[]"
 	}
-	var b strings.Builder
+	type constructJSON struct {
+		Name        string `json:"name"`
+		Domain      string `json:"domain"`
+		Provider    string `json:"provider"`
+		Description string `json:"description"`
+	}
+	out := make([]constructJSON, 0, len(f.capabilities))
 	for _, c := range f.capabilities {
-		fmt.Fprintf(&b, "- %s [provider=%s]: %s\n", c.Name(), c.Provider(), c.Description())
+		out = append(out, constructJSON{
+			Name:        c.Name(),
+			Domain:      c.Domain(),
+			Provider:    c.Provider(),
+			Description: c.Description(),
+		})
 	}
-	return strings.TrimSpace(b.String())
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }

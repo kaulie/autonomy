@@ -34,13 +34,15 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	task := &Task{
 		ID: "t1", Goal: "g", Description: "d", Target: "1",
 		Domain:   TaskDomainServer,
+		GoalType: GoalType_FEATURE,
 		Contract: Contract{ExpectedState: "changed"}, Status: "pending",
 	}
 	agent := &Agent{
 		ID: 10001, Name: "agent-10001", Lifecycle: AgentLifecycleEphemeral,
 		Backend: AgentBackendCursor, Workspace: "/tmp/ws/",
 	}
-	prompt, err := buildReasoningPrompt(DecisionContext{Task: task, Agent: agent, Step: 2}, ReasoningInput{Text: "extra"})
+	ctx := DecisionContext{Task: task, Agent: agent, Step: 2}
+	prompt, err := buildReasoningPrompt(ctx, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,54 +51,60 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filledPolicy := applyPolicyPlaceholders(raw, policyPlaceholders())
+	filledPolicy := applyPolicyPlaceholders(raw, policyPlaceholders(ctx, ReasoningInput{Text: "extra"}))
 	if !strings.HasPrefix(prompt, filledPolicy) {
 		t.Fatalf("prompt must start with full AGENT_V2.md (placeholders only)")
 	}
-	if strings.Contains(prompt, "{{CONSTRUCTS}}") {
-		t.Fatal("{{CONSTRUCTS}} was not replaced")
+	for _, placeholder := range []string{
+		"{{TASK}}", "{{GOAL_TYPE}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}",
+		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}",
+	} {
+		if strings.Contains(prompt, placeholder) {
+			t.Fatalf("%s was not replaced", placeholder)
+		}
 	}
-	if strings.Contains(prompt, "Respond with a single JSON object only") {
-		t.Fatal("must not append extra output instructions beyond AGENT_V2.md")
-	}
-	if strings.Contains(prompt, "task_id: t1") || strings.Contains(prompt, "## Current Goal") {
-		t.Fatal("legacy bullet Goal/World appendix must not appear")
+	for _, legacy := range []string{
+		"### Agent", "### Goal", "### World", "### Additional Input",
+		"task_id: t1", "## Current Goal",
+	} {
+		if strings.Contains(prompt, legacy) {
+			t.Fatalf("legacy appendix marker %q must not appear", legacy)
+		}
 	}
 
 	for _, want := range []string{
-		"## Constructs",
-		"asset.change",
-		"mutate the task target asset",
-		`"type": "plan | done | blocked | need_input"`,
+		"## Task",
+		"## Goal",
+		"## World",
 		"## Runtime Context",
-		"### Agent",
-		"### Goal",
-		"### World",
-		"### Additional Input",
-		`"completion_contract"`,
+		"## Constructs",
+		`"id": "t1"`,
+		`"goal": "g"`,
+		`"target_asset_id": "1"`,
 		`"focus_target_id"`,
 		`"assets"`,
-		`"expected_state"`,
 		`"agent-10001"`,
+		`"dev_feature"`,
+		`"additional_input"`,
 		`"text": "extra"`,
+		`"name": "asset.change"`,
+		`"name": "code_edit"`,
+		`"completion_contracts"`,
+		`"steps": []`,
+		`"type": "plan | done | blocked | need_input"`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n%s", want, prompt)
 		}
 	}
 
-	goalRaw := extractFencedJSON(prompt, "### Goal")
-	var goal map[string]any
-	if err := json.Unmarshal([]byte(goalRaw), &goal); err != nil {
-		t.Fatalf("goal json: %v\n%s", err, goalRaw)
+	taskRaw := extractFencedJSON(prompt, "## Task")
+	var taskJSON map[string]any
+	if err := json.Unmarshal([]byte(taskRaw), &taskJSON); err != nil {
+		t.Fatalf("task json: %v\n%s", err, taskRaw)
 	}
-	taskObj, _ := goal["task"].(map[string]any)
-	if taskObj["id"] != "t1" || taskObj["domain"] != "server" {
-		t.Fatalf("goal.task=%v", taskObj)
-	}
-	contract, _ := goal["completion_contract"].(map[string]any)
-	if contract["expected_state"] != "changed" {
-		t.Fatalf("contract=%v", contract)
+	if taskJSON["id"] != "t1" || taskJSON["domain"] != "server" || taskJSON["goal"] != "g" {
+		t.Fatalf("task=%v", taskJSON)
 	}
 }
 
@@ -205,7 +213,12 @@ func TestNormalizeReasonOutput(t *testing.T) {
 }
 
 func TestParseDecisionJSON(t *testing.T) {
-	t.Parallel()
+	prevAuto := _autonomy
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f}
+	t.Cleanup(func() { _autonomy = prevAuto })
+
 	cases := []struct {
 		name   string
 		text   string
@@ -215,15 +228,27 @@ func TestParseDecisionJSON(t *testing.T) {
 	}{
 		{
 			name:   "plan change",
-			text:   `{"type":"plan","reason":"mutate target","plan":[{"capability":"asset.change","input":{"target":"1"}}],"need":{}}`,
+			text:   `{"type":"plan","reason":"mutate target","plan":{"steps":[{"capability":"asset.change","input":{"target":"1"}}]},"need":{}}`,
 			noop:   false,
 			reason: "mutate target",
 		},
 		{
 			name:   "plan fenced",
-			text:   "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":[{\"capability\":\"change\",\"input\":{}}],\"need\":{}}\n```",
+			text:   "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":{\"steps\":[{\"capability\":\"asset.change\",\"input\":{}}]},\"need\":{}}\n```",
 			noop:   false,
 			reason: "go",
+		},
+		{
+			name:   "plan legacy array",
+			text:   `{"type":"plan","reason":"legacy","plan":[{"capability":"asset.change","input":{}}],"need":{}}`,
+			noop:   false,
+			reason: "legacy",
+		},
+		{
+			name:   "plan unknown capability",
+			text:   `{"type":"plan","reason":"unknown","plan":{"steps":[{"capability":"change","input":{}}]},"need":{}}`,
+			noop:   true,
+			reason: "unknown",
 		},
 		{
 			name:   "done",
@@ -246,7 +271,6 @@ func TestParseDecisionJSON(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			reason, action, err := parseDecision(tc.text)
 			if tc.err {
 				if err == nil {
