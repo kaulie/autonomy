@@ -206,11 +206,16 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 		Type        string `json:"type"`
 		Domain      string `json:"domain"`
 	}
+	type repoJSON struct {
+		URL        string `json:"url"`
+		MainBranch string `json:"main_branch"`
+	}
 	type entityJSON struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Type        string `json:"type"`
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		Description string    `json:"description"`
+		Type        string    `json:"type"`
+		Repository  *repoJSON `json:"repository,omitempty"`
 	}
 	type assetJSON struct {
 		ID    string `json:"id"`
@@ -257,12 +262,19 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 						for _, entityID := range cc.EntityReferences {
 							if de, found := _autonomy.DomainEntityManager.DomainEntities[entityID]; found {
 								meta := de.Entity()
-								entry.Entities = append(entry.Entities, entityJSON{
+								out := entityJSON{
 									ID:          meta.ID,
 									Name:        meta.Name,
 									Description: meta.Description,
 									Type:        de.Type(),
-								})
+								}
+								switch src := de.(type) {
+								case SourceCodeEntity:
+									out.Repository = &repoJSON{URL: src.Repository.URL, MainBranch: src.Repository.MainBranch}
+								case *SourceCodeEntity:
+									out.Repository = &repoJSON{URL: src.Repository.URL, MainBranch: src.Repository.MainBranch}
+								}
+								entry.Entities = append(entry.Entities, out)
 							}
 						}
 					}

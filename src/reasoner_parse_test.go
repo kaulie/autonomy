@@ -211,7 +211,8 @@ func TestFormatRuntimeContextJSONIncludesContextContainers(t *testing.T) {
 
 	dem := NewDomainEntityManager()
 	dem.DomainEntities["src-1"] = SourceCodeEntity{
-		Meta: Entity{ID: "src-1", Name: "source code", Description: "autonomy repo"},
+		Meta:       Entity{ID: "src-1", Name: "source code", Description: "autonomy repo"},
+		Repository: Repository{URL: "https://github.com/kaulie/autonomy", MainBranch: "main"},
 	}
 
 	am := NewAssetManager()
@@ -254,6 +255,11 @@ func TestFormatRuntimeContextJSONIncludesContextContainers(t *testing.T) {
 	es := first["entities"].([]any)
 	if len(es) != 1 || es[0].(map[string]any)["id"] != "src-1" {
 		t.Fatalf("entities=%v", first["entities"])
+	}
+	ent := es[0].(map[string]any)
+	repo := ent["repository"].(map[string]any)
+	if repo["url"] != "https://github.com/kaulie/autonomy" || repo["main_branch"] != "main" {
+		t.Fatalf("repository=%v", repo)
 	}
 	as := first["assets"].([]any)
 	if len(as) != 1 || as[0].(map[string]any)["id"] != "asset-1" {
