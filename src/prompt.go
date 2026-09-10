@@ -148,6 +148,7 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 	if text := strings.TrimSpace(input.Text); text != "" {
 		m["additional_input"] = map[string]string{"text": text}
 	}
+	m["context"] = json.RawMessage(formatRuntimeContextContainersJSON(ctx))
 	return mustJSON(m)
 }
 
@@ -183,11 +184,99 @@ func formatContextEntitiesJSON(ctx DecisionContext) []byte {
 				continue
 			}
 			entry := contextEntityJSON{ID: id, Type: string(ctype)}
-			if _autonomy != nil && _autonomy.ContextEntityManager != nil {
-				if e, ok := _autonomy.ContextEntityManager.ContextEntities[id]; ok {
-					entry.Name = e.Name
-					entry.Description = e.Description
-					entry.Domain = string(e.DomainType)
+			if _autonomy != nil && _autonomy.ContextContainerManager != nil {
+				if c, ok := _autonomy.ContextContainerManager.ContextContainers[id]; ok {
+					entry.Name = c.Name
+					entry.Description = c.Description
+					entry.Domain = string(c.DomainType)
+				}
+			}
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	return mustJSON(entries)
+}
+
+func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
+	type contextEntityJSON struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+		Domain      string `json:"domain"`
+	}
+	type entityJSON struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+	}
+	type assetJSON struct {
+		ID    string `json:"id"`
+		Kind  string `json:"kind"`
+		State string `json:"state"`
+	}
+	type containerJSON struct {
+		ID              string              `json:"id"`
+		Type            string              `json:"type"`
+		ContextEntities []contextEntityJSON `json:"context_entities"`
+		Entities        []entityJSON        `json:"entities"`
+		Assets          []assetJSON         `json:"assets"`
+	}
+
+	entries := []containerJSON{}
+	if ctx.Task != nil {
+		for ctype, id := range ctx.Task.ContextRef {
+			if id == "" {
+				continue
+			}
+			entry := containerJSON{
+				ID:              id,
+				Type:            string(ctype),
+				ContextEntities: []contextEntityJSON{},
+				Entities:        []entityJSON{},
+				Assets:          []assetJSON{},
+			}
+			if _autonomy != nil && _autonomy.ContextContainerManager != nil {
+				if cc, ok := _autonomy.ContextContainerManager.ContextContainers[id]; ok {
+					if _autonomy.ContextEntityManager != nil {
+						for _, ctxID := range cc.ContextReferences {
+							if e, found := _autonomy.ContextEntityManager.ContextEntities[ctxID]; found {
+								entry.ContextEntities = append(entry.ContextEntities, contextEntityJSON{
+									ID:          e.ID,
+									Name:        e.Name,
+									Description: e.Description,
+									Type:        string(e.ContextContainerType),
+									Domain:      string(e.DomainType),
+								})
+							}
+						}
+					}
+					if _autonomy.DomainEntityManager != nil {
+						for _, entityID := range cc.EntityReferences {
+							if de, found := _autonomy.DomainEntityManager.DomainEntities[entityID]; found {
+								meta := de.Entity()
+								entry.Entities = append(entry.Entities, entityJSON{
+									ID:          meta.ID,
+									Name:        meta.Name,
+									Description: meta.Description,
+									Type:        de.Type(),
+								})
+							}
+						}
+					}
+					if _world != nil && _world.assetManager != nil {
+						for _, assetID := range cc.AssetReferences {
+							if a, err := _world.assetManager.Get(assetID); err == nil {
+								entry.Assets = append(entry.Assets, assetJSON{
+									ID:    a.ID,
+									Kind:  a.Kind,
+									State: a.State,
+								})
+							}
+						}
+					}
 				}
 			}
 			entries = append(entries, entry)

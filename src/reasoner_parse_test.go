@@ -184,6 +184,102 @@ func TestFormatTaskJSONIncludesContextRef(t *testing.T) {
 	}
 }
 
+func TestFormatRuntimeContextJSONIncludesContextContainers(t *testing.T) {
+	prevAuto := _autonomy
+	prevWorld := _world
+
+	ccMgr := NewContextContainerManager()
+	ccMgr.ContextContainers["project-1"] = ContextContainer{
+		ID:                   "project-1",
+		Name:                 "Project One",
+		Description:          "main project",
+		DomainType:           TaskDomainSoftwareDevelopment,
+		ContextContainerType: ContextContainerTypeProject,
+		ContextReferences:    []string{"ctx-1"},
+		EntityReferences:     []string{"src-1"},
+		AssetReferences:      []string{"asset-1"},
+	}
+
+	ceMgr := NewContextEntityManager()
+	ceMgr.ContextEntities["ctx-1"] = ContextEntity{
+		ID:                   "ctx-1",
+		Name:                 "Repo Context",
+		Description:          "context for repo",
+		DomainType:           TaskDomainSoftwareDevelopment,
+		ContextContainerType: ContextContainerTypeProject,
+	}
+
+	dem := NewDomainEntityManager()
+	dem.DomainEntities["src-1"] = SourceCodeEntity{
+		Meta: Entity{ID: "src-1", Name: "source code", Description: "autonomy repo"},
+	}
+
+	am := NewAssetManager()
+	am.Set("asset-1", Asset{ID: "asset-1", Kind: "repo", State: "healthy"})
+
+	_autonomy = &Autonomy{
+		ContextContainerManager: ccMgr,
+		ContextEntityManager:    ceMgr,
+		DomainEntityManager:     dem,
+	}
+	_world = &World{assetManager: am}
+	t.Cleanup(func() {
+		_autonomy = prevAuto
+		_world = prevWorld
+	})
+
+	task := &Task{
+		ID: "t1",
+		ContextRef: map[ContextContainerType]string{
+			ContextContainerTypeProject: "project-1",
+		},
+	}
+	raw := formatRuntimeContextJSON(DecisionContext{Task: task}, ReasoningInput{})
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v :: %s", err, raw)
+	}
+	ctx, ok := got["context"].([]any)
+	if !ok || len(ctx) != 1 {
+		t.Fatalf("context=%v raw=%s", got["context"], raw)
+	}
+	first := ctx[0].(map[string]any)
+	if first["id"] != "project-1" || first["type"] != "project" {
+		t.Fatalf("first=%v", first)
+	}
+	ces := first["context_entities"].([]any)
+	if len(ces) != 1 || ces[0].(map[string]any)["id"] != "ctx-1" {
+		t.Fatalf("context_entities=%v", first["context_entities"])
+	}
+	es := first["entities"].([]any)
+	if len(es) != 1 || es[0].(map[string]any)["id"] != "src-1" {
+		t.Fatalf("entities=%v", first["entities"])
+	}
+	as := first["assets"].([]any)
+	if len(as) != 1 || as[0].(map[string]any)["id"] != "asset-1" {
+		t.Fatalf("assets=%v", first["assets"])
+	}
+}
+
+func TestBindEntityToContextContainerPersists(t *testing.T) {
+	prevAuto := _autonomy
+	mgr := NewContextContainerManager()
+	_autonomy = &Autonomy{ContextContainerManager: mgr}
+	t.Cleanup(func() { _autonomy = prevAuto })
+
+	container := ContextContainer{ID: "project-1", ContextContainerType: ContextContainerTypeProject}
+	if err := RegisterContextContainer(container); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindEntityToContextContainer(Entity{ID: "src-1"}, container); err != nil {
+		t.Fatal(err)
+	}
+	got := mgr.ContextContainers["project-1"]
+	if len(got.EntityReferences) != 1 || got.EntityReferences[0] != "src-1" {
+		t.Fatalf("EntityReferences=%v", got.EntityReferences)
+	}
+}
+
 func extractFencedJSON(prompt, heading string) string {
 	i := strings.Index(prompt, heading)
 	if i < 0 {
