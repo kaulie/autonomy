@@ -333,6 +333,30 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	}
 }
 
+func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	_store = store
+	t.Cleanup(func() { _store = prev })
+
+	agent := &Agent{ID: 9, Backend: AgentBackendCursor, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+	recordReasonIO(DecisionContext{Agent: agent, Task: &Task{ID: "t-cursor"}, Step: 1}, "in", "out")
+
+	var mode string
+	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, 9).Scan(&mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != string(ReasonModePlan) {
+		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
+	}
+}
+
 func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	store, err := OpenSQLiteStore(path)

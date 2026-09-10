@@ -131,18 +131,15 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 func recordReasonIO(ctx DecisionContext, input, output string) {
 	var agent *Agent
 	var taskID string
-	mode := ReasonModePlan
 	if ctx.Agent != nil {
 		agent = ctx.Agent
-		if ctx.Agent.Backend == AgentBackendCursor {
-			// Cursor runs currently use the SDK's standard agent mode.
-			mode = ReasonModeAgent
-		}
 	}
 	if ctx.Task != nil {
 		taskID = ctx.Task.ID
 	}
-	recordReasonTurn(agent, taskID, ctx.Step, mode, input, output)
+	// Top-level decisions always run in plan mode; only runtime capability
+	// prompts (recordAgentPrompt) run in agent mode.
+	recordReasonTurn(agent, taskID, ctx.Step, ReasonModePlan, input, output)
 }
 
 func llmTimeout() time.Duration {
