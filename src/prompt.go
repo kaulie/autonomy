@@ -144,15 +144,9 @@ func parseDecision(text string) (string, Action, error) {
 			switch capName {
 			case "noop", "nothing", "none", "":
 				continue
-			case "change":
-				capName = "asset.change"
 			}
 			if f := activeCapabilityFactory(); f != nil && f.Has(capName) {
 				return reason, CapabilityAction{Name: capName, Input: planInputMap(step.Input)}, nil
-			}
-			// Backward-compatible demo path when factory not wired (unit tests).
-			if capName == "asset.change" {
-				return reason, SimpleAction{}, nil
 			}
 			return reason, NothingAction{}, nil
 		}

@@ -8,7 +8,13 @@ import (
 )
 
 type Autonomy struct {
-	AgentFactory      *AgentFactory
+	AgentFactory *AgentFactory
+	// used to manage context entities registration
+	ContextEntityManager *ContextEntityManager
+	// used to manage domain entities registration
+	DomainEntityManager *DomainEntityManager
+	// used to manage context references for a task
+	TaskCtxManager    *TaskCtxManager
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	Varifier          *Verifier
@@ -21,6 +27,13 @@ var bootstrapFlag bool
 var _autonomy *Autonomy
 
 const DefaultMaxSteps = 2
+
+func GetAutonomy() *Autonomy {
+	if _autonomy == nil {
+		panic("Autonomy not initialized")
+	}
+	return _autonomy
+}
 
 func BootstrapAutonomy() (*Autonomy, error) {
 	if bootstrapFlag {
@@ -54,6 +67,16 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		MaxSteps:          DefaultMaxSteps,
 	}
 	_autonomy.SetWorld(world)
+
+	contextEntityManager := NewContextEntityManager()
+	_autonomy.ContextEntityManager = contextEntityManager
+
+	domainEntityManager := NewDomainEntityManager()
+	_autonomy.DomainEntityManager = domainEntityManager
+
+	TaskCtxManager := NewTaskCtxManager()
+	_autonomy.TaskCtxManager = TaskCtxManager
+
 	bootstrapFlag = true
 	return _autonomy, nil
 }
