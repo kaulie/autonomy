@@ -15,7 +15,7 @@ func NewVerifier() *Verifier {
 // type StateVerifier struct{}
 
 func (v *Verifier) Verify(task *Task, world *World) bool {
-	fmt.Println("Verifier: Verify: ", task.Target, ", ", task.Contract.ExpectedState)
+	fmt.Println("Verifier: Verify: task: ", task.ID, ", target: ", task.Target, ", expected state: ", task.Contract.ExpectedState)
 	asset, err := world.assetManager.Get(task.Target)
 	fmt.Println("Verifier: Asset: ", asset.State)
 	if err != nil {

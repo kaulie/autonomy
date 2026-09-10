@@ -1,6 +1,9 @@
 package autonomy
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Task is the work contract: what to achieve and how completion is judged.
 // It defines goal, not path.
@@ -31,6 +34,25 @@ const (
 	TaskDomainDatabase            TaskDomain = "database"
 )
 
+func ConvertToTaskDomain(externalDomain string) (TaskDomain, error) {
+	switch externalDomain {
+	case "software_development":
+		return TaskDomainSoftwareDevelopment, nil
+	case "ai":
+		return TaskDomainAI, nil
+	case "web":
+		return TaskDomainWeb, nil
+	case "mobile":
+		return TaskDomainMobile, nil
+	case "desktop":
+		return TaskDomainDesktop, nil
+	case "server":
+		return TaskDomainServer, nil
+	default:
+		return TaskDomainSoftwareDevelopment, fmt.Errorf("invalid external domain: %s", externalDomain)
+	}
+}
+
 // Contract is the completion anchor. Agents may choose any path; they may not rewrite this.
 type Contract struct {
 	ExpectedState string
@@ -42,3 +64,13 @@ type TaskResult struct {
 	Err     error
 	History []Result
 }
+
+type TaskType string
+
+const (
+	TaskTypeIssue   TaskType = "issue"
+	TaskTypeFeature TaskType = "feature"
+	TaskTypeDebug   TaskType = "debug"
+	TaskTypeStory   TaskType = "story"
+	TaskTypeTest    TaskType = "test"
+)
