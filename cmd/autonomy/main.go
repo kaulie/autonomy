@@ -8,24 +8,43 @@ import (
 	autonomy "github.com/kaulie/autonomy/src"
 )
 
-func convertToContextEntity(entity ExternalEntity) autonomy.ContextEntity {
-	return autonomy.ContextEntity{
-		ID:          entity.ID,
-		Name:        entity.Name,
-		Description: entity.Description,
-		CreatedAt:   entity.CreatedAt,
-		UpdatedAt:   entity.UpdatedAt,
+func convertToContextEntity(entity ExternalEntity) (autonomy.ContextEntity, error) {
+	var err error
+	var domainType autonomy.TaskDomain
+	var contextEntityType autonomy.ContextEntityType
+
+	domainType, err = autonomy.ConvertToTaskDomain(entity.EntityDomain)
+	if err != nil {
+		return autonomy.ContextEntity{}, err
 	}
+	contextEntityType, err = autonomy.ConvertToContextEntityType(entity.EntityType)
+	if err != nil {
+		return autonomy.ContextEntity{}, err
+	}
+
+	return autonomy.ContextEntity{
+		ID:                entity.ID,
+		Name:              entity.Name,
+		Description:       entity.Description,
+		CreatedAt:         entity.CreatedAt,
+		UpdatedAt:         entity.UpdatedAt,
+		DomainType:        domainType,
+		ContextEntityType: contextEntityType,
+	}, nil
 }
 
 func main() {
-	a, err := autonomy.BootstrapAutonomy()
+
+	var err error
+	var _autonomy *autonomy.Autonomy
+
+	_autonomy, err = autonomy.BootstrapAutonomy()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := a.Close(); err != nil {
+		if err := _autonomy.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
@@ -39,7 +58,7 @@ func main() {
 		UpdatedAt:   time.Now(),
 	}
 
-	projectContextEntity := convertToContextEntity(projectExternalEntity)
+	projectContextEntity, err := convertToContextEntity(projectExternalEntity)
 
 	err = autonomy.RegisterContextEntity(projectContextEntity)
 	if err != nil {
@@ -75,7 +94,7 @@ func main() {
 		},
 	}
 
-	err = a.Run(task)
+	err = _autonomy.Run(task)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

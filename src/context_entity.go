@@ -1,6 +1,9 @@
 package autonomy
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // ContextEntity is a entity that is used to anchor/mount the context of the task in a real world context, which is
 // essential for the agent to understand the task and the real world context.
@@ -29,4 +32,15 @@ type ContextDomainMapping struct {
 	ContextEntityID  int
 	DomainEntityID   int
 	DomainEntityType DomainEntityType
+}
+
+func ConvertToContextEntityType(externalEntityType string) (ContextEntityType, error) {
+	switch externalEntityType {
+	case "project":
+		return ContextEntityTypeProject, nil
+	case "team":
+		return ContextEntityTypeTeam, nil
+	default:
+		return ContextEntityTypeProject, fmt.Errorf("invalid external entity type: %s", externalEntityType)
+	}
 }

@@ -31,3 +31,8 @@ func RegisterDomainEntity(entity DomainEntity) error {
 	GetAutonomy().DomainEntityManager.DomainEntities[entity.Entity().ID] = entity
 	return nil
 }
+
+func BindTaskCtxRef(taskID string, contextEntityID string) error {
+	GetAutonomy().TaskCtxManager.AddTaskCtxRef(taskID, contextEntityID)
+	return nil
+}

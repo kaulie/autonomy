@@ -117,19 +117,21 @@ func (r *Autonomy) Run(task *Task) error {
 	persistAgent(agent)
 
 	steps := 0
-
+	var err error
+	var decision Decision
+	var result Result
 	for r.ShouldContinue(agent) {
 		steps++
 		if steps > r.MaxSteps {
 			break
 		}
-		decision, err := agent.DecideAtStep(steps)
+		decision, err = agent.DecideAtStep(steps)
 		if err != nil {
 			task.Status = "error"
 			persistTask(task)
 			return fmt.Errorf("decide: %w", err)
 		}
-		result, err := r.Runtime.Execute(decision)
+		result, err = r.Runtime.Execute(decision)
 		if err != nil {
 			task.Status = "error"
 			persistTask(task)
@@ -142,16 +144,18 @@ func (r *Autonomy) Run(task *Task) error {
 			task.Status = "done"
 			persistTask(task)
 			break
+		} else {
+			fmt.Printf("Task not verified\n")
 		}
 	}
 
-	ret, err := agent.Result()
-	fmt.Printf("Agent result: %v, error: %v\n", ret, err)
+	// ret, err := agent.Result()
+	// fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 	if task.Status == "running" || task.Status == "pending" {
 		if err != nil {
 			task.Status = "error"
 		} else {
-			task.Status = "completed"
+			task.Status = "completed" //completed not means success, it means the task is completed
 		}
 		persistTask(task)
 	}
