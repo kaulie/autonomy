@@ -47,12 +47,8 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 		if in["task_id"] == "" && ctx.Task.ID != "" {
 			in["task_id"] = ctx.Task.ID
 		}
-		if in["instruction"] == "" && in["goal"] == "" {
-			if ctx.Task.Goal != "" {
-				in["goal"] = ctx.Task.Goal
-			} else if ctx.Task.Description != "" {
-				in["instruction"] = ctx.Task.Description
-			}
+		if in["instruction"] == "" && in["goal"] == "" && ctx.Task.Description != "" {
+			in["instruction"] = ctx.Task.Description
 		}
 	}
 	out, err := cap.Run(in)

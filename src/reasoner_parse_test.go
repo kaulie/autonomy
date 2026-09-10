@@ -32,7 +32,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	})
 
 	task := &Task{
-		ID: "t1", Goal: "g", Description: "d",
+		ID: "t1", Description: "d",
 		Domain:   TaskDomainServer,
 		GoalType: GoalType_FEATURE,
 		Status:   "pending",
@@ -79,7 +79,6 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		"## Runtime Context",
 		"## Constructs",
 		`"id": "t1"`,
-		`"goal": "g"`,
 		`"assets"`,
 		`"agent-10001"`,
 		`"dev_feature"`,
@@ -101,7 +100,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	if err := json.Unmarshal([]byte(taskRaw), &taskJSON); err != nil {
 		t.Fatalf("task json: %v\n%s", err, taskRaw)
 	}
-	if taskJSON["id"] != "t1" || taskJSON["domain"] != "server" || taskJSON["goal"] != "g" {
+	if taskJSON["id"] != "t1" || taskJSON["domain"] != "server" {
 		t.Fatalf("task=%v", taskJSON)
 	}
 }

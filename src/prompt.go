@@ -123,7 +123,6 @@ func formatTaskJSON(task *Task) []byte {
 		"description": task.Description,
 		"status":      task.Status,
 		"context":     task.Context,
-		"goal":        task.Goal,
 		"goal_type":   string(task.GoalType),
 	})
 }
