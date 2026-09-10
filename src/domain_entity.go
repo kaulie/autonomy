@@ -44,17 +44,20 @@ type Repository struct {
 	MainBranch string `json:"main_branch"`
 }
 
-func BindEntityToContextContainer(entity Entity, contextEntity ContextContainer) error {
-	contextEntity.EntityReferences = append(contextEntity.EntityReferences, entity.ID)
-	return nil
+func BindEntityToContextContainer(entity Entity, contextContainer ContextContainer) error {
+	return updateContextContainer(contextContainer.ID, func(c *ContextContainer) {
+		c.EntityReferences = append(c.EntityReferences, entity.ID)
+	})
 }
 
-func BindAssetToContextContainer(asset Asset, contextEntity ContextContainer) error {
-	contextEntity.AssetReferences = append(contextEntity.AssetReferences, asset.ID)
-	return nil
+func BindAssetToContextContainer(asset Asset, contextContainer ContextContainer) error {
+	return updateContextContainer(contextContainer.ID, func(c *ContextContainer) {
+		c.AssetReferences = append(c.AssetReferences, asset.ID)
+	})
 }
 
 func BindContextToContextContainer(contextEntity ContextEntity, contextContainer ContextContainer) error {
-	contextContainer.ContextReferences = append(contextContainer.ContextReferences, contextEntity.ID)
-	return nil
+	return updateContextContainer(contextContainer.ID, func(c *ContextContainer) {
+		c.ContextReferences = append(c.ContextReferences, contextEntity.ID)
+	})
 }

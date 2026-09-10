@@ -1,5 +1,7 @@
 package autonomy
 
+import "fmt"
+
 type ContextContainerManager struct {
 	// project-001: context container
 	// team-001: context container
@@ -14,6 +16,16 @@ func NewContextContainerManager() *ContextContainerManager {
 		ContextContainers:       make(map[string]ContextContainer),
 		ContextContainersByType: make(map[ContextContainerType]map[string]ContextContainer),
 	}
+}
+
+func (m *ContextContainerManager) Upsert(container ContextContainer) {
+	m.ContextContainers[container.ID] = container
+	typeMap, ok := m.ContextContainersByType[container.ContextContainerType]
+	if !ok {
+		typeMap = make(map[string]ContextContainer)
+	}
+	typeMap[container.ID] = container
+	m.ContextContainersByType[container.ContextContainerType] = typeMap
 }
 
 // ContextEntityManager is a manager for the context entities
@@ -38,13 +50,21 @@ func NewDomainEntityManager() *DomainEntityManager {
 }
 
 func RegisterContextContainer(container ContextContainer) error {
-	GetAutonomy().ContextContainerManager.ContextContainers[container.ID] = container
-	typeMap, ok := GetAutonomy().ContextContainerManager.ContextContainersByType[container.ContextContainerType]
-	if !ok {
-		typeMap = make(map[string]ContextContainer)
+	GetAutonomy().ContextContainerManager.Upsert(container)
+	return nil
+}
+
+func updateContextContainer(id string, mutate func(*ContextContainer)) error {
+	mgr := GetAutonomy().ContextContainerManager
+	if mgr == nil {
+		return fmt.Errorf("context container manager not initialized")
 	}
-	typeMap[container.ID] = container
-	GetAutonomy().ContextContainerManager.ContextContainersByType[container.ContextContainerType] = typeMap
+	c, ok := mgr.ContextContainers[id]
+	if !ok {
+		return fmt.Errorf("context container not found: %s", id)
+	}
+	mutate(&c)
+	mgr.Upsert(c)
 	return nil
 }
 
