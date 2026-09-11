@@ -91,6 +91,18 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header（status/us
 - 事件按 `llmEventFlushSize`（默认 64）批量落库，`Finish` 时强制 flush。
 - 落库是 **best-effort**：失败只打 stderr，绝不让模型调用失败。没有 store 时 trace 是安全 no-op。
 
+### 开关：`AUTONOMY_LLM_EVENTS`
+
+控制**是否落库原始事件流**（`llm_events`）：
+
+| 取值 | 行为 |
+|------|------|
+| 未设置 / `1` / `true` / `on` / `yes` | **默认**：header + 全部原始事件都落库 |
+| `0` / `false` / `off` / `no` / `disable` / `disabled`（大小写不敏感） | 只写 `reason_turns` run header，跳过 `llm_events`（不缓冲、不写入） |
+
+关闭时 `reason_turns` 仍照常记录（它是一次 LLM 交互的既有记录，其它消费方依赖它），
+`event_count` 保持 0。开关在 `BeginLLMTrace` 时读取一次。
+
 代码位置：
 
 | 关注点 | 文件 |

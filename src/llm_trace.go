@@ -3,12 +3,27 @@ package autonomy
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
 // llmEventFlushSize bounds the number of buffered events before a best-effort
 // flush, so long streams do not insert one row at a time.
 const llmEventFlushSize = 64
+
+// llmEventStreamDisabledValues lists the AUTONOMY_LLM_EVENTS values that turn
+// off raw stream persistence. Anything else (including unset) keeps it on.
+var llmEventStreamDisabledValues = map[string]bool{
+	"0": true, "false": true, "off": true, "no": true, "disable": true, "disabled": true,
+}
+
+// llmEventStreamEnabled reports whether raw llm_events rows should be persisted.
+// Default is enabled; set AUTONOMY_LLM_EVENTS=0 (or false/off/no) to store only
+// the reason_turns run header and skip the stream.
+func llmEventStreamEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_EVENTS")))
+	return !llmEventStreamDisabledValues[v]
+}
 
 // LLMTrace records one LLM interaction. It opens a reason_turns row as the run
 // header, appends the provider's stream events to llm_events, then finalizes
@@ -25,12 +40,15 @@ type LLMTrace struct {
 	start  time.Time
 	buf    []LLMEvent
 	active bool
+	// events is false when AUTONOMY_LLM_EVENTS disables raw stream persistence;
+	// the run header is still recorded, only llm_events writes are skipped.
+	events bool
 }
 
 // BeginLLMTrace opens a run header for one LLM interaction. The returned trace
 // is always non-nil; call Emit for each stream event and Finish exactly once.
 func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input string) *LLMTrace {
-	t := &LLMTrace{store: activeStore(), start: time.Now()}
+	t := &LLMTrace{store: activeStore(), start: time.Now(), events: llmEventStreamEnabled()}
 	if t.store == nil {
 		return t
 	}
@@ -59,9 +77,10 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 }
 
 // Emit appends one stream event. Seq, CreatedAt and ElapsedMS are assigned here
-// so adapters only report what the provider actually sent.
+// so adapters only report what the provider actually sent. It is a no-op when
+// raw stream persistence is disabled (AUTONOMY_LLM_EVENTS).
 func (t *LLMTrace) Emit(ev LLMEvent) {
-	if t == nil || !t.active {
+	if t == nil || !t.active || !t.events {
 		return
 	}
 	ev.Seq = t.seq

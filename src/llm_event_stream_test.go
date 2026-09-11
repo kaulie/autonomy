@@ -218,3 +218,52 @@ func TestLLMTraceWithoutStoreIsNoop(t *testing.T) {
 	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant})
 	trace.Finish(LLMRunResult{Status: LLMStatusFinished})
 }
+
+func TestLLMEventStreamEnabledParsing(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "1": true, "true": true, "on": true, "yes": true,
+		"0": false, "false": false, "off": false, "no": false, "OFF": false, "disabled": false,
+	}
+	for value, want := range cases {
+		t.Setenv("AUTONOMY_LLM_EVENTS", value)
+		if got := llmEventStreamEnabled(); got != want {
+			t.Fatalf("AUTONOMY_LLM_EVENTS=%q enabled=%v, want %v", value, got, want)
+		}
+	}
+}
+
+func TestLLMTraceSkipsStreamWhenDisabled(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	_store = store
+	t.Cleanup(func() { _store = prev })
+	t.Setenv("AUTONOMY_LLM_EVENTS", "0")
+
+	agent := &Agent{ID: 88, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+	trace := BeginLLMTrace(agent, "task-d", 1, ReasonModePlan, "in")
+	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "x"})
+	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "y"})
+	trace.Finish(LLMRunResult{ProviderRunID: "run-x", Status: LLMStatusFinished, RawOutput: "done"})
+
+	var (
+		turnID int64
+		status string
+	)
+	if err := store.db.QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(LLMStatusFinished) {
+		t.Fatalf("status=%q, want %q (run header must still be written)", status, LLMStatusFinished)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("llm_events rows=%d, want 0 when AUTONOMY_LLM_EVENTS=0", count)
+	}
+}

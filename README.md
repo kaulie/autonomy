@@ -105,6 +105,8 @@ export AUTONOMY_LLM_MODEL=composer-2
 # disables proxy for loopback Bridge RPCs; unsetting proxy can make CreateAgent hang.
 # Stage timing logs go to stderr by default. AUTONOMY_LLM_DEBUG=0 silences SDK traces;
 # AUTONOMY_LLM_DEBUG=1 also dumps prompt body and assistant chunk sizes.
+# Optional: AUTONOMY_LLM_EVENTS=0 stores only the reason_turns run header and skips
+# the raw llm_events stream (default: store every provider event).
 go run ./cmd/autonomy
 ```
 
