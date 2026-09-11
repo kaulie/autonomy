@@ -74,3 +74,29 @@ func TestCodeEditUsesWorkspaceAndBroker(t *testing.T) {
 		t.Fatalf("meta name=%s domain=%s provider=%s", c.Name(), c.Domain(), c.Provider())
 	}
 }
+
+func TestCodeEditPromptDelegatesAutonomy(t *testing.T) {
+	t.Parallel()
+	sess := &mockSession{id: "agent-code_edit-2", summary: "done"}
+	c := sd.CodeEdit{Agents: &mockBroker{sess: sess}}
+	_, err := c.Run(map[string]string{
+		"workspace":   "/tmp/ws",
+		"instruction": "add hello endpoint",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"autonomous software engineer",
+		"Goal",
+		"add hello endpoint",
+		"understand the requirement",
+	} {
+		if !strings.Contains(sess.prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, sess.prompt)
+		}
+	}
+	if strings.Contains(sess.prompt, "Make only necessary changes") {
+		t.Fatalf("prompt still contains micromanaging instruction:\n%s", sess.prompt)
+	}
+}
