@@ -26,7 +26,7 @@ func (CodeEdit) Domain() string { return Domain }
 func (CodeEdit) Provider() string { return Provider }
 
 func (CodeEdit) Description() string {
-	return `edit code in the agent workspace to implement a feature. input: {"instruction":"<what to build>"} (or "goal"); optional "workspace"/"cwd" overrides Agent.Workspace`
+	return `autonomously implement a coding task in the agent workspace. input: {"instruction":"<goal or requirement>"} (or "goal"), "workspace" (or "cwd") required`
 }
 
 func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
@@ -55,15 +55,15 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	}
 	defer func() { _ = sess.Release(ctx) }()
 
-	prompt := fmt.Sprintf(`You are editing a software project at workspace:
+	prompt := fmt.Sprintf(`You are an autonomous software engineer working in this workspace:
+
 %s
 
-Implement the following feature by modifying the codebase as needed. Make only necessary changes. Prefer small, focused edits.
+Goal:
 
-Feature / instruction:
 %s
 
-When done, briefly summarize which files you changed and why.`, workspace, instruction)
+Own the task end-to-end: understand the requirement, explore the codebase, choose the implementation approach, make the changes, and verify your work. Treat the Goal as the objective rather than a step-by-step specification. When you are done, give a concise summary of what you changed and why.`, workspace, instruction)
 
 	summary, err := sess.Prompt(ctx, prompt)
 	if err != nil {
