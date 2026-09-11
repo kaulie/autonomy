@@ -18,6 +18,16 @@ type RunEvent struct {
 	Offset  string
 }
 
+// RunUsage is token usage for one run, as reported by the bridge.
+type RunUsage struct {
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	TotalTokens      int64
+}
+
 // RunResult is the terminal outcome of a run.
 type RunResult struct {
 	RunID        string
@@ -28,6 +38,7 @@ type RunResult struct {
 	DurationMS   int64
 	ErrorCode    string
 	ErrorMessage string
+	Usage        RunUsage
 }
 
 func (r RunResult) OK() bool { return r.Status == "finished" }
@@ -67,6 +78,15 @@ func (r *Run) Events(ctx context.Context) <-chan RunEvent {
 
 // Wait drains the stream to a terminal result.
 func (r *Run) Wait(ctx context.Context) (*RunResult, error) {
+	return r.WaitStream(ctx, nil)
+}
+
+// WaitStream is Wait plus a live event callback: it drains the stream to a
+// terminal result while invoking onEvent for every event in arrival order.
+// onEvent may be nil. When the live stream drops and the run is recovered via
+// WaitLiveRun, one synthetic "result" event is emitted so callers still observe
+// the terminal state.
+func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResult, error) {
 	if r.terminal != nil {
 		return r.terminal, nil
 	}
@@ -75,25 +95,35 @@ func (r *Run) Wait(ctx context.Context) (*RunResult, error) {
 	stopHB := startHeartbeat("Wait", started)
 	defer stopHB()
 
-	if err := r.consume(ctx, nil); err != nil {
+	if err := r.consume(ctx, onEvent); err != nil {
 		Trace("Wait", "consume error after %s run_id=%s: %v", time.Since(started).Round(time.Millisecond), r.runID, err)
 		// Dropped live stream: fall back to WaitLiveRun when we know run id.
 		if r.runID != "" {
 			Trace("Wait", "fallback WaitLiveRun run_id=%s", r.runID)
-			return r.waitLive(ctx)
+			return r.waitLiveWithEvent(ctx, onEvent)
 		}
 		return nil, err
 	}
 	if r.terminal == nil {
 		if r.runID != "" {
 			Trace("Wait", "no terminal on stream; fallback WaitLiveRun run_id=%s", r.runID)
-			return r.waitLive(ctx)
+			return r.waitLiveWithEvent(ctx, onEvent)
 		}
 		return nil, sdkErr("run ended without terminal result")
 	}
 	Trace("Wait", "done status=%s run_id=%s text_bytes=%d elapsed=%s",
 		r.terminal.Status, r.terminal.RunID, len(r.terminal.Text), time.Since(started).Round(time.Millisecond))
 	return r.terminal, nil
+}
+
+// waitLiveWithEvent wraps waitLive and emits a synthetic terminal event so
+// stream consumers still observe the run closing.
+func (r *Run) waitLiveWithEvent(ctx context.Context, onEvent func(RunEvent)) (*RunResult, error) {
+	res, err := r.waitLive(ctx)
+	if err == nil && onEvent != nil {
+		onEvent(RunEvent{Type: "result", Payload: map[string]any{"status": res.Status, "text": res.Text}})
+	}
+	return res, err
 }
 
 // Text drains and returns final assistant text.
@@ -202,6 +232,26 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 			if onEvent != nil {
 				onEvent(RunEvent{Type: "result", Payload: map[string]any{"status": rr.Status, "text": rr.Text}, Offset: msg.GetOffset()})
 			}
+		case *sdkv1.RunStreamMessage_InteractionUpdate:
+			iu := env.InteractionUpdate
+			Trace("stream", "interaction_update type=%s run_id=%s", iu.GetType(), r.runID)
+			if onEvent != nil {
+				onEvent(RunEvent{
+					Type:    "interaction_update:" + iu.GetType(),
+					Payload: structToMap(iu.GetUpdate()),
+					Offset:  msg.GetOffset(),
+				})
+			}
+		case *sdkv1.RunStreamMessage_Step:
+			cs := env.Step
+			Trace("stream", "conversation_step type=%s run_id=%s", cs.GetType(), r.runID)
+			if onEvent != nil {
+				onEvent(RunEvent{
+					Type:    "conversation_step:" + cs.GetType(),
+					Payload: structToMap(cs.GetStep()),
+					Offset:  msg.GetOffset(),
+				})
+			}
 		case *sdkv1.RunStreamMessage_Done:
 			r.drained = true
 			Trace("stream", "done after %d messages", n)
@@ -234,6 +284,22 @@ func runResultFromProto(p *sdkv1.RunResult, errorCode, statusMsg string) RunResu
 		DurationMS:   int64(p.GetDurationMs()),
 		ErrorCode:    errorCode,
 		ErrorMessage: statusMsg,
+		Usage:        usageFromProto(p.GetUsage()),
+	}
+}
+
+// usageFromProto maps the bridge's TokenUsage onto RunUsage.
+func usageFromProto(u *sdkv1.TokenUsage) RunUsage {
+	if u == nil {
+		return RunUsage{}
+	}
+	return RunUsage{
+		InputTokens:      u.GetInputTokens(),
+		OutputTokens:     u.GetOutputTokens(),
+		CacheReadTokens:  u.GetCacheReadTokens(),
+		CacheWriteTokens: u.GetCacheWriteTokens(),
+		ReasoningTokens:  u.GetReasoningTokens(),
+		TotalTokens:      u.GetTotalTokens(),
 	}
 }
 
@@ -283,7 +349,6 @@ func textFromPayload(payload map[string]any) string {
 	}
 	return ""
 }
-
 
 // Cancel requests cancellation of the in-flight run.
 func (r *Run) Cancel(ctx context.Context) error {

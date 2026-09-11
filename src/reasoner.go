@@ -104,21 +104,23 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("PromptCursor", "begin agent_id=%s", cAgent.ID)
 	tSend := time.Now()
-	text, err := ctx.Agent.PromptCursor(goCtx, prompt)
+	trace := BeginLLMTrace(ctx.Agent, reasonTaskID(ctx), ctx.Step, ReasonModePlan, prompt)
+	text, runRes, err := ctx.Agent.PromptCursorStream(goCtx, prompt, trace.Emit)
 	if err != nil {
+		trace.Finish(runRes)
 		return ReasoningResult{}, err
 	}
 	stage("PromptCursor", "done text_bytes=%d elapsed=%s total=%s",
 		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
 	stage("parse", "begin")
-	reason, action, err := parseDecision(text)
-	if err != nil {
-		recordReasonIO(ctx, prompt, text)
-		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", err, text)
+	reason, action, parseErr := parseDecision(text)
+	runRes.RawOutput = text
+	trace.Finish(runRes)
+	if parseErr != nil {
+		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", parseErr, text)
 	}
 	stage("parse", "ok reason=%q total=%s", reason, time.Since(t0).Round(time.Millisecond))
-	recordReasonIO(ctx, prompt, text)
 	return ReasoningResult{
 		Decision: Decision{
 			Reason: reason,
@@ -126,6 +128,14 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 			Ctx:    ctx,
 		},
 	}, nil
+}
+
+// reasonTaskID returns the task id carried by a decision context, if any.
+func reasonTaskID(ctx DecisionContext) string {
+	if ctx.Task == nil {
+		return ""
+	}
+	return ctx.Task.ID
 }
 
 func recordReasonIO(ctx DecisionContext, input, output string) {
@@ -137,8 +147,9 @@ func recordReasonIO(ctx DecisionContext, input, output string) {
 	if ctx.Task != nil {
 		taskID = ctx.Task.ID
 	}
-	// Top-level decisions always run in plan mode; only runtime capability
-	// prompts (recordAgentPrompt) run in agent mode.
+	// One-shot (non-streaming) recording: top-level decisions run in plan mode,
+	// while runtime capability prompts (recordAgentPrompt) run in agent mode.
+	// Streamed provider runs use BeginLLMTrace instead.
 	recordReasonTurn(agent, taskID, ctx.Step, ReasonModePlan, input, output)
 }
 

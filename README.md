@@ -105,10 +105,14 @@ export AUTONOMY_LLM_MODEL=composer-2
 # disables proxy for loopback Bridge RPCs; unsetting proxy can make CreateAgent hang.
 # Stage timing logs go to stderr by default. AUTONOMY_LLM_DEBUG=0 silences SDK traces;
 # AUTONOMY_LLM_DEBUG=1 also dumps prompt body and assistant chunk sizes.
+# Optional: AUTONOMY_LLM_EVENTS=0 stores only the reason_turns run header and skips
+# the raw llm_events stream (default: store every provider event).
 go run ./cmd/autonomy
 ```
 
 `LLMReasoner` reads `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` at runtime, passes it through to the model (replacing `{{CONSTRUCTS}}` from bootstrap-registered capabilities in `src/capability/`, plus any future `{{...}}` placeholders), then appends a structured **Runtime Context** appendix (fenced JSON for Agent / Goal / World / optional Additional Input). Bootstrap registers agents only via `AgentFactory`; Cursor is one backend (`AttachCursor` / `newCursorClient` once). `code_edit` acquires a Cursor-backed agent through `Runtime.AcquireAgent` (not a private Cursor client). SQLite lives at `$PROJECT_ROOT/data/autonomy.db`. Each Agent gets `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`. Decisions map registered capabilities to `CapabilityAction` → `Capability.Run`.
+
+Every LLM interaction is persisted as a `reason_turns` run header plus its raw provider stream in `llm_events` (`turn_id` → header, ordered by `seq`, verbatim `payload`). New providers plug in by mapping their native stream into the neutral `LLMEvent` shape via `LLMStreamAdapter` — see [docs/llm-event-stream.md](docs/llm-event-stream.md).
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
 
