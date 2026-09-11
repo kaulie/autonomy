@@ -17,6 +17,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 7. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界
 8. [runtime.md](runtime.md) / [execution-loop.md](execution-loop.md) — 执行与主循环
 9. [trust.md](trust.md) — 信任与选择（可后置实现）
+10. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流）与多 provider 扩展
 
 ## 终局四对象
 

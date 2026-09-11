@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,15 +88,54 @@ CREATE TABLE IF NOT EXISTS reason_turns (
   mode TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
+  llm_agent_id TEXT NOT NULL DEFAULT '',
   input TEXT NOT NULL DEFAULT '',
   raw_output TEXT NOT NULL DEFAULT '',
   normalized_output TEXT NOT NULL DEFAULT '',
+  run_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  error_code TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  event_count INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_cents REAL,
+  started_at TEXT,
+  ended_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- llm_events is the raw, provider-neutral stream for one reason_turns run.
+-- payload keeps the provider's event verbatim; the extra columns only make the
+-- stream queryable without JSON parsing. UNIQUE(turn_id, seq) makes appends
+-- idempotent when a dropped stream is replayed via the WaitLiveRun fallback.
+CREATE TABLE IF NOT EXISTS llm_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  turn_id INTEGER NOT NULL DEFAULT 0,
+  run_id TEXT NOT NULL DEFAULT '',
+  seq INTEGER NOT NULL DEFAULT 0,
+  offset_token TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL DEFAULT '',
+  event_type TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  text_delta TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL DEFAULT '{}',
+  elapsed_ms INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, step);
 CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, step);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_events_turn_seq ON llm_events(turn_id, seq);
+CREATE INDEX IF NOT EXISTS idx_llm_events_run ON llm_events(run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, event_type);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -123,6 +163,37 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 	}
 	if err := s.ensureColumn("reason_turns", "normalized_output", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.normalized_output: %w", err)
+	}
+	// Run-header columns for streamed LLM interactions. The stream itself lives
+	// in llm_events (created above); these keep the run summary on the header.
+	// Fresh databases already create them; this keeps older DBs usable.
+	runHeaderColumns := []struct{ name, decl string }{
+		{"llm_agent_id", "TEXT NOT NULL DEFAULT ''"},
+		{"run_id", "TEXT NOT NULL DEFAULT ''"},
+		{"status", "TEXT NOT NULL DEFAULT ''"},
+		{"error_code", "TEXT NOT NULL DEFAULT ''"},
+		{"error_message", "TEXT NOT NULL DEFAULT ''"},
+		{"duration_ms", "INTEGER NOT NULL DEFAULT 0"},
+		{"event_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"input_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"output_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"cache_write_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"reasoning_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"total_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"cost_cents", "REAL"},
+		{"started_at", "TEXT"},
+		{"ended_at", "TEXT"},
+	}
+	for _, c := range runHeaderColumns {
+		if err := s.ensureColumn("reason_turns", c.name, c.decl); err != nil {
+			return fmt.Errorf("migrate reason_turns.%s: %w", c.name, err)
+		}
+	}
+	// Index the run id only after the column is guaranteed to exist, so legacy
+	// databases without run_id migrate cleanly.
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_reason_turns_run ON reason_turns(run_id)`); err != nil {
+		return fmt.Errorf("migrate reason_turns run index: %w", err)
 	}
 	if err := s.backfillReasonTurnNormalizedOutputs(); err != nil {
 		return fmt.Errorf("normalize reason_turns.normalized_output: %w", err)
@@ -396,6 +467,41 @@ WHERE id = ? AND deleted_at IS NULL
 	return nil
 }
 
+// reasonTurnColumns lists the insertable reason_turns columns in the order
+// used by reasonTurnInsertArgs.
+const reasonTurnColumns = "task_id, agent_id, step, mode, llm_provider, model, llm_agent_id, " +
+	"input, raw_output, normalized_output, run_id, status, error_code, error_message, " +
+	"duration_ms, event_count, input_tokens, output_tokens, cache_read_tokens, " +
+	"cache_write_tokens, reasoning_tokens, total_tokens, cost_cents, started_at, ended_at, created_at"
+
+func reasonTurnInsertArgs(turn ReasonTurn) []any {
+	return []any{
+		turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model,
+		turn.LLMAgentID, turn.Input, turn.RawOutput, turn.NormalizedOutput,
+		turn.RunID, turn.Status, turn.ErrorCode, turn.ErrorMessage,
+		turn.DurationMS, turn.EventCount, turn.InputTokens, turn.OutputTokens,
+		turn.CacheReadTokens, turn.CacheWriteTokens, turn.ReasoningTokens, turn.TotalTokens,
+		nullFloatArg(turn.CostCents), nullTimeArg(turn.StartedAt), nullTimeArg(turn.EndedAt),
+		formatTime(turn.CreatedAt),
+	}
+}
+
+func (s *SQLiteStore) insertReasonTurn(turn ReasonTurn) (int64, error) {
+	args := reasonTurnInsertArgs(turn)
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(args)), ", ")
+	res, err := s.db.Exec(
+		"INSERT INTO reason_turns ("+reasonTurnColumns+") VALUES ("+placeholders+")", args...)
+	if err != nil {
+		return 0, fmt.Errorf("insert reason turn: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("insert reason turn id: %w", err)
+	}
+	return id, nil
+}
+
+// InsertReasonTurn writes a complete interaction in one shot.
 func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.CreatedAt.IsZero() {
 		turn.CreatedAt = time.Now()
@@ -403,12 +509,130 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.NormalizedOutput == "" {
 		turn.NormalizedOutput = normalizeReasonOutput(turn.RawOutput)
 	}
-	_, err := s.db.Exec(`
-INSERT INTO reason_turns (task_id, agent_id, step, mode, llm_provider, model, input, raw_output, normalized_output, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model, turn.Input, turn.RawOutput, turn.NormalizedOutput, formatTime(turn.CreatedAt))
+	if turn.Status == "" {
+		turn.Status = string(LLMStatusFinished)
+	}
+	if turn.StartedAt.IsZero() {
+		turn.StartedAt = turn.CreatedAt
+	}
+	if turn.EndedAt.IsZero() {
+		turn.EndedAt = turn.CreatedAt
+	}
+	_, err := s.insertReasonTurn(turn)
+	return err
+}
+
+// BeginReasonTurn opens a run header so stream events can be appended while the
+// run is live. It returns the header id used by AppendLLMEvents/FinishReasonTurn.
+func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (int64, error) {
+	if turn.CreatedAt.IsZero() {
+		turn.CreatedAt = time.Now()
+	}
+	if turn.Status == "" {
+		turn.Status = string(LLMStatusRunning)
+	}
+	return s.insertReasonTurn(turn)
+}
+
+// AppendLLMEvents appends a batch of stream events to a run in one transaction.
+// INSERT OR IGNORE keeps appends idempotent on the UNIQUE(turn_id, seq) key, so
+// a replayed stream (WaitLiveRun fallback) cannot double-write the same seq.
+func (s *SQLiteStore) AppendLLMEvents(turnID int64, runID string, events []LLMEvent) error {
+	if turnID == 0 || len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("insert reason turn: %w", err)
+		return fmt.Errorf("begin llm events tx: %w", err)
+	}
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO llm_events
+(turn_id, run_id, seq, offset_token, channel, event_type, role, name, text_delta, payload, elapsed_ms, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare llm event insert: %w", err)
+	}
+	defer stmt.Close()
+	for _, ev := range events {
+		if _, err := stmt.Exec(
+			turnID, runID, ev.Seq, ev.OffsetToken, string(ev.Channel), ev.EventType,
+			ev.Role, ev.Name, ev.TextDelta, ev.PayloadJSON(), ev.ElapsedMS, formatTime(ev.CreatedAt),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("append llm event seq=%d: %w", ev.Seq, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit llm events: %w", err)
 	}
 	return nil
+}
+
+// FinishReasonTurn finalizes the run header (status, usage, timing, outputs) and
+// backfills the run id onto events written before it was known.
+func (s *SQLiteStore) FinishReasonTurn(turnID int64, res LLMRunResult) error {
+	if turnID == 0 {
+		return nil
+	}
+	normalized := normalizeReasonOutput(res.RawOutput)
+	_, err := s.db.Exec(`
+UPDATE reason_turns SET
+  raw_output = ?, normalized_output = ?,
+  run_id = COALESCE(NULLIF(?, ''), run_id),
+  llm_agent_id = COALESCE(NULLIF(?, ''), llm_agent_id),
+  status = ?, error_code = ?, error_message = ?, duration_ms = ?, event_count = ?,
+  input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?,
+  reasoning_tokens = ?, total_tokens = ?, cost_cents = ?, ended_at = ?
+WHERE id = ?
+`, res.RawOutput, normalized, res.ProviderRunID, res.LLMAgentID, string(res.Status),
+		res.ErrorCode, res.ErrorMessage, res.DurationMS, res.EventCount,
+		res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.CacheReadTokens, res.Usage.CacheWriteTokens,
+		res.Usage.ReasoningTokens, res.Usage.TotalTokens, usageCostArg(res.Usage), nullTimeArg(res.EndedAt),
+		turnID)
+	if err != nil {
+		return fmt.Errorf("finish reason turn: %w", err)
+	}
+	if res.ProviderRunID != "" {
+		if _, err := s.db.Exec(`UPDATE llm_events SET run_id = ? WHERE turn_id = ? AND run_id = ''`,
+			res.ProviderRunID, turnID); err != nil {
+			return fmt.Errorf("backfill llm event run id: %w", err)
+		}
+	}
+	return nil
+}
+
+// ListLLMEvents returns a run's stream events in Seq order for replay/analysis.
+func (s *SQLiteStore) ListLLMEvents(turnID int64) ([]LLMEvent, error) {
+	rows, err := s.db.Query(`SELECT seq, offset_token, channel, event_type, role, name, text_delta, payload, elapsed_ms, created_at
+FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
+	if err != nil {
+		return nil, fmt.Errorf("query llm events: %w", err)
+	}
+	defer rows.Close()
+	var out []LLMEvent
+	for rows.Next() {
+		var (
+			ev        LLMEvent
+			channel   string
+			payload   string
+			createdAt string
+		)
+		if err := rows.Scan(&ev.Seq, &ev.OffsetToken, &channel, &ev.EventType, &ev.Role, &ev.Name,
+			&ev.TextDelta, &payload, &ev.ElapsedMS, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan llm event: %w", err)
+		}
+		ev.Channel = LLMEventChannel(channel)
+		ev.CreatedAt = parseTime(createdAt)
+		if payload != "" {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(payload), &m); err == nil {
+				ev.Payload = m
+			}
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate llm events: %w", err)
+	}
+	return out, nil
 }

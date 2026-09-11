@@ -107,13 +107,20 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	timeout := llmTimeout()
 	goCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	text, err := s.agent.PromptCursor(goCtx, prompt)
-	if err == nil {
-		recordAgentPrompt(s.agent, s.taskID, prompt, text)
+	trace := BeginLLMTrace(s.agent, s.taskID, 0, ReasonModeAgent, prompt)
+	text, runRes, err := s.agent.PromptCursorStream(goCtx, prompt, trace.Emit)
+	if err != nil {
+		trace.Finish(runRes)
+		return "", err
 	}
-	return text, err
+	runRes.RawOutput = text
+	trace.Finish(runRes)
+	return text, nil
 }
 
+// recordAgentPrompt persists a complete agent-mode interaction in one shot. It
+// is retained for callers that already hold the final output; live provider
+// runs record through BeginLLMTrace so the stream is captured as it happens.
 func recordAgentPrompt(agent *Agent, taskID, input, output string) {
 	if agent == nil {
 		return
