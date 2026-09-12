@@ -26,15 +26,16 @@ func llmEventStreamEnabled() bool {
 }
 
 // LLMTrace records one LLM interaction. It opens a reason_turns row as the run
-// header, appends the provider's stream events to llm_events, then finalizes
-// the header with status, usage, and duration.
+// header and records the user-input llm_message, appends the provider's stream
+// events to llm_events, then finalizes the header with status, usage, and
+// duration and records the assistant llm_message linked to that input.
 //
 // Persistence is best-effort: failures are logged and never fail the model
 // call, so observability degrades instead of the run breaking. A trace with no
 // active store is a safe no-op.
 type LLMTrace struct {
 	store  Store
-	turnID int64
+	handle ReasonTurnHandle
 	runID  string
 	seq    int
 	start  time.Time
@@ -66,12 +67,12 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 		turn.Model = agent.Model
 		turn.LLMAgentID = agent.LLMAgentID
 	}
-	id, err := t.store.BeginReasonTurn(turn)
+	handle, err := t.store.BeginReasonTurn(turn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] begin llm trace: %v\n", err)
 		return t
 	}
-	t.turnID = id
+	t.handle = handle
 	t.active = true
 	return t
 }
@@ -116,7 +117,7 @@ func (t *LLMTrace) Finish(res LLMRunResult) {
 		res.EventCount = t.seq
 	}
 	t.flush()
-	if err := t.store.FinishReasonTurn(t.turnID, res); err != nil {
+	if err := t.store.FinishReasonTurn(t.handle, res); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] finish llm trace: %v\n", err)
 	}
 	t.active = false
@@ -128,7 +129,7 @@ func (t *LLMTrace) flush() {
 	}
 	batch := t.buf
 	t.buf = nil
-	if err := t.store.AppendLLMEvents(t.turnID, t.runID, batch); err != nil {
+	if err := t.store.AppendLLMEvents(t.handle.TurnID, t.runID, batch); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] append llm events: %v\n", err)
 	}
 }

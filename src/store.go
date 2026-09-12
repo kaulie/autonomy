@@ -8,9 +8,11 @@ import (
 )
 
 // Store is the single, database-agnostic persistence contract the rest of
-// Autonomy codes against: tasks, agents, and reasoner turns. A reason_turns row
-// is the header of one LLM interaction; its llm_events rows are the provider's
-// run stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
+// Autonomy codes against: tasks, agents, reasoner turns, and conversation
+// messages. A reason_turns row is the header (run metadata) of one LLM
+// interaction; its llm_messages rows are the user input and assistant output as
+// independent, linked records; its llm_events rows are the provider's raw run
+// stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
 //
 // Concrete databases sit behind the StoreEngine SPI (store_engine.go): SQLite is
 // the built-in engine, and other databases plug in by registering another
@@ -20,18 +22,24 @@ type Store interface {
 	UpsertAgent(agent *Agent) error
 	SoftDeleteAgent(id int64) error
 	// InsertReasonTurn writes a complete interaction in one shot (used by the
-	// local reasoner and other non-streaming callers).
+	// local reasoner and other non-streaming callers). The header, the user
+	// input, and the assistant output are recorded together.
 	InsertReasonTurn(turn ReasonTurn) error
-	// BeginReasonTurn opens a run header and returns its id so stream events
-	// can be appended while the run is live.
-	BeginReasonTurn(turn ReasonTurn) (int64, error)
+	// BeginReasonTurn opens a run header, records the user-input message, and
+	// returns the handle that stream events and the final assistant message
+	// attach to. The handle's InputMessageID links the output back to its input.
+	BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 	// AppendLLMEvents appends a batch of neutral stream events to a run.
 	AppendLLMEvents(turnID int64, runID string, events []LLMEvent) error
-	// FinishReasonTurn finalizes the header with status, usage, and timing and
-	// backfills the run id onto any events written before it was known.
-	FinishReasonTurn(turnID int64, res LLMRunResult) error
+	// FinishReasonTurn finalizes the header with status, usage, and timing,
+	// records the assistant message (linked to the user input via the handle),
+	// and backfills the run id onto events written before it was known.
+	FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) error
 	// ListLLMEvents reads a run's stream events in Seq order.
 	ListLLMEvents(turnID int64) ([]LLMEvent, error)
+	// ListLLMMessages reads a run's messages (user input + assistant output) in
+	// Seq order.
+	ListLLMMessages(turnID int64) ([]LLMMessage, error)
 	Close() error
 }
 
@@ -81,6 +89,47 @@ type ReasonTurn struct {
 	StartedAt time.Time
 	EndedAt   time.Time
 	CreatedAt time.Time
+}
+
+// LLMMessageRole identifies the author of one llm_messages row.
+type LLMMessageRole string
+
+const (
+	LLMMessageRoleUser      LLMMessageRole = "user"
+	LLMMessageRoleAssistant LLMMessageRole = "assistant"
+)
+
+// ReasonTurnHandle is what BeginReasonTurn returns: the run header id plus the
+// id of the user-input message. FinishReasonTurn consumes it so the assistant
+// message it records can point back (ParentID) at the exact input it answers.
+type ReasonTurnHandle struct {
+	TurnID         int64
+	InputMessageID int64
+}
+
+// LLMMessage is one stored conversation message: a user input or an assistant
+// output as an independent record. Assistant rows carry ParentID pointing at the
+// user row they answer, so a return is traceable to its specific input.
+//
+// It is deliberately database-agnostic; the engine decides how to persist it.
+type LLMMessage struct {
+	ID      int64
+	TurnID  int64
+	TaskID  string
+	AgentID int64
+	Step    int
+	// Seq orders messages within one turn (user input = 0, assistant = 1).
+	Seq  int
+	Role LLMMessageRole
+	// ParentID is the id of the message this one answers (0 when none).
+	ParentID          int64
+	Content           string
+	NormalizedContent string
+	LLMProvider       LLMProvider
+	Model             string
+	RunID             string
+	Status            string
+	CreatedAt         time.Time
 }
 
 var _store Store

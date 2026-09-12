@@ -130,12 +130,37 @@ CREATE TABLE IF NOT EXISTS llm_events (
   created_at TEXT NOT NULL
 );
 
+-- llm_messages is the conversation log for one reason_turns run: the user input
+-- and the assistant output are separate rows. The assistant row's parent_id
+-- points back at the user row it answers, so a return is traceable to its
+-- specific input. UNIQUE(turn_id, seq) keeps the pair stable on replay.
+CREATE TABLE IF NOT EXISTS llm_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  turn_id INTEGER NOT NULL DEFAULT 0,
+  task_id TEXT NOT NULL DEFAULT '',
+  agent_id INTEGER NOT NULL DEFAULT 0,
+  step INTEGER NOT NULL DEFAULT 0,
+  seq INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT '',
+  parent_id INTEGER,
+  content TEXT NOT NULL DEFAULT '',
+  normalized_content TEXT NOT NULL DEFAULT '',
+  llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  run_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, step);
 CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, step);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_events_turn_seq ON llm_events(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_run ON llm_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, event_type);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_messages_turn_seq ON llm_messages(turn_id, seq);
+CREATE INDEX IF NOT EXISTS idx_llm_messages_parent ON llm_messages(parent_id);
+CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, step);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -197,6 +222,9 @@ CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, e
 	}
 	if err := s.backfillReasonTurnNormalizedOutputs(); err != nil {
 		return fmt.Errorf("normalize reason_turns.normalized_output: %w", err)
+	}
+	if err := s.backfillLLMMessages(); err != nil {
+		return fmt.Errorf("backfill llm_messages: %w", err)
 	}
 	return nil
 }
@@ -486,10 +514,18 @@ func reasonTurnInsertArgs(turn ReasonTurn) []any {
 	}
 }
 
-func (s *SQLiteStore) insertReasonTurn(turn ReasonTurn) (int64, error) {
+// llmMessageSeqUser / llmMessageSeqAssistant order the two messages that make up
+// one interaction within a run (user input first, assistant output second).
+const (
+	llmMessageSeqUser      = 0
+	llmMessageSeqAssistant = 1
+)
+
+// insertReasonTurnTx writes the run header inside tx and returns its id.
+func insertReasonTurnTx(tx *sql.Tx, turn ReasonTurn) (int64, error) {
 	args := reasonTurnInsertArgs(turn)
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(args)), ", ")
-	res, err := s.db.Exec(
+	res, err := tx.Exec(
 		"INSERT INTO reason_turns ("+reasonTurnColumns+") VALUES ("+placeholders+")", args...)
 	if err != nil {
 		return 0, fmt.Errorf("insert reason turn: %w", err)
@@ -501,7 +537,62 @@ func (s *SQLiteStore) insertReasonTurn(turn ReasonTurn) (int64, error) {
 	return id, nil
 }
 
-// InsertReasonTurn writes a complete interaction in one shot.
+// insertMessageTx writes one llm_messages row inside tx and returns its id.
+// Re-inserting the same (turn_id, seq) is a no-op that returns the existing id,
+// so a replayed finish cannot duplicate the message pair.
+func insertMessageTx(tx *sql.Tx, msg LLMMessage) (int64, error) {
+	var parent any
+	if msg.ParentID != 0 {
+		parent = msg.ParentID
+	}
+	res, err := tx.Exec(`INSERT OR IGNORE INTO llm_messages
+(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.TurnID, msg.TaskID, msg.AgentID, msg.Step, msg.Seq, string(msg.Role), parent,
+		msg.Content, msg.NormalizedContent, string(msg.LLMProvider), msg.Model, msg.RunID,
+		msg.Status, formatTime(msg.CreatedAt))
+	if err != nil {
+		return 0, fmt.Errorf("insert llm message: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("insert llm message rows: %w", err)
+	}
+	if affected == 0 {
+		var id int64
+		if err := tx.QueryRow(`SELECT id FROM llm_messages WHERE turn_id = ? AND seq = ?`,
+			msg.TurnID, msg.Seq).Scan(&id); err != nil {
+			return 0, fmt.Errorf("lookup existing llm message: %w", err)
+		}
+		return id, nil
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("insert llm message id: %w", err)
+	}
+	return id, nil
+}
+
+// userMessage builds the user-input llm_messages row for a run header.
+func userMessage(turnID int64, turn ReasonTurn) LLMMessage {
+	return LLMMessage{
+		TurnID:      turnID,
+		TaskID:      turn.TaskID,
+		AgentID:     turn.AgentID,
+		Step:        turn.Step,
+		Seq:         llmMessageSeqUser,
+		Role:        LLMMessageRoleUser,
+		Content:     turn.Input,
+		LLMProvider: turn.LLMProvider,
+		Model:       turn.Model,
+		RunID:       turn.RunID,
+		Status:      turn.Status,
+		CreatedAt:   turn.CreatedAt,
+	}
+}
+
+// InsertReasonTurn writes a complete interaction in one shot: the run header plus
+// the user input and assistant output as two linked llm_messages rows.
 func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.CreatedAt.IsZero() {
 		turn.CreatedAt = time.Now()
@@ -518,20 +609,74 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 	if turn.EndedAt.IsZero() {
 		turn.EndedAt = turn.CreatedAt
 	}
-	_, err := s.insertReasonTurn(turn)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin reason turn tx: %w", err)
+	}
+	turnID, err := insertReasonTurnTx(tx, turn)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	assistant := LLMMessage{
+		TurnID:            turnID,
+		TaskID:            turn.TaskID,
+		AgentID:           turn.AgentID,
+		Step:              turn.Step,
+		Seq:               llmMessageSeqAssistant,
+		Role:              LLMMessageRoleAssistant,
+		ParentID:          inputID,
+		Content:           turn.RawOutput,
+		NormalizedContent: turn.NormalizedOutput,
+		LLMProvider:       turn.LLMProvider,
+		Model:             turn.Model,
+		RunID:             turn.RunID,
+		Status:            turn.Status,
+		CreatedAt:         turn.EndedAt,
+	}
+	if _, err := insertMessageTx(tx, assistant); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reason turn: %w", err)
+	}
+	return nil
 }
 
-// BeginReasonTurn opens a run header so stream events can be appended while the
-// run is live. It returns the header id used by AppendLLMEvents/FinishReasonTurn.
-func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (int64, error) {
+// BeginReasonTurn opens a run header and records the user-input message so
+// stream events can be appended while the run is live. The returned handle links
+// the eventual assistant message back to this input.
+func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error) {
 	if turn.CreatedAt.IsZero() {
 		turn.CreatedAt = time.Now()
 	}
 	if turn.Status == "" {
 		turn.Status = string(LLMStatusRunning)
 	}
-	return s.insertReasonTurn(turn)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ReasonTurnHandle{}, fmt.Errorf("begin reason turn tx: %w", err)
+	}
+	turnID, err := insertReasonTurnTx(tx, turn)
+	if err != nil {
+		_ = tx.Rollback()
+		return ReasonTurnHandle{}, err
+	}
+	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	if err != nil {
+		_ = tx.Rollback()
+		return ReasonTurnHandle{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ReasonTurnHandle{}, fmt.Errorf("commit reason turn: %w", err)
+	}
+	return ReasonTurnHandle{TurnID: turnID, InputMessageID: inputID}, nil
 }
 
 // AppendLLMEvents appends a batch of stream events to a run in one transaction.
@@ -568,10 +713,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	return nil
 }
 
-// FinishReasonTurn finalizes the run header (status, usage, timing, outputs) and
-// backfills the run id onto events written before it was known.
-func (s *SQLiteStore) FinishReasonTurn(turnID int64, res LLMRunResult) error {
-	if turnID == 0 {
+// FinishReasonTurn finalizes the run header (status, usage, timing, outputs),
+// records the assistant message linked to the user input, and backfills the run
+// id onto events written before it was known.
+func (s *SQLiteStore) FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) error {
+	if h.TurnID == 0 {
 		return nil
 	}
 	normalized := normalizeReasonOutput(res.RawOutput)
@@ -588,15 +734,45 @@ WHERE id = ?
 		res.ErrorCode, res.ErrorMessage, res.DurationMS, res.EventCount,
 		res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.CacheReadTokens, res.Usage.CacheWriteTokens,
 		res.Usage.ReasoningTokens, res.Usage.TotalTokens, usageCostArg(res.Usage), nullTimeArg(res.EndedAt),
-		turnID)
+		h.TurnID)
 	if err != nil {
 		return fmt.Errorf("finish reason turn: %w", err)
 	}
+	if err := s.recordAssistantMessage(h, res); err != nil {
+		return err
+	}
 	if res.ProviderRunID != "" {
 		if _, err := s.db.Exec(`UPDATE llm_events SET run_id = ? WHERE turn_id = ? AND run_id = ''`,
-			res.ProviderRunID, turnID); err != nil {
+			res.ProviderRunID, h.TurnID); err != nil {
 			return fmt.Errorf("backfill llm event run id: %w", err)
 		}
+	}
+	return nil
+}
+
+// recordAssistantMessage writes the assistant llm_messages row for a finished
+// run, pulling task/agent/step/provider/model from the header (INSERT .. SELECT)
+// and linking it back to the user input via parent_id. It is idempotent: the
+// UNIQUE(turn_id, seq) key plus INSERT OR IGNORE keeps one assistant row per run.
+func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res LLMRunResult) error {
+	ended := res.EndedAt
+	if ended.IsZero() {
+		ended = time.Now()
+	}
+	var parent any
+	if h.InputMessageID != 0 {
+		parent = h.InputMessageID
+	}
+	_, err := s.db.Exec(`
+INSERT OR IGNORE INTO llm_messages
+(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, ?, ?, ?
+FROM reason_turns WHERE id = ?
+`, llmMessageSeqAssistant, string(LLMMessageRoleAssistant), parent,
+		res.RawOutput, normalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
+		formatTime(ended), h.TurnID)
+	if err != nil {
+		return fmt.Errorf("insert assistant message: %w", err)
 	}
 	return nil
 }
@@ -635,4 +811,135 @@ FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 		return nil, fmt.Errorf("iterate llm events: %w", err)
 	}
 	return out, nil
+}
+
+// ListLLMMessages returns a run's messages (user input + assistant output) in
+// Seq order. An assistant row's ParentID is the id of the user row it answers,
+// so a return can be traced back to its specific input.
+func (s *SQLiteStore) ListLLMMessages(turnID int64) ([]LLMMessage, error) {
+	rows, err := s.db.Query(`SELECT id, turn_id, task_id, agent_id, step, seq, role, parent_id,
+content, normalized_content, llm_provider, model, run_id, status, created_at
+FROM llm_messages WHERE turn_id = ? ORDER BY seq, id`, turnID)
+	if err != nil {
+		return nil, fmt.Errorf("query llm messages: %w", err)
+	}
+	defer rows.Close()
+	var out []LLMMessage
+	for rows.Next() {
+		var (
+			m         LLMMessage
+			role      string
+			provider  string
+			parentID  sql.NullInt64
+			createdAt string
+		)
+		if err := rows.Scan(&m.ID, &m.TurnID, &m.TaskID, &m.AgentID, &m.Step, &m.Seq, &role,
+			&parentID, &m.Content, &m.NormalizedContent, &provider, &m.Model, &m.RunID, &m.Status,
+			&createdAt); err != nil {
+			return nil, fmt.Errorf("scan llm message: %w", err)
+		}
+		m.Role = LLMMessageRole(role)
+		m.LLMProvider = LLMProvider(provider)
+		if parentID.Valid {
+			m.ParentID = parentID.Int64
+		}
+		m.CreatedAt = parseTime(createdAt)
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate llm messages: %w", err)
+	}
+	return out, nil
+}
+
+// backfillLLMMessages seeds llm_messages from reason_turns rows that predate the
+// message table: each header's input becomes a user message and its raw_output
+// becomes the assistant message linked to it. It is idempotent (only turns with
+// no messages yet are touched) and skips fully empty turns.
+func (s *SQLiteStore) backfillLLMMessages() error {
+	rows, err := s.db.Query(`SELECT t.id, t.task_id, CAST(t.agent_id AS INTEGER), t.step, t.llm_provider, t.model,
+t.input, t.raw_output, t.normalized_output, t.run_id, t.status, t.created_at
+FROM reason_turns t
+WHERE (t.input <> '' OR t.raw_output <> '')
+  AND NOT EXISTS (SELECT 1 FROM llm_messages m WHERE m.turn_id = t.id)`)
+	if err != nil {
+		return err
+	}
+	type pendingTurn struct {
+		id   int64
+		turn ReasonTurn
+	}
+	var pending []pendingTurn
+	for rows.Next() {
+		var (
+			id, agentID            int64
+			step                   int
+			taskID, provider       string
+			model                  string
+			input, raw, normalized string
+			runID, status          string
+			createdAt              string
+		)
+		if err := rows.Scan(&id, &taskID, &agentID, &step, &provider, &model, &input, &raw,
+			&normalized, &runID, &status, &createdAt); err != nil {
+			rows.Close()
+			return err
+		}
+		if normalized == "" {
+			normalized = normalizeReasonOutput(raw)
+		}
+		pending = append(pending, pendingTurn{id: id, turn: ReasonTurn{
+			TaskID: taskID, AgentID: agentID, Step: step, LLMProvider: LLMProvider(provider), Model: model,
+			Input: input, RawOutput: raw, NormalizedOutput: normalized, RunID: runID, Status: status,
+			CreatedAt: parseTime(createdAt),
+		}})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, p := range pending {
+		if err := s.backfillReasonTurnMessages(p.id, p.turn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// backfillReasonTurnMessages writes the user + assistant pair for one backfilled
+// turn in a single transaction.
+func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	assistant := LLMMessage{
+		TurnID:            turnID,
+		TaskID:            turn.TaskID,
+		AgentID:           turn.AgentID,
+		Step:              turn.Step,
+		Seq:               llmMessageSeqAssistant,
+		Role:              LLMMessageRoleAssistant,
+		ParentID:          inputID,
+		Content:           turn.RawOutput,
+		NormalizedContent: turn.NormalizedOutput,
+		LLMProvider:       turn.LLMProvider,
+		Model:             turn.Model,
+		RunID:             turn.RunID,
+		Status:            turn.Status,
+		CreatedAt:         turn.CreatedAt,
+	}
+	if _, err := insertMessageTx(tx, assistant); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }

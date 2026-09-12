@@ -178,12 +178,16 @@ func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
 	}
 	defer store.Close()
 
-	turnID, err := store.BeginReasonTurn(ReasonTurn{AgentID: 5, Status: string(LLMStatusRunning)})
+	handle, err := store.BeginReasonTurn(ReasonTurn{AgentID: 5, Status: string(LLMStatusRunning)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turnID == 0 {
+	if handle.TurnID == 0 {
 		t.Fatal("expected a turn id")
+	}
+	turnID := handle.TurnID
+	if handle.InputMessageID == 0 {
+		t.Fatal("expected a user-input message id")
 	}
 	batch := []LLMEvent{
 		{Seq: 0, EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "a"},

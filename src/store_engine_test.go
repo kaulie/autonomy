@@ -10,15 +10,20 @@ import (
 // a non-SQLite backend can be registered and opened without touching callers.
 type fakeStore struct{}
 
-func (fakeStore) UpsertTask(*Task) error                          { return nil }
-func (fakeStore) UpsertAgent(*Agent) error                        { return nil }
-func (fakeStore) SoftDeleteAgent(int64) error                     { return nil }
-func (fakeStore) InsertReasonTurn(ReasonTurn) error               { return nil }
-func (fakeStore) BeginReasonTurn(ReasonTurn) (int64, error)       { return 0, nil }
+func (fakeStore) UpsertTask(*Task) error            { return nil }
+func (fakeStore) UpsertAgent(*Agent) error          { return nil }
+func (fakeStore) SoftDeleteAgent(int64) error       { return nil }
+func (fakeStore) InsertReasonTurn(ReasonTurn) error { return nil }
+func (fakeStore) BeginReasonTurn(ReasonTurn) (ReasonTurnHandle, error) {
+	return ReasonTurnHandle{}, nil
+}
 func (fakeStore) AppendLLMEvents(int64, string, []LLMEvent) error { return nil }
-func (fakeStore) FinishReasonTurn(int64, LLMRunResult) error      { return nil }
-func (fakeStore) ListLLMEvents(int64) ([]LLMEvent, error)         { return nil, nil }
-func (fakeStore) Close() error                                    { return nil }
+func (fakeStore) FinishReasonTurn(ReasonTurnHandle, LLMRunResult) error {
+	return nil
+}
+func (fakeStore) ListLLMEvents(int64) ([]LLMEvent, error)     { return nil, nil }
+func (fakeStore) ListLLMMessages(int64) ([]LLMMessage, error) { return nil, nil }
+func (fakeStore) Close() error                                { return nil }
 
 // fakeEngine records the DSN it was opened with so tests can assert dispatch to
 // the registered engine (and its DefaultDSN fallback).

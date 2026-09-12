@@ -11,17 +11,19 @@
 
 ## 数据模型
 
-两张表，一个 header + 一条事件流：
+三张表：一个 run header + 消息记录 + 一条事件流：
 
 ```
-reason_turns (1)  ────  run header：一次 LLM 交互的输入/输出/状态/用量
+reason_turns (1)  ────  run header：provider/status/usage/耗时/run_id（内容列保留）
       │  id
-      ▼
-llm_events  (N)  ────  provider run stream：逐条原始事件（保真）
+      ├──▶ llm_messages (N) ── user 输入 + assistant 返回两条独立记录（parent_id 溯源）
+      └──▶ llm_events   (N) ── provider run stream：逐条原始事件（保真）
 ```
 
 - `reason_turns` 既是原有「一次 reasoner 对话」记录，也是 run header。新增 run 级元数据列
   （`run_id`/`status`/usage/耗时 …）。
+- `llm_messages` 是 **新增** 子表，把「用户输入」和「LLM 返回」拆成两条独立记录，返回通过
+  `parent_id` 溯源到具体输入 —— 详见 [llm-message.md](llm-message.md)。
 - `llm_events` 是 **新增** 子表，`turn_id` 指向 header，按 `seq` 排序，`payload` 保留 provider
   原始事件 JSON。
 
@@ -81,14 +83,15 @@ CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, e
 ## 写入流程
 
 ```
-BeginLLMTrace(agent, taskID, step, mode, input)   → 建 header（status=running）
+BeginLLMTrace(agent, taskID, step, mode, input)   → 建 header + 写 user 消息（status=running）
    ↓  每个 provider 事件
 LLMTrace.Emit(LLMEvent)                            → 缓冲，按批写 llm_events
    ↓  run 结束
-LLMTrace.Finish(LLMRunResult)                      → 回写 header（status/usage/时长/输出）+ 回填 run_id
+LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assistant 消息（link input）+ 回填 run_id
 ```
 
 - 事件按 `llmEventFlushSize`（默认 64）批量落库，`Finish` 时强制 flush。
+- `llm_messages`（user 输入 + assistant 返回）**始终写**；`AUTONOMY_LLM_EVENTS` 只控制 `llm_events`。
 - 落库是 **best-effort**：失败只打 stderr，绝不让模型调用失败。没有 store 时 trace 是安全 no-op。
 
 ### 开关：`AUTONOMY_LLM_EVENTS`
@@ -100,7 +103,7 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header（status/us
 | 未设置 / `1` / `true` / `on` / `yes` | **默认**：header + 全部原始事件都落库 |
 | `0` / `false` / `off` / `no` / `disable` / `disabled`（大小写不敏感） | 只写 `reason_turns` run header，跳过 `llm_events`（不缓冲、不写入） |
 
-关闭时 `reason_turns` 仍照常记录（它是一次 LLM 交互的既有记录，其它消费方依赖它），
+关闭时 `reason_turns` 与 `llm_messages` 仍照常记录（前者是 run header，后者是输入/返回记录，其它消费方依赖），
 `event_count` 保持 0。开关在 `BeginLLMTrace` 时读取一次。
 
 代码位置：
