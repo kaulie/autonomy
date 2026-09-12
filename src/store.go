@@ -4,13 +4,17 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 )
 
-// Store persists tasks, agents, and reasoner turns. A reason_turns row is the
-// header of one LLM interaction; its llm_events rows are the provider's run
-// stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
+// Store is the single, database-agnostic persistence contract the rest of
+// Autonomy codes against: tasks, agents, and reasoner turns. A reason_turns row
+// is the header of one LLM interaction; its llm_events rows are the provider's
+// run stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
+//
+// Concrete databases sit behind the StoreEngine SPI (store_engine.go): SQLite is
+// the built-in engine, and other databases plug in by registering another
+// engine. Neither this interface nor its callers change when the database does.
 type Store interface {
 	UpsertTask(task *Task) error
 	UpsertAgent(agent *Agent) error
@@ -150,16 +154,6 @@ func recordReasonTurn(agent *Agent, taskID string, step int, mode ReasonMode, in
 		turn.Model = agent.Model
 	}
 	persistReasonTurn(turn)
-}
-
-// OpenDefaultStore opens $PROJECT_ROOT/data/autonomy.db.
-func OpenDefaultStore() (Store, error) {
-	root, err := projectRoot()
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(root, "data", "autonomy.db")
-	return OpenSQLiteStore(path)
 }
 
 func formatTime(t time.Time) string {
