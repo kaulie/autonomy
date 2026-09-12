@@ -87,9 +87,9 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 ## 现状表结构
 
-`sqlite` engine 当前维护 `tasks` / `agents` / `reason_turns` / `llm_events` 四张表
-（LLM 事件流见 [llm-event-stream.md](llm-event-stream.md)）。其它 engine 只需实现同样的 `Store`
-语义，表结构可自由设计。
+`sqlite` engine 当前维护 `tasks` / `agents` / `reason_turns` / `llm_messages` / `llm_events` 五张表
+（输入/返回消息见 [llm-message.md](llm-message.md)，原始事件流见 [llm-event-stream.md](llm-event-stream.md)）。
+其它 engine 只需实现同样的 `Store` 语义，表结构可自由设计。
 
 ## 代码位置
 
