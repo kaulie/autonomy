@@ -37,8 +37,8 @@ type Store interface {
 	FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) error
 	// ListLLMEvents reads a run's stream events in Seq order.
 	ListLLMEvents(turnID int64) ([]LLMEvent, error)
-	// ListLLMMessages reads a run's messages (user input + assistant output) in
-	// Seq order.
+	// ListLLMMessages reads a run's messages in Seq order: the user input, the
+	// aggregated thinking/tool intermediates, then the assistant output.
 	ListLLMMessages(turnID int64) ([]LLMMessage, error)
 	Close() error
 }
@@ -91,12 +91,16 @@ type ReasonTurn struct {
 	CreatedAt time.Time
 }
 
-// LLMMessageRole identifies the author of one llm_messages row.
+// LLMMessageRole identifies the author/kind of one llm_messages row. user is the
+// input, assistant the run's final return, and thinking/tool are the aggregated
+// intermediates derived from the run's raw stream (see aggregateChatMessages).
 type LLMMessageRole string
 
 const (
 	LLMMessageRoleUser      LLMMessageRole = "user"
 	LLMMessageRoleAssistant LLMMessageRole = "assistant"
+	LLMMessageRoleThinking  LLMMessageRole = "thinking"
+	LLMMessageRoleTool      LLMMessageRole = "tool"
 )
 
 // ReasonTurnHandle is what BeginReasonTurn returns: the run header id plus the

@@ -233,3 +233,103 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Fatalf("messages after second reopen=%d, want 2", len(msgs2))
 	}
 }
+
+// TestLLMMessagesAggregateThinkingAndTools proves the streamed path also records
+// the thinking and tool activity as aggregated llm_messages rows (not one row
+// per streamed delta), ordered by occurrence, with the assistant return last and
+// every row tracing back to the user input.
+func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	handle, err := store.BeginReasonTurn(ReasonTurn{
+		TaskID: "t-agg", AgentID: 7, Step: 1, Mode: ReasonModeAgent,
+		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "do it",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A realistic stream: thinking arrives as token deltas, the tool call and its
+	// result are two separate events sharing a call_id, and the assistant text is
+	// streamed in chunks too (its deltas must NOT become their own rows).
+	events := []LLMEvent{
+		{Seq: 0, Channel: LLMChannelThought, EventType: "thinking", TextDelta: "Let"},
+		{Seq: 1, Channel: LLMChannelThought, EventType: "thinking", TextDelta: " me think"},
+		{Seq: 2, Channel: LLMChannelAssistant, EventType: "assistant", TextDelta: "Hel"},
+		{Seq: 3, Channel: LLMChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
+			"call_id": "c1", "name": "shell", "status": "running", "args": map[string]any{"command": "ls"},
+		}},
+		{Seq: 4, Channel: LLMChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
+			"call_id": "c1", "name": "shell", "status": "completed", "args": map[string]any{"command": "ls"},
+			"result": map[string]any{"exit": 0, "stdout": "a\nb"},
+		}},
+		{Seq: 5, Channel: LLMChannelAssistant, EventType: "assistant", TextDelta: "lo"},
+	}
+	if err := store.AppendLLMEvents(handle.TurnID, "run-agg", events); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishReasonTurn(handle, LLMRunResult{
+		ProviderRunID: "run-agg", Status: LLMStatusFinished, RawOutput: "Hello",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := store.ListLLMMessages(handle.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("messages=%d, want 4 (user, thinking, tool, assistant): %+v", len(msgs), msgs)
+	}
+	input := msgs[0]
+	if input.Role != LLMMessageRoleUser || input.Content != "do it" || input.Seq != llmMessageSeqUser {
+		t.Fatalf("input message=%+v", input)
+	}
+
+	think := msgs[1]
+	if think.Role != LLMMessageRoleThinking || think.Content != "Let me think" || think.Seq != 1 {
+		t.Fatalf("thinking message=%+v, want aggregated \"Let me think\" at seq 1", think)
+	}
+	if think.ParentID != input.ID {
+		t.Fatalf("thinking parent_id=%d, want input id %d", think.ParentID, input.ID)
+	}
+
+	tool := msgs[2]
+	if tool.Role != LLMMessageRoleTool || tool.Seq != 2 {
+		t.Fatalf("tool message=%+v, want role=tool at seq 2", tool)
+	}
+	if tool.Content != `{"exit":0,"stdout":"a\nb"}` {
+		t.Fatalf("tool content=%q, want the merged tool result", tool.Content)
+	}
+	if tool.NormalizedContent != `{"args":{"command":"ls"},"call_id":"c1","name":"shell"}` {
+		t.Fatalf("tool normalized_content=%q, want name/args/call_id", tool.NormalizedContent)
+	}
+	if tool.ParentID != input.ID {
+		t.Fatalf("tool parent_id=%d, want input id %d", tool.ParentID, input.ID)
+	}
+
+	out := msgs[3]
+	if out.Role != LLMMessageRoleAssistant || out.Content != "Hello" || out.Seq != 3 {
+		t.Fatalf("assistant message=%+v, want the final return at seq 3", out)
+	}
+	if out.ParentID != input.ID || out.ParentID != handle.InputMessageID {
+		t.Fatalf("assistant parent_id=%d, want input id %d (handle %d)", out.ParentID, input.ID, handle.InputMessageID)
+	}
+
+	// Finishing again must be idempotent: same rows, no duplicates.
+	if err := store.FinishReasonTurn(handle, LLMRunResult{
+		ProviderRunID: "run-agg", Status: LLMStatusFinished, RawOutput: "Hello",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := store.ListLLMMessages(handle.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 4 {
+		t.Fatalf("messages after re-finish=%d, want 4", len(again))
+	}
+}
