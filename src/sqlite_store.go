@@ -514,8 +514,9 @@ func reasonTurnInsertArgs(turn ReasonTurn) []any {
 	}
 }
 
-// llmMessageSeqUser / llmMessageSeqAssistant order the two messages that make up
-// one interaction within a run (user input first, assistant output second).
+// llmMessageSeqUser is the seq of a run's user-input message. The assistant
+// (final return) row is placed one past the aggregated thinking/tool rows, so
+// with no aggregated rows it keeps the original seq 1 layout.
 const (
 	llmMessageSeqUser      = 0
 	llmMessageSeqAssistant = 1
@@ -738,7 +739,15 @@ WHERE id = ?
 	if err != nil {
 		return fmt.Errorf("finish reason turn: %w", err)
 	}
-	if err := s.recordAssistantMessage(h, res); err != nil {
+	events, err := s.ListLLMEvents(h.TurnID)
+	if err != nil {
+		return err
+	}
+	assistantSeq, err := s.recordAggregatedMessages(h.TurnID, h.InputMessageID, events)
+	if err != nil {
+		return err
+	}
+	if err := s.recordAssistantMessage(h, res, assistantSeq); err != nil {
 		return err
 	}
 	if res.ProviderRunID != "" {
@@ -752,9 +761,11 @@ WHERE id = ?
 
 // recordAssistantMessage writes the assistant llm_messages row for a finished
 // run, pulling task/agent/step/provider/model from the header (INSERT .. SELECT)
-// and linking it back to the user input via parent_id. It is idempotent: the
-// UNIQUE(turn_id, seq) key plus INSERT OR IGNORE keeps one assistant row per run.
-func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res LLMRunResult) error {
+// and linking it back to the user input via parent_id. seq is one past the
+// aggregated thinking/tool rows, so the return stays the run's final message. It
+// is idempotent: the UNIQUE(turn_id, seq) key plus INSERT OR IGNORE keeps one
+// assistant row per run.
+func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res LLMRunResult, seq int) error {
 	ended := res.EndedAt
 	if ended.IsZero() {
 		ended = time.Now()
@@ -768,11 +779,48 @@ INSERT OR IGNORE INTO llm_messages
 (turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
 SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, ?, ?, ?
 FROM reason_turns WHERE id = ?
-`, llmMessageSeqAssistant, string(LLMMessageRoleAssistant), parent,
+`, seq, string(LLMMessageRoleAssistant), parent,
 		res.RawOutput, normalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
 		formatTime(ended), h.TurnID)
 	if err != nil {
 		return fmt.Errorf("insert assistant message: %w", err)
+	}
+	return nil
+}
+
+// recordAggregatedMessages derives the thinking/tool messages from a run's raw
+// stream and writes them (seq 1..N, parent_id = the user input). It returns the
+// seq the assistant row must use, which is one past the last aggregated row so
+// the return stays final. With no aggregated rows that is 1, the original layout.
+// It is idempotent: INSERT OR IGNORE on UNIQUE(turn_id, seq) makes a replayed
+// finish a no-op.
+func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) (int, error) {
+	rows := aggregateChatMessages(events)
+	for _, m := range rows {
+		m.TurnID = turnID
+		m.ParentID = parentID
+		if err := s.insertDerivedMessage(m); err != nil {
+			return 0, err
+		}
+	}
+	return len(rows) + 1, nil
+}
+
+// insertDerivedMessage writes one aggregated llm_messages row, copying
+// task/agent/step/provider/model/run_id/status from the run header.
+func (s *SQLiteStore) insertDerivedMessage(m LLMMessage) error {
+	var parent any
+	if m.ParentID != 0 {
+		parent = m.ParentID
+	}
+	_, err := s.db.Exec(`
+INSERT OR IGNORE INTO llm_messages
+(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, run_id, status, ?
+FROM reason_turns WHERE id = ?
+`, m.Seq, string(m.Role), parent, m.Content, m.NormalizedContent, formatTime(m.CreatedAt), m.TurnID)
+	if err != nil {
+		return fmt.Errorf("insert %s message: %w", m.Role, err)
 	}
 	return nil
 }
@@ -909,9 +957,25 @@ WHERE (t.input <> '' OR t.raw_output <> '')
 	return nil
 }
 
-// backfillReasonTurnMessages writes the user + assistant pair for one backfilled
-// turn in a single transaction.
+// backfillReasonTurnMessages writes the message rows for one backfilled turn in
+// a single transaction: the user input, the aggregated thinking/tool rows
+// derived from any recorded stream, then the assistant output (kept final).
 func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) error {
+	events, err := s.ListLLMEvents(turnID)
+	if err != nil {
+		return err
+	}
+	derived := aggregateChatMessages(events)
+	for i := range derived {
+		derived[i].TurnID = turnID
+		derived[i].TaskID = turn.TaskID
+		derived[i].AgentID = turn.AgentID
+		derived[i].Step = turn.Step
+		derived[i].LLMProvider = turn.LLMProvider
+		derived[i].Model = turn.Model
+		derived[i].RunID = turn.RunID
+		derived[i].Status = turn.Status
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -921,12 +985,19 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 		_ = tx.Rollback()
 		return err
 	}
+	for _, m := range derived {
+		m.ParentID = inputID
+		if _, err := insertMessageTx(tx, m); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
 	assistant := LLMMessage{
 		TurnID:            turnID,
 		TaskID:            turn.TaskID,
 		AgentID:           turn.AgentID,
 		Step:              turn.Step,
-		Seq:               llmMessageSeqAssistant,
+		Seq:               len(derived) + 1,
 		Role:              LLMMessageRoleAssistant,
 		ParentID:          inputID,
 		Content:           turn.RawOutput,
