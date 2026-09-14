@@ -265,8 +265,15 @@ func wrapConnectErr(err error) error {
 	return &TransportError{Msg: err.Error()}
 }
 
-// Prompt is the one-shot helper: create → send → wait → close.
+// Prompt is the one-shot helper: create → send → wait → close. The whole
+// session shares one idle watchdog (AUTONOMY_LLM_TIMEOUT, default 3m): it keeps
+// running while the provider produces activity and is aborted only after that
+// much silence.
 func Prompt(ctx context.Context, text string, opts ...ClientOption) (string, error) {
+	wd := NewIdleWatchdog(ctx, IdleTimeout())
+	defer wd.Stop()
+	ctx = WithIdleWatchdog(wd.Context(), wd)
+
 	client := NewClient(opts...)
 	defer client.Close()
 

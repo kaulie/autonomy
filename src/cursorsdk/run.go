@@ -97,7 +97,21 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 
 	if err := r.consume(ctx, onEvent); err != nil {
 		Trace("Wait", "consume error after %s run_id=%s: %v", time.Since(started).Round(time.Millisecond), r.runID, err)
+		if r.terminal != nil {
+			// The run already produced its terminal result; a teardown racing
+			// that final message (idle cutoff, dropped stream) must not discard
+			// the outcome we do have.
+			Trace("Wait", "using terminal result despite drain error status=%s", r.terminal.Status)
+			return r.terminal, nil
+		}
+		if ctx.Err() != nil {
+			// The context ended (idle timeout or caller cancel): err already
+			// carries the cause and the run is not recoverable.
+			return nil, err
+		}
 		// Dropped live stream: fall back to WaitLiveRun when we know run id.
+		// No events arrive on this path, so the idle watchdog keeps bounding
+		// how long that recovery may take.
 		if r.runID != "" {
 			Trace("Wait", "fallback WaitLiveRun run_id=%s", r.runID)
 			return r.waitLiveWithEvent(ctx, onEvent)
@@ -144,6 +158,10 @@ func (r *Run) waitLive(ctx context.Context) (*RunResult, error) {
 	resp, err := r.client.agentRPC.WaitLiveRun(ctx, connect.NewRequest(&sdkv1.WaitLiveRunRequest{RunId: r.runID}))
 	if err != nil {
 		Trace("WaitLiveRun", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
+		if ctx.Err() != nil {
+			// Idle timeout / caller cancel tore down the RPC: surface the cause.
+			return nil, ctxErr(ctx)
+		}
 		return nil, wrapConnectErr(err)
 	}
 	rr := runResultFromProto(resp.Msg.GetResult(), "", r.statusMsg)
@@ -176,13 +194,14 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 	n := 0
 	for r.stream.Receive() {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return ctxErr(ctx)
 		}
 		n++
 		msg := r.stream.Msg()
 		if off := msg.GetOffset(); off != "" {
 			r.lastOffset = off
 		}
+		noteActivity(ctx, msg)
 		switch env := msg.GetEnvelope().(type) {
 		case nil:
 			if TraceVerbose() {
@@ -261,8 +280,25 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 		}
 	}
 	r.drained = true
-	Trace("stream", "receive ended after %d messages err=%v", n, r.stream.Err())
-	return r.stream.Err()
+	if ctx.Err() != nil {
+		// The stream ended because the context did (idle timeout / caller
+		// cancel): report the cause instead of transport noise or a bare EOF.
+		return ctxErr(ctx)
+	}
+	err := r.stream.Err()
+	Trace("stream", "receive ended after %d messages err=%v", n, err)
+	return err
+}
+
+// noteActivity reports provider progress to the idle watchdog carried by ctx.
+// Bare keepalives keep the connection warm but say nothing about the run, so
+// they deliberately do not count as activity: a run that only receives
+// keepalives is idle and will be aborted by its watchdog.
+func noteActivity(ctx context.Context, msg *sdkv1.RunStreamMessage) {
+	if msg.GetEnvelope() == nil {
+		return
+	}
+	touchIdle(ctx)
 }
 
 func runResultFromProto(p *sdkv1.RunResult, errorCode, statusMsg string) RunResult {

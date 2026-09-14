@@ -7,6 +7,7 @@ import (
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/capability/broker"
+	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
 // Runtime reliably executes actions and exposes agent acquisition to capabilities.
@@ -104,9 +105,10 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	if s.agent.Backend != AgentBackendCursor {
 		return "", fmt.Errorf("prompt unsupported for backend %q", s.agent.Backend)
 	}
-	timeout := llmTimeout()
-	goCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	idle := cursorsdk.IdleTimeout()
+	wd := cursorsdk.NewIdleWatchdog(ctx, idle)
+	defer wd.Stop()
+	goCtx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
 	trace := BeginLLMTrace(s.agent, s.taskID, 0, ReasonModeAgent, prompt)
 	text, runRes, err := s.agent.PromptCursorStream(goCtx, prompt, trace.Emit)
 	if err != nil {

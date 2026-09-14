@@ -66,9 +66,12 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	if ctx.Context != nil {
 		parent = ctx.Context
 	}
-	timeout := llmTimeout()
-	goCtx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
+	// A run is never capped by wall clock: the watchdog only aborts it after
+	// AUTONOMY_LLM_TIMEOUT (default 3m) with no provider activity.
+	idle := cursorsdk.IdleTimeout()
+	wd := cursorsdk.NewIdleWatchdog(parent, idle)
+	defer wd.Stop()
+	goCtx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
 
 	t0 := time.Now()
 	stage := func(name string, format string, args ...any) {
@@ -81,7 +84,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		)
 	}
 
-	stage("start", "model=%s timeout=%s cwd=%s lifecycle=%s", model, timeout, cwd, ctx.Agent.Lifecycle)
+	stage("start", "model=%s idle=%s cwd=%s lifecycle=%s", model, idle, cwd, ctx.Agent.Lifecycle)
 
 	stage("ensureCursor", "begin")
 	tEnsure := time.Now()
@@ -151,15 +154,6 @@ func recordReasonIO(ctx DecisionContext, input, output string) {
 	// while runtime capability prompts (recordAgentPrompt) run in agent mode.
 	// Streamed provider runs use BeginLLMTrace instead.
 	recordReasonTurn(agent, taskID, ctx.Step, ReasonModePlan, input, output)
-}
-
-func llmTimeout() time.Duration {
-	if v := strings.TrimSpace(os.Getenv("AUTONOMY_LLM_TIMEOUT")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
-	}
-	return 3 * time.Minute
 }
 
 type LocalReasoner struct {
