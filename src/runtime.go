@@ -106,6 +106,15 @@ func (s *runtimeAgentSession) ID() string {
 	return s.agent.Name
 }
 
+// Workspace is the sandbox this agent works in. It is the agent's own
+// AGENT_WORKSPACE unless AcquireAgent was asked to override it.
+func (s *runtimeAgentSession) Workspace() string {
+	if s == nil || s.agent == nil {
+		return ""
+	}
+	return s.agent.Workspace
+}
+
 // beginDelegatedTrace opens the run header for a prompt this agent received from
 // another agent (a capability delegating a sub-task to it), so the recorded input
 // row is attributed to the agent that delegated rather than to the user: the user

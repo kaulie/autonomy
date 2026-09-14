@@ -38,11 +38,10 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 		return fmt.Errorf("unknown capability %q", a.Name)
 	}
 	in := copyStringMap(a.Input)
-	if ctx.Agent != nil {
-		if in["workspace"] == "" && in["cwd"] == "" && ctx.Agent.Workspace != "" {
-			in["workspace"] = ctx.Agent.Workspace
-		}
-	}
+	// The runtime deliberately does not default a workspace into the input: a
+	// capability that acts in place gets the workspace the plan gives it, and one
+	// that delegates to another agent (code_edit) must let that agent work in its
+	// own workspace instead of the caller's.
 	if ctx.Task != nil {
 		if in["task_id"] == "" && ctx.Task.ID != "" {
 			in["task_id"] = ctx.Task.ID
