@@ -46,11 +46,20 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 			role:      "assistant",
 		},
 		{
-			name:      "thinking",
+			name:      "thinking delta",
+			native:    clineAgentEvent(map[string]any{"type": "content_start", "contentType": "reasoning", "reasoning": "why not"}),
+			channel:   LLMChannelThought,
+			eventType: "agent_event:content_start:reasoning",
+			text:      "why not",
+			role:      "assistant",
+		},
+		{
+			// content_end repeats the whole block, so it must not add text again.
+			name:      "thinking block end",
 			native:    clineAgentEvent(map[string]any{"type": "content_end", "contentType": "reasoning", "reasoning": "why not"}),
 			channel:   LLMChannelThought,
 			eventType: "agent_event:content_end:reasoning",
-			text:      "why not",
+			text:      "",
 			role:      "assistant",
 		},
 		{
@@ -205,5 +214,60 @@ func TestClineRunResultWithoutCostStaysUnknown(t *testing.T) {
 	}
 	if meta.Status != LLMStatusFinished || !strings.Contains(meta.RawOutput, "ok") {
 		t.Fatalf("meta=%+v", meta)
+	}
+}
+
+// TestThinkingIsAlignedAcrossBackends locks the contract a UI relies on: a
+// thinking block becomes exactly one message whose text appears once, and its
+// duration is exposed the same way whether the backend reports it (Cursor's
+// thinking_duration_ms) or only streams deltas (Cline).
+func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
+	start := time.Now()
+	adapter := clineStreamAdapter{}
+
+	// Cline: reasoning deltas plus a block-end event repeating the whole text.
+	var clineEvents []LLMEvent
+	for i, delta := range []string{"Let", " me", " think"} {
+		ev, ok := adapter.MapEvent(clineAgentEvent(map[string]any{
+			"type": "content_start", "contentType": "reasoning", "reasoning": delta,
+		}), start)
+		if !ok {
+			t.Fatal("cline delta dropped")
+		}
+		ev.Seq = i
+		ev.CreatedAt = start.Add(time.Duration(i) * 400 * time.Millisecond)
+		clineEvents = append(clineEvents, ev)
+	}
+	end, ok := adapter.MapEvent(clineAgentEvent(map[string]any{
+		"type": "content_end", "contentType": "reasoning", "reasoning": "Let me think",
+	}), start)
+	if !ok {
+		t.Fatal("cline block end dropped")
+	}
+	end.Seq = 3
+	end.CreatedAt = start.Add(1200 * time.Millisecond)
+	clineEvents = append(clineEvents, end)
+
+	msgs := aggregateChatMessages(clineEvents)
+	if len(msgs) != 1 {
+		t.Fatalf("cline thinking messages=%d want 1: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Content != "Let me think" {
+		t.Fatalf("cline thinking text=%q want the block exactly once", msgs[0].Content)
+	}
+	if msgs[0].NormalizedContent != `{"duration_ms":1200}` {
+		t.Fatalf("cline thinking normalized=%q want the derived 1200ms span", msgs[0].NormalizedContent)
+	}
+
+	// Cursor: one thinking message per block, duration reported by the provider.
+	cursorMsgs := aggregateChatMessages([]LLMEvent{{
+		Seq: 0, Channel: LLMChannelThought, EventType: "thinking", TextDelta: "hmm", CreatedAt: start,
+		Payload: map[string]any{"text": "hmm", "thinking_duration_ms": float64(3456)},
+	}})
+	if len(cursorMsgs) != 1 || cursorMsgs[0].Content != "hmm" {
+		t.Fatalf("cursor thinking messages=%+v", cursorMsgs)
+	}
+	if cursorMsgs[0].NormalizedContent != `{"duration_ms":3456}` {
+		t.Fatalf("cursor thinking normalized=%q want the reported 3456ms", cursorMsgs[0].NormalizedContent)
 	}
 }
