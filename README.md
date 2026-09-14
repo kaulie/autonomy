@@ -153,6 +153,8 @@ args=…` / `tool <name> end … out=…` / `iteration …` / `usage …`. The p
 noise is dropped. `AUTONOMY_CLINE_TRACE=1` switches to the full per-event firehose
 for debugging; `AUTONOMY_LLM_DEBUG=0` silences the bridge.
 
+Bridge unit tests (trace policy, config resolution): `cd src/clinesdk/bridge && npm test`.
+
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
