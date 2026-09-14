@@ -117,6 +117,12 @@ function onCoreEvent(event) {
  */
 function noteRunActivity(agent, inner) {
 	if (!agent || !inner) return;
+	if (agent.firstEventAt == null) {
+		agent.firstEventAt = Date.now();
+		if (agent.runStartedAt != null) {
+			log("info", `first event after ${agent.firstEventAt - agent.runStartedAt}ms (${inner.type}${inner.contentType ? ":" + inner.contentType : ""})`);
+		}
+	}
 	const type = inner.type;
 	const contentType = inner.contentType;
 	if (type === "content_end" && contentType === "text") {
@@ -299,7 +305,16 @@ async function send(params, requestId) {
 			sessionOwners.set(sessionId, agent.agentId);
 			log("info", `start session=${sessionId} model=${config.modelId ?? "default"} cwd=${config.cwd} req=${requestId}`);
 			agent.currentRequest = requestId;
-			res = await client.start({ prompt, interactive: INTERACTIVE, config });
+			// Bridge-side progress: warn when nothing at all arrived shortly after a
+			// start, because a stalled provider looks exactly like a slow one.
+			agent.runStartedAt = Date.now();
+			agent.firstEventAt = null;
+			setTimeout(() => {
+				if (agent.firstEventAt == null) {
+					log("warn", `no SDK events ${Date.now() - agent.runStartedAt}ms after start (session ${agent.sessionId}) — provider may be queueing/throttling`);
+				}
+			}, 30000);
+	res = await client.start({ prompt, interactive: INTERACTIVE, config });
 			agent.sessionId = res?.sessionId ?? sessionId;
 			agent.started = true;
 			sessionOwners.set(agent.sessionId, agent.agentId);
