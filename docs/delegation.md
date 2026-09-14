@@ -31,6 +31,8 @@ Task Owner → Coding Agent → Research Agent → …
 - 常伴随子 [Task](task.md) 或等价工作单元
 - 完成时发出 [Event](event.md) 供 Owner 再规划
 - 选择接受方可参考 [Capability](capability.md) + [Trust](trust.md) + Cost + Availability
+- **落库表现**：用户只写顶层 Task 的输入；被委托的那次 run 的输入行在 `llm_messages` 里记成
+  `role=agent`（谁委托的），不再是 `user`（见 [llm-message.md](llm-message.md)）
 
 ## 不变式
 

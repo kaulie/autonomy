@@ -106,6 +106,14 @@ func (s *runtimeAgentSession) ID() string {
 	return s.agent.Name
 }
 
+// beginDelegatedTrace opens the run header for a prompt this agent received from
+// another agent (a capability delegating a sub-task to it), so the recorded input
+// row is attributed to the agent that delegated rather than to the user: the user
+// only authors the top-level task.
+func (s *runtimeAgentSession) beginDelegatedTrace(prompt string) *LLMTrace {
+	return BeginLLMTraceFrom(s.agent, LLMMessageRoleAgent, s.taskID, 0, ReasonModeAgent, prompt)
+}
+
 func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string, error) {
 	if s == nil || s.agent == nil {
 		return "", fmt.Errorf("nil agent session")
@@ -119,7 +127,7 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	wd := llmrun.NewIdleWatchdog(ctx, idle)
 	defer wd.Stop()
 	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
-	trace := BeginLLMTrace(s.agent, s.taskID, 0, ReasonModeAgent, prompt)
+	trace := s.beginDelegatedTrace(prompt)
 	text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, ReasonModeAgent, trace.Emit)
 	if err != nil {
 		trace.Finish(runRes)

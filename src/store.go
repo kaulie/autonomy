@@ -67,14 +67,17 @@ const (
 // The Run* / Status / usage fields are populated for streamed provider runs;
 // they stay zero for local or one-shot turns.
 type ReasonTurn struct {
-	TaskID           string
-	AgentID          int64
-	Step             int
-	Mode             ReasonMode
-	LLMProvider      LLMProvider
-	Model            string
-	LLMAgentID       string
-	Input            string
+	TaskID      string
+	AgentID     int64
+	Step        int
+	Mode        ReasonMode
+	LLMProvider LLMProvider
+	Model       string
+	LLMAgentID  string
+	Input       string
+	// InputRole is who authored Input: the user (empty defaults to it) for the
+	// runtime's own prompts, or agent when another agent delegated this run.
+	InputRole        LLMMessageRole
 	RawOutput        string
 	NormalizedOutput string
 	// RunID is the provider's run id (e.g. Cursor RunResult.RunID).
@@ -108,6 +111,11 @@ const (
 	LLMMessageRoleAssistant LLMMessageRole = "assistant"
 	LLMMessageRoleThinking  LLMMessageRole = "thinking"
 	LLMMessageRoleTool      LLMMessageRole = "tool"
+	// LLMMessageRoleAgent marks a run's input when another agent authored the
+	// prompt (a capability delegating a sub-task to this agent), as opposed to
+	// user, which is the human's own task. The user only authors the top-level
+	// task; everything delegated below it is agent to agent.
+	LLMMessageRoleAgent LLMMessageRole = "agent"
 )
 
 // ReasonTurnHandle is what BeginReasonTurn returns: the run header id plus the

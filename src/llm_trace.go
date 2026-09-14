@@ -53,9 +53,22 @@ type LLMTrace struct {
 	aggregator *chatAggregator
 }
 
-// BeginLLMTrace opens a run header for one LLM interaction. The returned trace
-// is always non-nil; call Emit for each stream event and Finish exactly once.
+// BeginLLMTrace opens a run header for one LLM interaction whose input is the
+// user's (the runtime's own prompts). The returned trace is always non-nil; call
+// Emit for each stream event and Finish exactly once.
 func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input string) *LLMTrace {
+	return BeginLLMTraceFrom(agent, LLMMessageRoleUser, taskID, step, mode, input)
+}
+
+// BeginLLMTraceFrom opens a run header and records who authored the input:
+// LLMMessageRoleUser for the runtime's own prompts, LLMMessageRoleAgent when
+// another agent delegated this run (a capability handing a sub-task to this
+// agent). The input row is the run's first llm_messages row, so this is where a
+// delegation becomes visible instead of looking like the user speaking again.
+func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, step int, mode ReasonMode, input string) *LLMTrace {
+	if inputRole == "" {
+		inputRole = LLMMessageRoleUser
+	}
 	t := &LLMTrace{store: activeStore(), start: time.Now(), events: llmEventStreamEnabled()}
 	if t.store == nil {
 		return t
@@ -65,6 +78,7 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 		Step:      step,
 		Mode:      mode,
 		Input:     input,
+		InputRole: inputRole,
 		Status:    string(LLMStatusRunning),
 		StartedAt: t.start,
 	}
@@ -82,8 +96,8 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 	t.handle = handle
 	t.aggregator = newChatAggregator()
 	t.active = true
-	// The user input is an llm_messages row too, so the run's log starts with it.
-	logLLMMessage(LLMMessage{Seq: llmMessageSeqUser, Role: LLMMessageRoleUser, Content: input})
+	// The input is an llm_messages row too, so the run's log starts with it.
+	logLLMMessage(LLMMessage{Seq: llmMessageSeqUser, Role: inputRole, Content: input})
 	return t
 }
 

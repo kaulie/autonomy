@@ -585,15 +585,21 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return id, nil
 }
 
-// userMessage builds the user-input llm_messages row for a run header.
-func userMessage(turnID int64, turn ReasonTurn) LLMMessage {
+// inputMessage builds a run's input llm_messages row. Its role names who authored
+// the prompt: the user (the default) for the runtime's own prompts, agent when
+// another agent delegated this run to the agent that is running it.
+func inputMessage(turnID int64, turn ReasonTurn) LLMMessage {
+	role := turn.InputRole
+	if role == "" {
+		role = LLMMessageRoleUser
+	}
 	return LLMMessage{
 		TurnID:      turnID,
 		TaskID:      turn.TaskID,
 		AgentID:     turn.AgentID,
 		Step:        turn.Step,
 		Seq:         llmMessageSeqUser,
-		Role:        LLMMessageRoleUser,
+		Role:        role,
 		Content:     turn.Input,
 		LLMProvider: turn.LLMProvider,
 		Model:       turn.Model,
@@ -630,7 +636,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		_ = tx.Rollback()
 		return err
 	}
-	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -680,7 +686,7 @@ func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
 	}
-	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
@@ -1079,7 +1085,7 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 	if err != nil {
 		return err
 	}
-	inputID, err := insertMessageTx(tx, userMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return err
