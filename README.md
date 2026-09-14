@@ -117,9 +117,31 @@ go run ./cmd/autonomy
 
 `LLMReasoner` reads `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` at runtime, passes it through to the model (replacing `{{CONSTRUCTS}}` from bootstrap-registered capabilities in `src/capability/`, plus any future `{{...}}` placeholders), then appends a structured **Runtime Context** appendix (fenced JSON for Agent / Goal / World / optional Additional Input). Bootstrap registers agents only via `AgentFactory`; Cursor is one backend (`AttachCursor` / `newCursorClient` once). `code_edit` acquires a Cursor-backed agent through `Runtime.AcquireAgent` (not a private Cursor client). Storage is pluggable behind a unified `Store` interface; the default `sqlite` engine lives at `$PROJECT_ROOT/data/autonomy.db` (see [docs/store.md](docs/store.md)). Each Agent gets `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`. Decisions map registered capabilities to `CapabilityAction` → `Capability.Run`.
 
-Every LLM interaction is persisted as a `reason_turns` run header, the user input and assistant output as two linked `llm_messages` rows (`parent_id` traces a return back to its specific input), plus the raw provider stream in `llm_events` (`turn_id` → header, ordered by `seq`, verbatim `payload`). New providers plug in by mapping their native stream into the neutral `LLMEvent` shape via `LLMStreamAdapter` — see [docs/llm-message.md](docs/llm-message.md) and [docs/llm-event-stream.md](docs/llm-event-stream.md).
+Every LLM interaction is persisted as a `reason_turns` run header, the user input and assistant output as two linked `llm_messages` rows (`parent_id` traces a return back to its specific input), plus the raw provider stream in `llm_events` (`turn_id` → header, ordered by `seq`, verbatim `payload`). New providers plug in by mapping their native stream into the neutral `LLMEvent` shape via `LLMStreamAdapter` — `cursor` (Cursor SDK bridge) and `cline` (Cline SDK bridge) are
+implemented today — see [docs/llm-message.md](docs/llm-message.md), [docs/llm-event-stream.md](docs/llm-event-stream.md)
+and [docs/cline-reasoner.md](docs/cline-reasoner.md).
 
 Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -timeout 5m -v`
+
+### Cline backend (resident agent sessions)
+
+`AUTONOMY_LLM_BACKEND=cline` runs acquired coding agents on the Cline SDK instead
+of the Cursor SDK bridge. Cline's agent core is TypeScript-only, so Go drives it
+through a small Node bridge (`src/clinesdk/bridge/bridge.mjs`, NDJSON over stdio)
+that owns the resident Cline session; the Go side owns process lifecycle, request
+correlation, event fan-out and the mapping onto neutral `LLMEvent`s. Design,
+protocol and mapping: [docs/cline-reasoner.md](docs/cline-reasoner.md).
+
+```bash
+./scripts/install-cline-bridge.sh            # npm install @cline/sdk for the bridge
+export AUTONOMY_CLINE_PROVIDER=deepseek      # or anthropic, openai, openrouter, ...
+export AUTONOMY_CLINE_MODEL=deepseek-v4-pro
+export AUTONOMY_CLINE_API_KEY=sk-...         # optional: `cline auth` credentials also work
+export AUTONOMY_LLM_BACKEND=cline
+go run ./cmd/autonomy
+```
+
+Live smoke (optional): `CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=... AUTONOMY_CLINE_MODEL=... go test ./src/clinesdk -run TestClineBridgeLive -timeout 6m -v`
 
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.

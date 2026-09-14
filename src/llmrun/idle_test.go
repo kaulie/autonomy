@@ -1,12 +1,10 @@
-package cursorsdk
+package llmrun
 
 import (
 	"context"
 	"strings"
 	"testing"
 	"time"
-
-	sdkv1 "github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1"
 )
 
 func waitDone(t *testing.T, ctx context.Context, d time.Duration) bool {
@@ -83,7 +81,7 @@ func TestIdleWatchdogDisabledFollowsParent(t *testing.T) {
 	}
 }
 
-func TestTouchIdleThroughContext(t *testing.T) {
+func TestTouchThroughContext(t *testing.T) {
 	t.Parallel()
 	wd := NewIdleWatchdog(context.Background(), 70*time.Millisecond)
 	defer wd.Stop()
@@ -91,46 +89,14 @@ func TestTouchIdleThroughContext(t *testing.T) {
 
 	for i := 0; i < 12; i++ {
 		time.Sleep(15 * time.Millisecond)
-		touchIdle(ctx)
+		Touch(ctx)
 	}
 	if ctx.Err() != nil {
 		t.Fatalf("touching through ctx did not keep the run alive: %v", context.Cause(ctx))
 	}
 	// Contexts without a watchdog are a no-op.
-	touchIdle(context.Background())
-	touchIdle(nil)
-}
-
-func TestNoteActivitySkipsKeepalives(t *testing.T) {
-	t.Parallel()
-	wd := NewIdleWatchdog(context.Background(), 70*time.Millisecond)
-	defer wd.Stop()
-	ctx := WithIdleWatchdog(wd.Context(), wd)
-
-	// Bare keepalives must not count as progress.
-	for i := 0; i < 8; i++ {
-		time.Sleep(15 * time.Millisecond)
-		noteActivity(ctx, &sdkv1.RunStreamMessage{})
-	}
-	if !waitDone(t, wd.Context(), 2*time.Second) {
-		t.Fatal("keepalive-only traffic kept an idle run alive")
-	}
-}
-
-func TestNoteActivityCountsProviderEvents(t *testing.T) {
-	t.Parallel()
-	wd := NewIdleWatchdog(context.Background(), 70*time.Millisecond)
-	defer wd.Stop()
-	ctx := WithIdleWatchdog(wd.Context(), wd)
-
-	event := &sdkv1.RunStreamMessage{Envelope: &sdkv1.RunStreamMessage_Done{}}
-	for i := 0; i < 12; i++ {
-		time.Sleep(15 * time.Millisecond)
-		noteActivity(ctx, event)
-	}
-	if ctx.Err() != nil {
-		t.Fatalf("provider events did not keep the run alive: %v", context.Cause(ctx))
-	}
+	Touch(context.Background())
+	Touch(nil)
 }
 
 func TestCtxErrPrefersCause(t *testing.T) {
@@ -140,12 +106,12 @@ func TestCtxErrPrefersCause(t *testing.T) {
 	if !waitDone(t, wd.Context(), 2*time.Second) {
 		t.Fatal("watchdog did not fire")
 	}
-	got := ctxErr(wd.Context())
+	got := CtxErr(wd.Context())
 	if got == nil || !strings.Contains(got.Error(), "idle") {
-		t.Fatalf("ctxErr=%v, want the idle-timeout cause", got)
+		t.Fatalf("CtxErr=%v, want the idle-timeout cause", got)
 	}
-	if ctxErr(context.Background()) != nil {
-		t.Fatal("ctxErr on a live context should be nil")
+	if CtxErr(context.Background()) != nil {
+		t.Fatal("CtxErr on a live context should be nil")
 	}
 }
 

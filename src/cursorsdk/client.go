@@ -13,6 +13,7 @@ import (
 
 	sdkv1 "github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1"
 	"github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1/sdkv1connect"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // BridgeVersion is reported by SdkBridgeControlService.GetVersion.
@@ -270,9 +271,9 @@ func wrapConnectErr(err error) error {
 // running while the provider produces activity and is aborted only after that
 // much silence.
 func Prompt(ctx context.Context, text string, opts ...ClientOption) (string, error) {
-	wd := NewIdleWatchdog(ctx, IdleTimeout())
+	wd := llmrun.NewIdleWatchdog(ctx, llmrun.IdleTimeout())
 	defer wd.Stop()
-	ctx = WithIdleWatchdog(wd.Context(), wd)
+	ctx = llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	client := NewClient(opts...)
 	defer client.Close()

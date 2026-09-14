@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/cursorsdk"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 type ReasoningInput struct {
@@ -68,10 +69,10 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	}
 	// A run is never capped by wall clock: the watchdog only aborts it after
 	// AUTONOMY_LLM_TIMEOUT (default 3m) with no provider activity.
-	idle := cursorsdk.IdleTimeout()
-	wd := cursorsdk.NewIdleWatchdog(parent, idle)
+	idle := llmrun.IdleTimeout()
+	wd := llmrun.NewIdleWatchdog(parent, idle)
 	defer wd.Stop()
-	goCtx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
+	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	t0 := time.Now()
 	stage := func(name string, format string, args ...any) {
@@ -86,13 +87,13 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("start", "model=%s idle=%s cwd=%s lifecycle=%s", model, idle, cwd, ctx.Agent.Lifecycle)
 
-	stage("ensureCursor", "begin")
+	stage("ensureSession", "begin")
 	tEnsure := time.Now()
-	cAgent, err := ctx.Agent.ensureCursorSession(goCtx, model, cwd)
+	session, err := ctx.Agent.ensureLLMSession(goCtx, model, cwd, ReasonModePlan)
 	if err != nil {
 		return ReasoningResult{}, err
 	}
-	stage("ensureCursor", "ok id=%s elapsed=%s", cAgent.ID, time.Since(tEnsure).Round(time.Millisecond))
+	stage("ensureSession", "ok session=%s elapsed=%s", session, time.Since(tEnsure).Round(time.Millisecond))
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
@@ -105,15 +106,15 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		stage("prompt", "body:\n%s", prompt)
 	}
 
-	stage("PromptCursor", "begin agent_id=%s", cAgent.ID)
+	stage("prompt_run", "begin session=%s", session)
 	tSend := time.Now()
 	trace := BeginLLMTrace(ctx.Agent, reasonTaskID(ctx), ctx.Step, ReasonModePlan, prompt)
-	text, runRes, err := ctx.Agent.PromptCursorStream(goCtx, prompt, trace.Emit)
+	text, runRes, err := ctx.Agent.PromptLLMStream(goCtx, prompt, ReasonModePlan, trace.Emit)
 	if err != nil {
 		trace.Finish(runRes)
 		return ReasoningResult{}, err
 	}
-	stage("PromptCursor", "done text_bytes=%d elapsed=%s total=%s",
+	stage("prompt_run", "done text_bytes=%d elapsed=%s total=%s",
 		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
 	stage("parse", "begin")

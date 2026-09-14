@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kaulie/autonomy/src/clinesdk"
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
@@ -21,6 +22,7 @@ type AgentBackend string
 const (
 	AgentBackendLocal  AgentBackend = "local"
 	AgentBackendCursor AgentBackend = "cursor"
+	AgentBackendCline  AgentBackend = "cline"
 )
 
 // LLMProvider identifies which LLM provider backs an agent.
@@ -118,6 +120,7 @@ type Agent struct {
 	DecideMaker *DecisionMaker
 
 	cursorAgent *cursorsdk.Agent
+	clineAgent  *clinesdk.Agent
 	// LLMAgentID is retained for persistent agents after Close (Resume later).
 	LLMAgentID string
 }
