@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,6 +64,44 @@ func TestRuntimeAcquireAgentWithoutWorkspaceUsesItsOwn(t *testing.T) {
 	}
 	if want := AgentWorkspacePath(sess.ID()); ws != want {
 		t.Fatalf("session workspace=%q, want %q", ws, want)
+	}
+}
+
+// TestRuntimeAcquireAgentRecordsTheDelegatedTask: a capability-acquired agent
+// works on the same task as its caller, so its agents row must carry that
+// current_task_id (it used to stay empty while its runs already recorded the
+// task).
+func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	_store = store
+	t.Cleanup(func() { _store = prev })
+
+	rt := NewRuntime(NewAgentFactory())
+	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
+		Purpose: "code_edit",
+		TaskID:  "task-9",
+		Backend: string(AgentBackendLocal),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sess.Release(context.Background()) }()
+
+	var taskID, state string
+	if err := store.db.QueryRow(`SELECT current_task_id, state FROM agents WHERE name = ?`, sess.ID()).
+		Scan(&taskID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if taskID != "task-9" {
+		t.Fatalf("agents.current_task_id=%q, want the delegated task %q", taskID, "task-9")
+	}
+	if state != "running" {
+		t.Fatalf("agents.state=%q, want running", state)
 	}
 }
 

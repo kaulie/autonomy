@@ -15,8 +15,9 @@ type AcquireAgentOpts struct {
 	Workspace string
 	// Model overrides AUTONOMY_LLM_MODEL when non-empty.
 	Model string
-	// TaskID, when non-empty, is recorded on reason_turns for prompts made by
-	// the acquired agent.
+	// TaskID, when non-empty, is the task the acquired agent works on: it is
+	// recorded as the agent's current_task_id and on every reason_turns row the
+	// agent produces. A delegated worker carries the delegating agent's task id.
 	TaskID string
 	// Backend is "cursor" (default) or "local".
 	Backend string
