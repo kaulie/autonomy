@@ -53,6 +53,14 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 	}
 	agent := r.agents.NewAgent()
 	agent.Lifecycle = AgentLifecycleEphemeral
+	// A capability-acquired agent works on the same task as the agent that
+	// delegated to it, so its row carries that task id too (current_task_id used
+	// to stay empty for delegated workers even though their runs already recorded
+	// the task). Only the id is known at this point; nothing reads CurrentTask for
+	// a delegated agent.
+	if taskID := strings.TrimSpace(opts.TaskID); taskID != "" {
+		agent.CurrentTask = &Task{ID: taskID}
+	}
 	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
 		agent.Workspace = ws
 	}
