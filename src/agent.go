@@ -120,7 +120,11 @@ type Agent struct {
 	DecideMaker *DecisionMaker
 
 	cursorAgent *cursorsdk.Agent
+	// clineAgent is the Cline session for the mode in use; clineAgents keeps one
+	// session handle per (mode, cwd) for the agent's lifetime, because closing a
+	// session while another one is starting can stall that run.
 	clineAgent  *clinesdk.Agent
+	clineAgents map[string]*clinesdk.Agent
 	// LLMAgentID is retained for persistent agents after Close (Resume later).
 	LLMAgentID string
 }

@@ -51,6 +51,22 @@ function log(level, message) {
 	process.stderr.write(`[cline-bridge] ${level}: ${message}\n`);
 }
 
+// AUTONOMY_CLINE_TRACE=1 (or the shared AUTONOMY_LLM_DEBUG=1) logs every event
+// the SDK emits, which is how a "no provider activity" stall gets diagnosed.
+const TRACE = /^(1|true|on|yes)$/i.test(process.env.AUTONOMY_CLINE_TRACE ?? process.env.AUTONOMY_LLM_DEBUG ?? "");
+
+// Headless by default: autonomy has no UI to answer SDK interaction prompts, and
+// an unanswered prompt looks exactly like a stalled run (no events at all).
+// AUTONOMY_CLINE_INTERACTIVE=1 restores the web-cursor-style interactive host.
+const INTERACTIVE = /^(1|true|on|yes)$/i.test(process.env.AUTONOMY_CLINE_INTERACTIVE ?? "");
+
+function summarizeEvent(event) {
+	const inner = event?.payload?.event ?? event;
+	const type = inner?.type ?? event?.type ?? "?";
+	const content = inner?.contentType ? `:${inner.contentType}` : "";
+	return `${event?.type ?? "?"}/${type}${content}`;
+}
+
 function rpcError(code, message) {
 	const err = new Error(message);
 	err.code = code;
@@ -82,6 +98,9 @@ function onCoreEvent(event) {
 	const agentId = sessionId ? sessionOwners.get(sessionId) ?? null : null;
 	const agent = agentId ? agents.get(agentId) : null;
 	if (agent) noteRunActivity(agent, event?.payload?.event ?? event);
+	if (TRACE) {
+		log("trace", `event ${summarizeEvent(event)} session=${sessionId ?? "-"} req=${agent?.currentRequest ?? "-"}`);
+	}
 	write({
 		type: "event",
 		requestId: agent?.currentRequest ?? null,
@@ -280,7 +299,7 @@ async function send(params, requestId) {
 			sessionOwners.set(sessionId, agent.agentId);
 			log("info", `start session=${sessionId} model=${config.modelId ?? "default"} cwd=${config.cwd} req=${requestId}`);
 			agent.currentRequest = requestId;
-			res = await client.start({ prompt, interactive: true, config });
+			res = await client.start({ prompt, interactive: INTERACTIVE, config });
 			agent.sessionId = res?.sessionId ?? sessionId;
 			agent.started = true;
 			sessionOwners.set(agent.sessionId, agent.agentId);

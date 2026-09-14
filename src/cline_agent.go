@@ -31,27 +31,58 @@ func (a *Agent) AttachCline(ctx context.Context) error {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	agent, err := client.Agents().Create(ctx, clinesdk.CreateOptions{
+	return a.attachClineSession(ctx, clineModeFor(ReasonModeAgent), cwd)
+}
+
+// clineSessionKey identifies one resident session: a Cline session is sticky in
+// both mode and cwd, so those two define the handle.
+func clineSessionKey(mode, cwd string) string {
+	return mode + "\x00" + cwd
+}
+
+// attachClineSession creates (or reuses) the session for one mode/cwd and makes
+// it the current one. Sessions for other modes/cwds are kept alive: closing one
+// while a freshly started session is initialising can stall that run, and an
+// idle handle costs a bridge-side map entry.
+func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error {
+	if a.clineAgents == nil {
+		a.clineAgents = map[string]*clinesdk.Agent{}
+	}
+	key := clineSessionKey(mode, cwd)
+	if existing, ok := a.clineAgents[key]; ok {
+		a.setClineSession(existing)
+		return nil
+	}
+	agent, err := sharedClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
 		ProviderID:   resolveClineProvider(),
 		ModelID:      resolveClineModel(),
 		APIKey:       strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
 		BaseURL:      strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
 		CWD:          cwd,
 		SystemPrompt: defaultClineSystemPrompt(),
-		Mode:         clineModeFor(ReasonModeAgent),
+		Mode:         mode,
 	})
 	if err != nil {
-		return fmt.Errorf("create cline agent: %w", err)
+		return fmt.Errorf("create cline agent (mode %s): %w", mode, err)
 	}
-	a.clineAgent = agent
+	a.clineAgents[key] = agent
+	a.setClineSession(agent)
 	a.LLMAgentID = agent.ID
 	a.Backend = AgentBackendCline
 	a.LLMProvider = LLMProviderCline
 	a.Model = agent.ModelID
 	persistAgent(a)
-	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s provider=%s model=%s cwd=%s\n",
-		agent.ID, agent.ProviderID, agent.ModelID, agent.CWD)
+	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s mode=%s provider=%s model=%s cwd=%s\n",
+		agent.ID, mode, agent.ProviderID, agent.ModelID, agent.CWD)
 	return nil
+}
+
+func (a *Agent) setClineSession(agent *clinesdk.Agent) {
+	a.clineAgent = agent
+	a.LLMAgentID = agent.ID
+	a.Backend = AgentBackendCline
+	a.LLMProvider = LLMProviderCline
+	a.Model = agent.ModelID
 }
 
 // clineModeFor maps an autonomy reasoning mode onto a Cline session mode. Plan
@@ -65,44 +96,17 @@ func clineModeFor(mode ReasonMode) string {
 }
 
 // ensureClineSession attaches a session if needed and makes sure it runs in the
-// requested mode. A Cline session is mode-sticky, so a mode switch replaces the
-// session (the prompt carries the context, so nothing is lost).
+// requested mode. A Cline session is sticky in mode and cwd, so a change means
+// switching to another resident session (the prompt carries the context).
 func (a *Agent) ensureClineSession(ctx context.Context, cwd, mode string) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("nil agent")
 	}
-	if a.clineAgent == nil {
-		if err := a.AttachCline(ctx); err != nil {
-			return "", err
-		}
-	}
 	if cwd != "" {
 		a.Workspace = cwd
 	}
-	if a.clineAgent.Mode != mode {
-		modeAgent, err := sharedClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
-			ProviderID:   a.clineAgent.ProviderID,
-			ModelID:      a.clineAgent.ModelID,
-			APIKey:       strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
-			BaseURL:      strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
-			CWD:          a.clineAgent.CWD,
-			SystemPrompt: defaultClineSystemPrompt(),
-			Mode:         mode,
-		})
-		if err != nil {
-			return "", fmt.Errorf("create cline agent (mode %s): %w", mode, err)
-		}
-		old := a.clineAgent
-		a.clineAgent = modeAgent
-		a.LLMAgentID = modeAgent.ID
-		persistAgent(a)
-		go func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := old.Close(closeCtx); err != nil {
-				fmt.Fprintf(os.Stderr, "[autonomy] close cline session %s failed: %v\n", old.ID, err)
-			}
-		}()
+	if err := a.attachClineSession(ctx, mode, a.Workspace); err != nil {
+		return "", err
 	}
 	return firstNonEmptyString(a.clineAgent.SessionID, a.clineAgent.ID), nil
 }
@@ -162,9 +166,9 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 	return text, meta, nil
 }
 
-// disposeClineSession ends the Cline session for this task.
+// disposeClineSession ends every Cline session this agent opened for this task.
 func (a *Agent) disposeClineSession(ctx context.Context) {
-	if a == nil || a.clineAgent == nil {
+	if a == nil {
 		return
 	}
 	if ctx == nil {
@@ -172,9 +176,12 @@ func (a *Agent) disposeClineSession(ctx context.Context) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := a.clineAgent.Close(cctx); err != nil {
-		fmt.Fprintf(os.Stderr, "[autonomy] close cline agent %s failed: %v\n", a.clineAgent.ID, err)
+	for key, agent := range a.clineAgents {
+		if err := agent.Close(cctx); err != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] close cline agent %s (%s) failed: %v\n", agent.ID, key, err)
+		}
 	}
-	// The shared bridge client is process-wide and must NOT be closed here.
+	a.clineAgents = nil
 	a.clineAgent = nil
+	// The shared bridge client is process-wide and must NOT be closed here.
 }

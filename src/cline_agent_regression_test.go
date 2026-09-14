@@ -65,11 +65,8 @@ func TestEnsureClineSessionAlsoServesReasonerBeforeAgentAttach(t *testing.T) {
 	installFakeClineClient(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 	agent := newClineTestAgent(t)
-	// Plan-mode reasoner call on an already-attached (yolo) agent: the session
-	// is replaced, and the caller keeps working.
-	if err := agent.clineAgent.Close(context.Background()); err != nil {
-		t.Fatalf("close: %v", err)
-	}
+	// Drop the yolo session, then ask the reasoner path for a plan session.
+	agent.clineAgents = nil
 	agent.clineAgent = nil
 	agent.Backend = AgentBackendLocal
 	session, err := agent.ensureLLMSession(context.Background(), "composer-2", agent.Workspace, ReasonModePlan)

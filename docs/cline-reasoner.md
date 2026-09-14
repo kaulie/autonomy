@@ -55,6 +55,8 @@ runtime → bridge
 | `AUTONOMY_CLINE_API_KEY` | 空 → 用 `cline auth` 保存的凭据 | provider key；通常不用设 |
 | `AUTONOMY_CLINE_BASE_URL` | 空 | 兼容 OpenAI 的自建端点等 |
 | `AUTONOMY_CLINE_SYSTEM_PROMPT` | 见下 | 覆盖 session system prompt（SDK **必须**有非空 system prompt） |
+| `AUTONOMY_CLINE_INTERACTIVE` | `0` | 桥默认以 **headless** 方式启动 SDK（`interactive: false`）。设为 `1` 恢复 web-cursor 那种"有 UI 应答"的模式；**无 UI 时不要开**，否则 SDK 的交互请求没人回答，表现就是"零事件卡死" |
+| `AUTONOMY_CLINE_TRACE` | `0` | 设为 `1`（或复用 `AUTONOMY_LLM_DEBUG=1`）后，桥会把 SDK 的**每个事件**打到 stderr，用来诊断"到底有没有事件在流" |
 | `AUTONOMY_CLINE_DATA_DIR` / `CLINE_DATA_DIR` / `CLINE_DIR` | `~/.cline` | 定位已保存的 Cline 配置（仅在 provider/model 未显式设置时使用） |
 | `AUTONOMY_CLINE_NODE_BIN` | `node` | Node 可执行文件 |
 | `AUTONOMY_CLINE_BRIDGE_SCRIPT` | `src/clinesdk/bridge/bridge.mjs` | 桥脚本路径 |
@@ -72,9 +74,10 @@ runtime → bridge
 
 - 一个 autonomy `Agent` ↔ **一个常驻 Cline session**：第一次 `send` 由 `ClineCore.start` 起会话，
   之后每次 `send` 都是 `ClineCore.send`，上下文与 prompt cache 复用。
-- **模式是粘的**：Cline session 创建时就定了 `plan`（只读）或 `yolo`（工具自动批准）。autonomy 的
-  `ReasonModePlan` → Cline `plan`，其余 → `yolo`。同一 agent 切模式时会**换一个新 session**
-  （prompt 自带上下文，所以不丢信息），旧 session 异步 `close`。
+- **模式/工作目录是粘的**：Cline session 创建时就定了 `plan`（只读）或 `yolo`（工具自动批准）以及 cwd。
+  autonomy 的 `ReasonModePlan` → Cline `plan`，其余 → `yolo`；需要另一种时**再建一个 session 并保留旧的**
+  （key = `mode` + cwd）。**不会在别的 session 正在启动时去 close 它** —— 那样可能让新 run 静默卡住；
+  所有 session 在该 agent `Release`/dispose 时一起关闭。
 - ephemeral agent（capability 通过 `Runtime.AcquireAgent` 拿到的）在 `Release` 时 `close` session；
   常驻 agent 保留 handle 以备恢复（与 Cursor 路径一致）。
 
@@ -140,6 +143,20 @@ go run ./cmd/autonomy                      # LLMReasoner 与 code_edit 现在都
 坑（已修）：SDK 在 **没有 system prompt** 时会内部 `undefined.trim()` 抛错（`Cannot read
 properties of undefined (reading 'trim')`），所以桥会兜底一个通用 prompt，autonomy 侧
 `defaultClineSystemPrompt()` 也会给默认值。
+
+## 排查"零事件卡死"
+
+症状：`decide: cline wait: run idle for 3m0s: no provider activity`，且桥在 `start session=…` 之后
+**一条事件都没有**。这说明 run 在 provider 应答前就停了，按顺序看：
+
+1. `AUTONOMY_CLINE_TRACE=1` 重跑：确认是否真的零事件（正常首轮应有几百条 `status/iteration_start/
+   content_start:reasoning`…）。
+2. 零事件 → 先怀疑**交互式卡住**（`AUTONOMY_CLINE_INTERACTIVE` 不要开）或 **provider 侧排队/限流**
+   （换个 provider/model 或稍后重试）。
+3. 有事件但中途静默超过 `AUTONOMY_LLM_TIMEOUT`（默认 3m）→ 调大该值即可；看门狗只在**静默**时触发，
+   事件持续流动不会打断长 run。
+4. 报错信息已经带提示：零事件时会是 `… (no SDK events arrived at all: check the provider status/quota
+   for deepseek/deepseek-v4-pro; AUTONOMY_CLINE_TRACE=1 traces provider events)`。
 
 ## 已知边界（后续可做）
 
