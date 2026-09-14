@@ -34,6 +34,10 @@ go.work.sum
 # Cursor SDK Bridge standalone binary (download via scripts/fetch-bridge.sh)
 third_party/
 
+# Cline bridge Node dependencies (install via scripts/install-cline-bridge.sh);
+# the lockfile IS committed so installs are reproducible.
+src/clinesdk/bridge/node_modules/
+
 # Local SQLite persistence ($PROJECT_ROOT/data/autonomy.db)
 data/
 

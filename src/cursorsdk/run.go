@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	sdkv1 "github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // RunEvent is one event from a run stream.
@@ -160,7 +161,7 @@ func (r *Run) waitLive(ctx context.Context) (*RunResult, error) {
 		Trace("WaitLiveRun", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		if ctx.Err() != nil {
 			// Idle timeout / caller cancel tore down the RPC: surface the cause.
-			return nil, ctxErr(ctx)
+			return nil, llmrun.CtxErr(ctx)
 		}
 		return nil, wrapConnectErr(err)
 	}
@@ -194,7 +195,7 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 	n := 0
 	for r.stream.Receive() {
 		if ctx.Err() != nil {
-			return ctxErr(ctx)
+			return llmrun.CtxErr(ctx)
 		}
 		n++
 		msg := r.stream.Msg()
@@ -283,7 +284,7 @@ func (r *Run) consume(ctx context.Context, onEvent func(RunEvent)) error {
 	if ctx.Err() != nil {
 		// The stream ended because the context did (idle timeout / caller
 		// cancel): report the cause instead of transport noise or a bare EOF.
-		return ctxErr(ctx)
+		return llmrun.CtxErr(ctx)
 	}
 	err := r.stream.Err()
 	Trace("stream", "receive ended after %d messages err=%v", n, err)
@@ -298,7 +299,7 @@ func noteActivity(ctx context.Context, msg *sdkv1.RunStreamMessage) {
 	if msg.GetEnvelope() == nil {
 		return
 	}
-	touchIdle(ctx)
+	llmrun.Touch(ctx)
 }
 
 func runResultFromProto(p *sdkv1.RunResult, errorCode, statusMsg string) RunResult {

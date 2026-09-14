@@ -15,6 +15,7 @@ import (
 	"github.com/kaulie/autonomy/src/cursorsdk"
 	sdkv1 "github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1"
 	"github.com/kaulie/autonomy/src/cursorsdk/gen/sdk/v1/sdkv1connect"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // fakeAgentService is a minimal in-process bridge: only the RPCs used by the
@@ -114,9 +115,9 @@ func TestRunSurvivesActivityPastIdleGap(t *testing.T) {
 	}
 	client := newFakeClient(t, svc)
 
-	wd := cursorsdk.NewIdleWatchdog(context.Background(), idle)
+	wd := llmrun.NewIdleWatchdog(context.Background(), idle)
 	defer wd.Stop()
-	ctx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
+	ctx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	run := startRun(t, client, ctx)
 	res, err := run.WaitStream(ctx, nil)
@@ -151,9 +152,9 @@ func TestRunAbortedAfterIdleGap(t *testing.T) {
 	}
 	client := newFakeClient(t, svc)
 
-	wd := cursorsdk.NewIdleWatchdog(context.Background(), idle)
+	wd := llmrun.NewIdleWatchdog(context.Background(), idle)
 	defer wd.Stop()
-	ctx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
+	ctx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	run := startRun(t, client, ctx)
 	started := time.Now()
@@ -207,9 +208,9 @@ func TestRunCollectsTerminalResultRacingIdleCutoff(t *testing.T) {
 	}
 	client := newFakeClient(t, svc)
 
-	wd := cursorsdk.NewIdleWatchdog(context.Background(), idle)
+	wd := llmrun.NewIdleWatchdog(context.Background(), idle)
 	defer wd.Stop()
-	ctx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
+	ctx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	run := startRun(t, client, ctx)
 	res, err := run.WaitStream(ctx, nil)
