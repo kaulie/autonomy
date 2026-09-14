@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -327,43 +329,92 @@ func (r *Run) baseResult(status string) *RunResult {
 }
 
 func (r *Run) decodeResult(raw json.RawMessage) (*RunResult, error) {
-	var payload struct {
-		AgentID      string    `json:"agentId"`
-		SessionID    string    `json:"sessionId"`
-		Mode         string    `json:"mode"`
-		Status       string    `json:"status"`
-		Text         string    `json:"text"`
-		FinishReason string    `json:"finishReason"`
-		Usage        *RunUsage `json:"usage"`
-		UsageSource  string    `json:"usageSource"`
-		LastError    string    `json:"lastError"`
-	}
+	// The summary is decoded leniently: the bridge/SDK may hand back a structured
+	// object where a string is expected (a provider error, for example) or a
+	// numeric string, and a finished run must never fail to decode because of it.
+	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, bridgeErr("decode run result: %v", err)
 	}
 	res := &RunResult{
-		AgentID:      firstNonEmpty(payload.AgentID, r.agent.ID),
-		SessionID:    firstNonEmpty(payload.SessionID, r.agent.SessionID),
-		Mode:         payload.Mode,
-		Status:       normalizeStatus(payload.Status),
-		Text:         payload.Text,
-		FinishReason: payload.FinishReason,
-		UsageSource:  payload.UsageSource,
-		ErrorMessage: payload.LastError,
+		AgentID:      firstNonEmpty(anyText(payload["agentId"]), r.agent.ID),
+		SessionID:    firstNonEmpty(anyText(payload["sessionId"]), r.agent.SessionID),
+		Mode:         anyText(payload["mode"]),
+		Status:       normalizeStatus(anyText(payload["status"])),
+		Text:         anyText(payload["text"]),
+		FinishReason: anyText(payload["finishReason"]),
+		UsageSource:  anyText(payload["usageSource"]),
+		ErrorMessage: messageText(payload["lastError"]),
 		StartedAt:    r.startedAt,
 		EndedAt:      time.Now(),
 	}
 	res.DurationMS = time.Since(r.startedAt).Milliseconds()
-	if payload.Usage != nil {
-		res.Usage = *payload.Usage
+	if usage, ok := payload["usage"].(map[string]any); ok {
+		res.Usage = decodeUsageMap(usage)
 	}
 	if res.SessionID != "" {
 		r.agent.SessionID = res.SessionID
 	}
 	if res.Status == LLMStatusError && res.ErrorMessage == "" {
-		res.ErrorMessage = firstNonEmpty(payload.FinishReason, "cline run failed")
+		res.ErrorMessage = firstNonEmpty(res.FinishReason, "cline run failed")
 	}
 	return res, nil
+}
+
+// anyText renders a decoded JSON value as text: strings pass through, numbers and
+// booleans become their literal form, objects/arrays become compact JSON.
+func anyText(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case float64:
+		if t == math.Trunc(t) && math.Abs(t) < 1e15 {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case json.Number:
+		return t.String()
+	default:
+		if b, err := json.Marshal(t); err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(t)
+	}
+}
+
+// messageText renders an error-ish value as a human message, preferring the usual
+// message keys (recursing into nested objects) before falling back to compact JSON.
+func messageText(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return anyText(v)
+	}
+	for _, key := range []string{"message", "error", "detail", "reason", "code"} {
+		switch t := m[key].(type) {
+		case nil:
+			continue
+		case string:
+			if s := strings.TrimSpace(t); s != "" {
+				return s
+			}
+		case map[string]any, []any:
+			if s := messageText(t); s != "" {
+				return s
+			}
+		default:
+			if s := anyText(t); s != "" && s != "{}" {
+				return s
+			}
+		}
+	}
+	if s := anyText(m); s != "" && s != "{}" {
+		return s
+	}
+	return ""
 }
 
 // LLM run statuses, matching the neutral model used by the rest of autonomy.
@@ -399,32 +450,97 @@ type RunUsage struct {
 	HasCost bool `json:"-"`
 }
 
-// UnmarshalJSON reads a usage object, remembering whether a cost was present.
+// UnmarshalJSON reads a usage object leniently (numbers or numeric strings) and
+// remembers whether a cost was present at all.
 func (u *RunUsage) UnmarshalJSON(data []byte) error {
-	type raw struct {
-		InputTokens      int64    `json:"inputTokens"`
-		OutputTokens     int64    `json:"outputTokens"`
-		CacheReadTokens  int64    `json:"cacheReadTokens"`
-		CacheWriteTokens int64    `json:"cacheWriteTokens"`
-		ReasoningTokens  *int64   `json:"reasoningTokens"`
-		TotalTokens      int64    `json:"totalTokens"`
-		CostUSD          *float64 `json:"costUsd"`
-	}
-	var r raw
-	if err := json.Unmarshal(data, &r); err != nil {
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
-	u.InputTokens = r.InputTokens
-	u.OutputTokens = r.OutputTokens
-	u.CacheReadTokens = r.CacheReadTokens
-	u.CacheWriteTokens = r.CacheWriteTokens
-	u.ReasoningTokens = r.ReasoningTokens
-	u.TotalTokens = r.TotalTokens
-	if r.CostUSD != nil {
-		u.CostUSD = *r.CostUSD
+	*u = decodeUsageMap(m)
+	return nil
+}
+
+// decodeUsageMap reads the usage numbers, accepting both the camelCase keys the
+// bridge sends and the snake_case spellings a provider might use.
+func decodeUsageMap(m map[string]any) RunUsage {
+	var u RunUsage
+	int64Field := func(target *int64, keys ...string) {
+		for _, key := range keys {
+			if v, ok := anyInt64(m[key]); ok {
+				*target = v
+				return
+			}
+		}
+	}
+	int64Field(&u.InputTokens, "inputTokens", "input_tokens")
+	int64Field(&u.OutputTokens, "outputTokens", "output_tokens")
+	int64Field(&u.CacheReadTokens, "cacheReadTokens", "cache_read_tokens")
+	int64Field(&u.CacheWriteTokens, "cacheWriteTokens", "cache_write_tokens")
+	int64Field(&u.TotalTokens, "totalTokens", "total_tokens")
+	for _, key := range []string{"reasoningTokens", "reasoning_tokens"} {
+		if v, ok := anyInt64(m[key]); ok {
+			u.ReasoningTokens = &v
+			break
+		}
+	}
+	if cost, ok := anyFloat(m["costUsd"], m["cost_usd"], m["totalCost"], m["cost"]); ok {
+		u.CostUSD = cost
 		u.HasCost = true
 	}
-	return nil
+	return u
+}
+
+// anyInt64 reads a decoded JSON value as an integer, accepting numeric strings.
+func anyInt64(v any) (int64, bool) {
+	switch t := v.(type) {
+	case nil:
+		return 0, false
+	case float64:
+		return int64(t), true
+	case int64:
+		return t, true
+	case int:
+		return int64(t), true
+	case json.Number:
+		n, err := t.Int64()
+		return n, err == nil
+	case string:
+		if t = strings.TrimSpace(t); t == "" {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(t, 10, 64)
+		if err != nil {
+			if f, ferr := strconv.ParseFloat(t, 64); ferr == nil {
+				return int64(f), true
+			}
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+// anyFloat returns the first value that reads as a float.
+func anyFloat(vals ...any) (float64, bool) {
+	for _, v := range vals {
+		switch t := v.(type) {
+		case float64:
+			return t, true
+		case int64:
+			return float64(t), true
+		case json.Number:
+			if f, err := t.Float64(); err == nil {
+				return f, true
+			}
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
+				return f, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // RunResult is the terminal outcome of one run.

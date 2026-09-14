@@ -55,3 +55,46 @@ export function resolveClineDefaults({ env = process.env, home = os.homedir(), r
 	}
 	return null;
 }
+
+/**
+ * coerceText renders a provider value as text: strings pass through, numbers and
+ * booleans become their literal form, objects/arrays become compact JSON, and
+ * null/undefined become "". The SDK occasionally hands back a non-string where a
+ * string is expected (a structured error, for example), and the Go client must
+ * never fail to decode a finished run because of that.
+ */
+export function coerceText(value) {
+	if (value == null) return "";
+	if (typeof value === "string") return value;
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+/**
+ * messageOf picks a human-readable message out of an error-ish value: a plain
+ * string wins, otherwise the usual message keys are preferred and anything else
+ * degrades to compact JSON (or the fallback).
+ */
+export function messageOf(value, fallback = "") {
+	if (typeof value === "string") {
+		return value.trim() !== "" ? value : fallback;
+	}
+	if (value && typeof value === "object") {
+		for (const key of ["message", "error", "detail", "reason", "code"]) {
+			const candidate = value[key];
+			if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
+			if (candidate && typeof candidate === "object") {
+				const nested = messageOf(candidate, "");
+				if (nested !== "") return nested;
+			}
+		}
+		const text = coerceText(value);
+		return text !== "" && text !== "{}" ? text : fallback;
+	}
+	const text = coerceText(value);
+	return text !== "" ? text : fallback;
+}

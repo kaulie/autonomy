@@ -31,12 +31,10 @@ func Trace(stage, format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[cline %s +%s] %s\n", stage, elapsed, fmt.Sprintf(format, args...))
 }
 
-// TraceVerbose reports whether verbose (per-event) tracing is on.
+// TraceVerbose reports whether verbose (per-event) tracing is on. It mirrors the
+// Cursor client: AUTONOMY_LLM_DEBUG=1 (or true/verbose) enables it, everything
+// else keeps the log to heartbeats and stage lines.
 func TraceVerbose() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_DEBUG"))) {
-	case "0", "false", "off", "no", "disable", "disabled":
-		return false
-	default:
-		return true
-	}
+	v := strings.TrimSpace(os.Getenv("AUTONOMY_LLM_DEBUG"))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "verbose")
 }

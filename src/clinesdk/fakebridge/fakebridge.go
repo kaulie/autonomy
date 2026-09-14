@@ -128,10 +128,15 @@ func Main() {
 					"usage": map[string]any{"inputTokens": 7, "outputTokens": 3, "totalTokens": 10, "costUsd": 0.00001},
 				})
 			case strings.Contains(prompt, "fail me"):
-				event(req.ID, agentID, sessionID, map[string]any{"type": "error", "message": "provider exploded"})
+				// The real bridge forwarded a structured error here, which broke the client;
+				// keep that shape so the tolerant decoder stays covered end to end.
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "error", "error": map[string]any{"code": "provider_error", "message": "provider exploded"},
+				})
 				result(req.ID, map[string]any{
 					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "error",
-					"text": "", "finishReason": "error", "lastError": "provider exploded",
+					"text": "", "finishReason": "error",
+					"lastError": map[string]any{"code": "provider_error", "message": "provider exploded"},
 				})
 			case started:
 				event(req.ID, agentID, sessionID, map[string]any{

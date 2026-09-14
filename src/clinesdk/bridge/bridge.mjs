@@ -34,7 +34,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
-import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, resolveClineDefaults } from "./config.mjs";
+import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, messageOf, resolveClineDefaults } from "./config.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
 const core = { client: null, promise: null };
@@ -135,7 +135,9 @@ function noteRunActivity(agent, inner) {
 		return;
 	}
 	if (type === "error") {
-		agent.lastError = inner.message ?? inner.error ?? "agent run failed";
+		// The SDK may report a structured error; the Go client decodes this field as
+		// text, so flatten it here.
+		agent.lastError = messageOf(inner.error ?? inner.message, "agent run failed");
 	}
 }
 
@@ -194,11 +196,11 @@ function summarize(agent, res, usageSource) {
 		sessionId: agent.sessionId,
 		mode: agent.mode,
 		status: statusOf(result),
-		text: result.text || agent.text || "",
-		finishReason: result.finishReason ?? "",
+		text: coerceText(result.text || agent.text),
+		finishReason: coerceText(result.finishReason),
 		usage,
 		usageSource: usageSource ?? (result.usage ? "run" : "accumulated_delta"),
-		lastError: agent.lastError ?? null,
+		lastError: agent.lastError == null ? null : coerceText(agent.lastError),
 	};
 }
 
