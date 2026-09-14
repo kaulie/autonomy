@@ -41,16 +41,16 @@ func (clineStreamAdapter) MapEvent(native any, _ time.Time) (LLMEvent, bool) {
 	case clineEventChunk:
 		return mapClineChunk(ev)
 	case clineEventStatus:
-		return mapClineLifecycle(ev, LLMChannelStatus, clineEventStatus)
+		return mapClineLifecycle(ev, LLMChannelStatus, LLMKindStatus, clineEventStatus)
 	case clineEventSessionSnapshot:
-		return mapClineLifecycle(ev, LLMChannelMeta, clineEventSessionSnapshot)
+		return mapClineLifecycle(ev, LLMChannelMeta, LLMKindMeta, clineEventSessionSnapshot)
 	case clineEventEnded:
-		return mapClineLifecycle(ev, LLMChannelResult, clineEventEnded)
+		return mapClineLifecycle(ev, LLMChannelResult, LLMKindRunResult, clineEventEnded)
 	default:
 		if strings.TrimSpace(ev.Type) == "" {
 			return LLMEvent{}, false
 		}
-		return mapClineLifecycle(ev, LLMChannelMeta, ev.Type)
+		return mapClineLifecycle(ev, LLMChannelMeta, LLMKindMeta, ev.Type)
 	}
 }
 
@@ -58,18 +58,26 @@ func (clineStreamAdapter) MapEvent(native any, _ time.Time) (LLMEvent, bool) {
 func mapClineAgentEvent(ev clinesdk.RunEvent) (LLMEvent, bool) {
 	inner, ok := ev.Payload["event"].(map[string]any)
 	if !ok {
-		return mapClineLifecycle(ev, LLMChannelMeta, clineEventAgentEvent)
+		return mapClineLifecycle(ev, LLMChannelMeta, LLMKindMeta, clineEventAgentEvent)
 	}
 	innerType := payloadString(inner, "type")
 	contentType := payloadString(inner, "contentType")
 	mapped := LLMEvent{
 		Channel:   clineAgentChannel(innerType, contentType),
+		Kind:      clineAgentKind(innerType, contentType),
 		EventType: clineAgentEventType(innerType, contentType),
 		Role:      "assistant",
 		Payload:   inner,
 	}
 	if innerType == "usage" {
 		mapped.Role = "system"
+		mapped.Payload = withUsageKeys(inner, payloadMap(inner, "usage"))
+		if cost, ok := payloadNumber(inner, "totalCost", "cost", "total_cost"); ok {
+			mapped.Payload = withNeutralKV(mapped.Payload, LLMKeyCostUSD, cost) // Cline reports USD
+		}
+	}
+	if innerType == "notice" {
+		mapped.Payload = withNeutralKV(inner, LLMKeyStatus, payloadString(inner, "noticeType"), LLMKeyMessage, payloadString(inner, "message"))
 	}
 	if callID := payloadString(inner, "toolCallId"); callID != "" {
 		// The aggregation layer groups tool events by call_id and reads
@@ -80,20 +88,70 @@ func mapClineAgentEvent(ev clinesdk.RunEvent) (LLMEvent, bool) {
 	}
 	switch contentType {
 	case "text":
-		mapped.TextDelta = firstNonEmptyString(payloadString(inner, "text"), payloadString(inner, "accumulated"))
+		text := firstNonEmptyString(payloadString(inner, "text"), payloadString(inner, "accumulated"))
+		mapped.TextDelta = text
+		mapped.Payload = withNeutralText(mapped.Payload, text)
 	case "reasoning":
 		// Thinking text arrives as content_start deltas. content_end repeats the
 		// whole block (verified against a real stream: joining the deltas equals
 		// the block text), so emitting it as a delta again would duplicate the
 		// aggregated thinking message. The payload still carries the full text.
+		// The neutral text key always carries the event's own text (the whole
+		// block on content_end), while TextDelta stays empty there so the
+		// aggregation does not see the block twice.
+		reasoning := payloadString(inner, "reasoning")
+		mapped.Payload = withNeutralText(mapped.Payload, reasoning)
 		if innerType != "content_end" {
-			mapped.TextDelta = payloadString(inner, "reasoning")
+			mapped.TextDelta = reasoning
 		}
 	}
 	if mapped.Name == "" {
 		mapped.Name = firstNonEmptyString(payloadString(inner, "name"), payloadString(inner, "tool"))
 	}
 	return mapped, true
+}
+
+// clineAgentKind classifies one inner agent event. Cline streams text and
+// thinking as deltas (with a block-end marker) and tool calls as
+// start / output-update / end events sharing a toolCallId.
+func clineAgentKind(innerType, contentType string) LLMEventKind {
+	switch contentType {
+	case "text":
+		if innerType == "content_end" {
+			return LLMKindAssistant
+		}
+		return LLMKindAssistantDelta
+	case "reasoning", "thinking":
+		if innerType == "content_end" {
+			return LLMKindThoughtEnd
+		}
+		return LLMKindThoughtDelta
+	case "tool":
+		switch innerType {
+		case "content_start":
+			return LLMKindToolCallStarted
+		case "content_update":
+			return LLMKindToolCallDelta
+		case "content_end":
+			return LLMKindToolCallCompleted
+		default:
+			return LLMKindToolCallDelta
+		}
+	}
+	switch innerType {
+	case "usage":
+		return LLMKindUsage
+	case "done":
+		return LLMKindRunResult
+	case "error":
+		return LLMKindError
+	case "notice":
+		return LLMKindStatus
+	case "content_start", "content_update", "content_end":
+		return LLMKindAssistantDelta
+	default:
+		return LLMKindMeta
+	}
 }
 
 // clineAgentChannel classifies one inner agent event.
@@ -133,11 +191,24 @@ func clineAgentEventType(innerType, contentType string) string {
 
 // annotateClineTool copies the native payload and adds the neutral tool keys.
 func annotateClineTool(inner map[string]any, callID string) map[string]any {
-	out := make(map[string]any, len(inner)+4)
+	out := make(map[string]any, len(inner)+6)
 	for k, v := range inner {
 		out[k] = v
 	}
-	out["call_id"] = callID
+	out[LLMKeyCallID] = callID
+	if name := payloadString(inner, "toolName"); name != "" {
+		out[LLMKeyName] = name
+	}
+	// Cline signals the tool lifecycle with the event type, so normalize it into
+	// the same status key Cursor uses (running while it runs, completed at end).
+	if payloadString(inner, "type") == "content_end" {
+		out[LLMKeyStatus] = "completed"
+	} else {
+		out[LLMKeyStatus] = "running"
+	}
+	if ms, ok := payloadNumber(inner, "durationMs", "duration_ms"); ok {
+		out[LLMKeyDurationMS] = int64(ms)
+	}
 	if args, ok := inner["input"]; ok {
 		out["args"] = args
 	}
@@ -151,7 +222,7 @@ func annotateClineTool(inner map[string]any, callID string) map[string]any {
 		}
 	}
 	if output, ok := inner["output"]; ok {
-		out["result"] = output
+		out[LLMKeyResult] = output
 	}
 	return out
 }
@@ -166,6 +237,7 @@ func mapClineChunk(ev clinesdk.RunEvent) (LLMEvent, bool) {
 	}
 	return LLMEvent{
 		Channel:   LLMChannelTool,
+		Kind:      LLMKindToolCallDelta,
 		EventType: clineEventChunk + ":" + payloadString(ev.Payload, "stream"),
 		Role:      "tool",
 		Payload:   ev.Payload,
@@ -173,9 +245,10 @@ func mapClineChunk(ev clinesdk.RunEvent) (LLMEvent, bool) {
 	}, true
 }
 
-func mapClineLifecycle(ev clinesdk.RunEvent, channel LLMEventChannel, eventType string) (LLMEvent, bool) {
+func mapClineLifecycle(ev clinesdk.RunEvent, channel LLMEventChannel, kind LLMEventKind, eventType string) (LLMEvent, bool) {
 	return LLMEvent{
 		Channel:   channel,
+		Kind:      kind,
 		EventType: eventType,
 		Role:      "system",
 		Payload:   ev.Payload,
