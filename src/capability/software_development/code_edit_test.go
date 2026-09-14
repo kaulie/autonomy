@@ -2,6 +2,8 @@ package software_development_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,8 +44,52 @@ func (m *mockBroker) AcquireAgent(_ context.Context, opts broker.AcquireAgentOpt
 	return m.sess, nil
 }
 
+// useRepoPrompt points PROJECT_ROOT at this repository, so the worker prompt is
+// read from its real file ($PROJECT_ROOT/src/agent_policy/CODE_EDIT.md).
+func useRepoPrompt(t *testing.T) {
+	t.Helper()
+	t.Setenv("PROJECT_ROOT", filepath.Join("..", "..", ".."))
+}
+
+// TestCodeEditPromptIsReadFromTheTemplateEachRun pins the point of keeping the
+// prompt out of Go source: the file under $PROJECT_ROOT is the prompt. Editing it
+// (or replacing it) changes what the worker receives, with no code change.
+func TestCodeEditPromptIsReadFromTheTemplateEachRun(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, filepath.FromSlash(sd.DefaultPromptRel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("ws={{WORKSPACE}} goal={{GOAL}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECT_ROOT", root)
+
+	sess := &mockSession{id: "agent-code_edit-4", workspace: "/sandbox/agent-10099/", summary: "done"}
+	if _, err := (sd.CodeEdit{Agents: &mockBroker{sess: sess}}).Run(map[string]string{"instruction": "do it"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "ws=/sandbox/agent-10099/ goal=do it\n"; sess.prompt != want {
+		t.Fatalf("prompt=%q, want the rendered template %q", sess.prompt, want)
+	}
+}
+
+// TestCodeEditFailsWithoutPromptTemplate: no template, no delegation — and no
+// agent is acquired just to be left unprompted.
+func TestCodeEditFailsWithoutPromptTemplate(t *testing.T) {
+	t.Setenv("PROJECT_ROOT", t.TempDir())
+	m := &mockBroker{sess: &mockSession{id: "agent-code_edit-5", workspace: "/ws/"}}
+	_, err := (sd.CodeEdit{Agents: m}).Run(map[string]string{"instruction": "do it"})
+	if err == nil || !strings.Contains(err.Error(), sd.DefaultPromptRel) {
+		t.Fatalf("err=%v, want a missing-template error naming %s", err, sd.DefaultPromptRel)
+	}
+	if m.lastOpts.Purpose != "" {
+		t.Fatalf("acquired an agent without a prompt: %+v", m.lastOpts)
+	}
+}
+
 func TestCodeEditRequiresInstruction(t *testing.T) {
-	t.Parallel()
+	useRepoPrompt(t)
 	c := sd.CodeEdit{Agents: &mockBroker{sess: &mockSession{summary: "ok"}}}
 	_, err := c.Run(map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "instruction") {
@@ -56,7 +102,7 @@ func TestCodeEditRequiresInstruction(t *testing.T) {
 // is never forwarded as the acquisition workspace nor written into the prompt —
 // that is what used to put the worker inside the planner's sandbox.
 func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
-	t.Parallel()
+	useRepoPrompt(t)
 	const plannerWorkspace = "/Users/gaolei/agent-workspace-sandbox/agent-10095"
 	const workerWorkspace = "/Users/gaolei/agent-workspace-sandbox/agent-10096/"
 	sess := &mockSession{id: "agent-code_edit-1", workspace: workerWorkspace, summary: "edited files"}
@@ -85,6 +131,9 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 	if !strings.Contains(sess.prompt, "add hello endpoint") {
 		t.Fatalf("prompt=%q", sess.prompt)
 	}
+	if strings.Contains(sess.prompt, "{{") {
+		t.Fatalf("prompt still has an unrendered placeholder:\n%s", sess.prompt)
+	}
 	if out["workspace"] != workerWorkspace {
 		t.Fatalf("out workspace=%q, want the worker's own %q", out["workspace"], workerWorkspace)
 	}
@@ -99,7 +148,7 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 // TestCodeEditNeedsNoWorkspaceInput: the delegating agent does not have to supply
 // a workspace at all — the worker's own is the one that counts.
 func TestCodeEditNeedsNoWorkspaceInput(t *testing.T) {
-	t.Parallel()
+	useRepoPrompt(t)
 	sess := &mockSession{id: "agent-code_edit-3", workspace: "/sandbox/agent-10099/", summary: "done"}
 	c := sd.CodeEdit{Agents: &mockBroker{sess: sess}}
 	if _, err := c.Run(map[string]string{"instruction": "do it"}); err != nil {
@@ -110,14 +159,13 @@ func TestCodeEditNeedsNoWorkspaceInput(t *testing.T) {
 	}
 }
 
+// TestCodeEditPromptDelegatesAutonomy: the shipped template still hands the
+// worker the objective and the autonomy to choose the implementation.
 func TestCodeEditPromptDelegatesAutonomy(t *testing.T) {
-	t.Parallel()
-	sess := &mockSession{id: "agent-code_edit-2", summary: "done"}
+	useRepoPrompt(t)
+	sess := &mockSession{id: "agent-code_edit-2", workspace: "/tmp/ws/", summary: "done"}
 	c := sd.CodeEdit{Agents: &mockBroker{sess: sess}}
-	_, err := c.Run(map[string]string{
-		"workspace":   "/tmp/ws",
-		"instruction": "add hello endpoint",
-	})
+	_, err := c.Run(map[string]string{"instruction": "add hello endpoint"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,5 +181,8 @@ func TestCodeEditPromptDelegatesAutonomy(t *testing.T) {
 	}
 	if strings.Contains(sess.prompt, "Make only necessary changes") {
 		t.Fatalf("prompt still contains micromanaging instruction:\n%s", sess.prompt)
+	}
+	if strings.Contains(sess.prompt, "{{") {
+		t.Fatalf("shipped template has an unrendered placeholder:\n%s", sess.prompt)
 	}
 }
