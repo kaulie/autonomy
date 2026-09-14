@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // AgentFactory creates resident Cline sessions.
@@ -182,6 +184,9 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 			break
 		}
 		events++
+		// Provider activity resets the run's idle budget. Without this the budget
+		// would bound the *total* run time instead of silence, killing busy runs.
+		llmrun.Touch(ctx)
 		if r.agent.SessionID == "" && ev.SessionID != "" {
 			r.agent.SessionID = ev.SessionID
 		}

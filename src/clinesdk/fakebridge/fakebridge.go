@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kaulie/autonomy/src/clinesdk"
 )
@@ -109,6 +110,23 @@ func Main() {
 			switch {
 			case strings.Contains(prompt, "hang"):
 				// Never answers: the client must abort on its own context.
+			case strings.Contains(prompt, "stream slowly"):
+				// Keeps producing events well past any short idle budget: this is
+				// how a busy long run must survive (the budget bounds silence).
+				for i := 0; i < 12; i++ {
+					event(req.ID, agentID, sessionID, map[string]any{
+						"type": "content_start", "contentType": "text", "text": "tick ", "accumulated": "tick ",
+					})
+					time.Sleep(60 * time.Millisecond)
+				}
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_end", "contentType": "text", "text": "slow but alive",
+				})
+				result(req.ID, map[string]any{
+					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "finished",
+					"text": "slow but alive", "finishReason": "completed", "usageSource": "run",
+					"usage": map[string]any{"inputTokens": 7, "outputTokens": 3, "totalTokens": 10, "costUsd": 0.00001},
+				})
 			case strings.Contains(prompt, "fail me"):
 				event(req.ID, agentID, sessionID, map[string]any{"type": "error", "message": "provider exploded"})
 				result(req.ID, map[string]any{
