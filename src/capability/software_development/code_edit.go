@@ -40,6 +40,13 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	}
 
 	ctx := context.Background()
+	// The prompt comes from $PROJECT_ROOT before anything is acquired, so a
+	// missing template fails the delegation instead of creating an agent that
+	// cannot be prompted.
+	tmpl, err := readPromptTemplate()
+	if err != nil {
+		return nil, fmt.Errorf("code_edit: %w", err)
+	}
 	// No Workspace: the broker gives the worker its own AGENT_WORKSPACE. Passing
 	// the caller's (the delegating agent's) workspace here is what used to run the
 	// worker inside the caller's sandbox.
@@ -53,23 +60,10 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	}
 	defer func() { _ = sess.Release(ctx) }()
 
-	// The workspace is the worker's own; the goal may still name the delegating
-	// agent's workspace (the planner writes from its own point of view), so the
-	// prompt says outright which one is binding.
+	// The workspace is the worker's own; rendering it into the prompt is what the
+	// worker treats as binding (see src/agent_policy/CODE_EDIT.md).
 	workspace := sess.Workspace()
-	prompt := fmt.Sprintf(`You are an autonomous software engineer working in your own workspace:
-
-%s
-
-Goal:
-
-%s
-
-That workspace is the only place you may work in. If the Goal names a different
-workspace path, that path belongs to the agent that delegated this task to you,
-not to you: ignore it and do the work here.
-
-Own the task end-to-end: understand the requirement, explore the codebase, choose the implementation approach, make the changes, and verify your work. Treat the Goal as the objective rather than a step-by-step specification. When you are done, give a concise summary of what you changed and why.`, workspace, instruction)
+	prompt := renderPrompt(tmpl, workspace, instruction)
 
 	summary, err := sess.Prompt(ctx, prompt)
 	if err != nil {

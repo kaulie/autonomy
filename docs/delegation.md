@@ -34,9 +34,12 @@ Task Owner → Coding Agent → Research Agent → …
 - **落库表现**：用户只写顶层 Task 的输入；被委托的那次 run 的输入行在 `llm_messages` 里记成
   `role=agent`（谁委托的），不再是 `user`（见 [llm-message.md](llm-message.md)）
 - **执行位置**：被委托的 agent 在自己的 `AGENT_WORKSPACE` 里执行。委托方不能把自己的 workspace
-  交给它 —— 委托走 `AcquireAgent` 且**不带 workspace**（`code_edit` 不再接收 `workspace`/`cwd` 输入，
-  prompt 里写明"只在自己的 workspace 里干活；goal 里若出现别的路径那是委托方的，忽略它"），
-  worker 的 workspace 由 `AgentSession.Workspace()` 回读（见 [agent.md](agent.md)）
+  交给它 —— 委托走 `AcquireAgent` 且**不带 workspace**（`code_edit` 不再接收 `workspace`/`cwd` 输入），
+  worker 的 workspace 由 `AgentSession.Workspace()` 回读并渲染进提示词（见 [agent.md](agent.md)）
+
+- **提示词在文件里，不在代码里**：worker 拿到的提示词是
+  `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md`（`{{WORKSPACE}}` / `{{GOAL}}`），每次委托现读现渲染；
+  改措辞不用重新编译，文件缺失则该次委托直接失败（`src/capability/software_development/prompt.go`）。
 
 ## 不变式
 
