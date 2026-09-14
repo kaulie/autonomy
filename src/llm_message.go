@@ -75,12 +75,54 @@ type chatGroup struct {
 	hasResult bool
 	text      strings.Builder
 	createdAt time.Time
+	// endedAt tracks the last event of the group, so a thinking block's duration
+	// can be derived when the provider does not report one (Cline).
+	endedAt time.Time
+	// reportedMS is the provider-reported thinking duration (Cursor).
+	reportedMS *int64
 }
 
 func (g *chatGroup) appendText(ev LLMEvent) {
 	g.text.WriteString(ev.TextDelta)
 	if g.createdAt.IsZero() {
 		g.createdAt = ev.CreatedAt
+	}
+	if !ev.CreatedAt.IsZero() {
+		g.endedAt = ev.CreatedAt
+	}
+	if g.reportedMS == nil {
+		if ms, ok := numberPayload(ev.Payload, "thinking_duration_ms"); ok {
+			g.reportedMS = &ms
+		}
+	}
+}
+
+// thinkingDurationMS is the provider-reported thinking duration when available,
+// otherwise the span covered by the block's events.
+func (g *chatGroup) thinkingDurationMS() (int64, bool) {
+	if g.reportedMS != nil {
+		return *g.reportedMS, true
+	}
+	if g.createdAt.IsZero() || g.endedAt.IsZero() {
+		return 0, false
+	}
+	if d := g.endedAt.Sub(g.createdAt).Milliseconds(); d > 0 {
+		return d, true
+	}
+	return 0, false
+}
+
+// numberPayload reads a numeric payload field (JSON numbers decode as float64).
+func numberPayload(payload map[string]any, key string) (int64, bool) {
+	switch v := payload[key].(type) {
+	case float64:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	default:
+		return 0, false
 	}
 }
 
@@ -107,6 +149,13 @@ func (g *chatGroup) message(seq int) LLMMessage {
 	switch g.role {
 	case LLMMessageRoleThinking:
 		m.Content = g.text.String()
+		// Both backends expose how long the model thought: Cursor reports
+		// thinking_duration_ms, Cline only streams reasoning deltas (so the
+		// span between them is the duration). Normalizing it here gives the UI
+		// one field to render "thought for Xs" on either backend.
+		if d, ok := g.thinkingDurationMS(); ok {
+			m.NormalizedContent = marshalJSONValue(map[string]any{"duration_ms": d}, true)
+		}
 	case LLMMessageRoleTool:
 		m.Content = marshalJSONValue(g.result, g.hasResult)
 		m.NormalizedContent = marshalJSONValue(map[string]any{

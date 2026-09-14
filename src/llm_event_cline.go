@@ -82,7 +82,13 @@ func mapClineAgentEvent(ev clinesdk.RunEvent) (LLMEvent, bool) {
 	case "text":
 		mapped.TextDelta = firstNonEmptyString(payloadString(inner, "text"), payloadString(inner, "accumulated"))
 	case "reasoning":
-		mapped.TextDelta = payloadString(inner, "reasoning")
+		// Thinking text arrives as content_start deltas. content_end repeats the
+		// whole block (verified against a real stream: joining the deltas equals
+		// the block text), so emitting it as a delta again would duplicate the
+		// aggregated thinking message. The payload still carries the full text.
+		if innerType != "content_end" {
+			mapped.TextDelta = payloadString(inner, "reasoning")
+		}
 	}
 	if mapped.Name == "" {
 		mapped.Name = firstNonEmptyString(payloadString(inner, "name"), payloadString(inner, "tool"))

@@ -147,6 +147,28 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assis
    trace.Finish(LLMRunResult{ProviderRunID: id, Status: LLMStatusFinished, RawOutput: text})
    ```
 
+## 后端对齐：thinking / 状态事件契约
+
+两个后端在**网关层**已经统一（web-cursor 的 `providers/{cursor,cline}/mapper.js` 都把各自的思考事件映射成统一的
+`thinking` 事件），在 **autonomy 层**同样对齐：落库的 `llm_events` 与聚合出的 `llm_messages` 形状一致。
+
+| 语义 | Cursor 原生 | Cline 原生 | autonomy 中立事件 | 下游怎么用 |
+|---|---|---|---|---|
+| 思考中（增量） | SDK `thinking` 消息（**整块**文本 + `thinking_duration_ms`） | `agent_event content_start/update:reasoning`（逐 token 增量） | `channel=thought`，`TextDelta`=思考文本 | 出现 thought delta 即显示"思考中" |
+| 思考块结束 | 同一条 `thinking` 消息 | `agent_event content_end:reasoning`（重复整块文本；`TextDelta` 置空以免重复） | `channel=thought`，`event_type=agent_event:content_end:reasoning` | 结束该思考块 |
+| 思考耗时 | payload `thinking_duration_ms`（SDK 上报） | 由首个→最后 reasoning 事件的跨度推导 | `llm_messages.normalized_content = {"duration_ms":N}`（聚合层统一，优先用上报值） | "思考了 Xs" |
+| 运行状态 | SDK `status` 消息（status/message） | core `status` + `agent_event notice` | `channel=status`（payload `status`/`message`） | spinner / 错误文案 |
+| 最终回答 | SDK `assistant` 文本 | `agent_event content_end:text` / `done` | run header `raw_output` + `llm_messages` 的 assistant 行 | 结果渲染 |
+| 工具调用 | SDK `tool_call` | `agent_event content_*:tool` | `channel=tool`，payload 含中立键 `call_id`/`args`/`result`（+ stdout `chunk`） | 工具卡片 / 调用-结果合并 |
+| 用量与成本 | SDK `usage` | `agent_event usage` + run header | `reason_turns` 的 token/cost 列（cline 含 cacheRead/cost，常驻 send 用累计差值） | 计费/统计 |
+
+**粒度差异（已归一）**：Cursor 一条消息给整块思考，Cline 给逐 token 增量，块结束时重复整块文本。聚合层因此
+把连续 thought 事件拼成 **1 条 thinking 消息**，并屏蔽 `content_end:reasoning` 的重复文本（否则内容会翻倍）。
+
+**尚未打通的一环**：autonomy 目前只把这些事件**落库**（`llm_events`/`llm_messages`），还没有面向 UI 的实时
+出口（SSE/WebSocket）。UI 要从 autonomy 实时显示"还在 thinking"，需要补这个出口（或在 UI 侧读库）。这属于
+"core 迁到 autonomy" 的下一步，见 `docs/cline-reasoner.md` 的边界小节。
+
 `LLMProvider` 常量（`cursor` / `cline` / `deepseek_harness`）与 `channel` 分类是中立的；表结构不变。
 
 ## 保留策略
