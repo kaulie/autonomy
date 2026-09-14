@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clineConfigCandidates, coerceText, messageOf, resolveClineDefaults } from "./config.mjs";
+import { clineConfigCandidates, coerceText, interactiveSession, messageOf, resolveClineDefaults } from "./config.mjs";
 
 const file = JSON.stringify({
 	version: 1,
@@ -57,6 +57,18 @@ test("coerceText renders provider values as text", () => {
 	assert.equal(coerceText(false), "false");
 	assert.equal(coerceText({ code: "x", message: "boom" }), '{"code":"x","message":"boom"}');
 	assert.equal(coerceText([1, 2]), "[1,2]");
+});
+
+test("interactiveSession defaults on, because only interactive sessions stay resident", () => {
+	// A non-interactive session is disposed when its run ends, so the second send
+	// fails with session_not_found; the default must keep the session alive.
+	assert.equal(interactiveSession({}), true);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "1" }), true);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "true" }), true);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "0" }), false);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "off" }), false);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "false" }), false);
+	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "no" }), false);
 });
 
 test("messageOf picks a human message out of an error-ish value", () => {

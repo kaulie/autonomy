@@ -34,7 +34,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
-import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, messageOf, resolveClineDefaults } from "./config.mjs";
+import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, interactiveSession, messageOf, resolveClineDefaults } from "./config.mjs";
 import { eventLabel, signalLine, traceLevel, traceWidth } from "./trace.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
@@ -61,10 +61,12 @@ function log(level, message) {
 const TRACE = traceLevel();
 const TRACE_WIDTH = traceWidth();
 
-// Headless by default: autonomy has no UI to answer SDK interaction prompts, and
-// an unanswered prompt looks exactly like a stalled run (no events at all).
-// AUTONOMY_CLINE_INTERACTIVE=1 restores the web-cursor-style interactive host.
-const INTERACTIVE = /^(1|true|on|yes)$/i.test(process.env.AUTONOMY_CLINE_INTERACTIVE ?? "");
+// Interactive sessions by default: they are the only ones the SDK keeps alive
+// between turns, which is what a resident autonomy agent is (a non-interactive
+// session is disposed when its run finishes, so the second send fails with
+// `session_not_found`). The bridge is the host — see interactiveSession in
+// config.mjs — and the bridge logs the session mode it started.
+const INTERACTIVE = interactiveSession();
 
 function rpcError(code, message) {
 	const err = new Error(message);
@@ -319,7 +321,8 @@ async function send(params, requestId) {
 			// routed to this request if the session is already mapped.
 			agent.sessionId = sessionId;
 			sessionOwners.set(sessionId, agent.agentId);
-			log("info", `start session=${sessionId} model=${config.modelId ?? "default"} cwd=${config.cwd} req=${requestId}`);
+			log("info", `start session=${sessionId} model=${config.modelId ?? "default"} cwd=${config.cwd} ` +
+				`session-mode=${INTERACTIVE ? "resident" : "single-run"} req=${requestId}`);
 			agent.currentRequest = requestId;
 			// Bridge-side progress: warn when nothing at all arrived shortly after a
 			// start, because a stalled provider looks exactly like a slow one.

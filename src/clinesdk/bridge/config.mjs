@@ -79,6 +79,30 @@ export function coerceText(value) {
  * string wins, otherwise the usual message keys are preferred and anything else
  * degrades to compact JSON (or the fallback).
  */
+/**
+ * interactiveSession reports whether new Cline sessions are started as
+ * interactive. It defaults to true, and that is load-bearing:
+ *
+ *   - a NON-interactive session is single-run by design. When its run finishes
+ *     the runtime calls finalizeSingleRun → shutdownSession, which deletes the
+ *     session from the live registry and emits `ended`; the next `send` then
+ *     fails with `session_not_found: session not found: cls-…`.
+ *   - an interactive session stays resident: the turn ends (completeInteractiveTurn
+ *     → idle) and the session — its context, workspace state and prompt cache —
+ *     is still there for the next send, which is what an autonomy agent needs.
+ *
+ * There is no UI here; the bridge is the host: it drives turns itself and
+ * autonomy's sessions are self-contained (the yolo preset used for agent runs
+ * has enableAskQuestion off, so nothing waits for a human).
+ *
+ * AUTONOMY_CLINE_INTERACTIVE=0/off/false switches to single-run sessions (only
+ * useful to reproduce the teardown behavior above).
+ */
+export function interactiveSession(env = process.env) {
+	const v = String(env.AUTONOMY_CLINE_INTERACTIVE ?? "").trim().toLowerCase();
+	return !(v === "0" || v === "false" || v === "off" || v === "no");
+}
+
 export function messageOf(value, fallback = "") {
 	if (typeof value === "string") {
 		return value.trim() !== "" ? value : fallback;
