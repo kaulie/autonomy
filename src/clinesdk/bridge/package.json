@@ -1,0 +1,17 @@
+{
+	"name": "autonomy-cline-bridge",
+	"version": "0.1.0",
+	"private": true,
+	"description": "NDJSON stdio bridge exposing the Cline SDK (@cline/sdk) to the Go autonomy runtime",
+	"type": "module",
+	"main": "bridge.mjs",
+	"engines": {
+		"node": ">=22"
+	},
+	"dependencies": {
+		"@cline/sdk": "0.0.82"
+	},
+	"scripts": {
+		"smoke": "node smoke.mjs"
+	}
+}

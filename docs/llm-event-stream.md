@@ -112,6 +112,7 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assis
 |--------|------|
 | 中立事件模型 / provider 适配器注册 | `src/llm_event.go` |
 | Cursor 事件映射 | `src/llm_event_cursor.go` |
+| Cline 事件映射 | `src/llm_event_cline.go`（见 [cline-reasoner.md](cline-reasoner.md)） |
 | header + 事件写入编排 | `src/llm_trace.go` |
 | 表结构 & 读写 | `src/sqlite_store.go` |
 | 落库调用点 | `src/reasoner.go`（plan 模式）、`src/runtime.go`（agent 模式） |

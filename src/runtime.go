@@ -7,7 +7,7 @@ import (
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/capability/broker"
-	"github.com/kaulie/autonomy/src/cursorsdk"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // Runtime reliably executes actions and exposes agent acquisition to capabilities.
@@ -57,8 +57,11 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		agent.Workspace = ws
 	}
 	backend := strings.ToLower(strings.TrimSpace(opts.Backend))
-	if backend == "" {
-		backend = string(AgentBackendCursor)
+	if backend == "" || backend == string(AgentBackendCursor) {
+		// Capabilities name a purpose ("an autonomous coding agent"), not a
+		// vendor: the legacy "cursor" label means "the host default backend",
+		// which AUTONOMY_LLM_BACKEND selects at runtime.
+		backend = string(defaultAgentBackend())
 	}
 	switch AgentBackend(backend) {
 	case AgentBackendCursor:
@@ -66,8 +69,13 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 			r.releaseRegistered(agent)
 			return nil, err
 		}
+	case AgentBackendCline:
+		if err := agent.AttachCline(ctx, opts.Model); err != nil {
+			r.releaseRegistered(agent)
+			return nil, err
+		}
 	case AgentBackendLocal:
-		// Local-only session: no Cursor attach; Prompt is unsupported.
+		// Local-only session: no LLM attach; Prompt is unsupported.
 	default:
 		r.releaseRegistered(agent)
 		return nil, fmt.Errorf("unknown agent backend %q", opts.Backend)
@@ -102,15 +110,17 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	if s == nil || s.agent == nil {
 		return "", fmt.Errorf("nil agent session")
 	}
-	if s.agent.Backend != AgentBackendCursor {
+	switch s.agent.Backend {
+	case AgentBackendCursor, AgentBackendCline:
+	default:
 		return "", fmt.Errorf("prompt unsupported for backend %q", s.agent.Backend)
 	}
-	idle := cursorsdk.IdleTimeout()
-	wd := cursorsdk.NewIdleWatchdog(ctx, idle)
+	idle := llmrun.IdleTimeout()
+	wd := llmrun.NewIdleWatchdog(ctx, idle)
 	defer wd.Stop()
-	goCtx := cursorsdk.WithIdleWatchdog(wd.Context(), wd)
+	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 	trace := BeginLLMTrace(s.agent, s.taskID, 0, ReasonModeAgent, prompt)
-	text, runRes, err := s.agent.PromptCursorStream(goCtx, prompt, trace.Emit)
+	text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, ReasonModeAgent, trace.Emit)
 	if err != nil {
 		trace.Finish(runRes)
 		return "", err
@@ -139,6 +149,7 @@ func (s *runtimeAgentSession) Release(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	s.agent.disposeCursorSession(ctx)
+	s.agent.disposeClineSession(ctx)
 	if s.agent.IsEphemeral() {
 		softDeleteAgent(s.agent.ID)
 		s.rt.agents.Delete(s.agent.Name)

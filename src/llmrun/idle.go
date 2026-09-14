@@ -1,4 +1,10 @@
-package cursorsdk
+// Package llmrun holds run-liveness plumbing shared by every LLM backend
+// adapter (Cursor SDK bridge, Cline SDK bridge, future providers).
+//
+// It deliberately knows nothing about any provider: adapters report "activity"
+// when their stream yields an event, and this package turns that signal into a
+// cancellable context that only fires after a period of silence.
+package llmrun
 
 import (
 	"context"
@@ -134,8 +140,8 @@ func WithIdleWatchdog(ctx context.Context, w *IdleWatchdog) context.Context {
 	return context.WithValue(ctx, idleWatchdogKey{}, w)
 }
 
-// touchIdle reports provider activity to the watchdog carried by ctx, if any.
-func touchIdle(ctx context.Context) {
+// Touch reports provider activity to the watchdog carried by ctx, if any.
+func Touch(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
@@ -144,9 +150,9 @@ func touchIdle(ctx context.Context) {
 	}
 }
 
-// ctxErr prefers the cancellation cause (e.g. an idle timeout) over the bare
+// CtxErr prefers the cancellation cause (e.g. an idle timeout) over the bare
 // context error so callers can tell why a run stopped.
-func ctxErr(ctx context.Context) error {
+func CtxErr(ctx context.Context) error {
 	if ctx == nil {
 		return nil
 	}
