@@ -47,8 +47,8 @@ func closeSharedClineClient() error {
 // newClineClient is the single entry for constructing a Cline client/bridge.
 func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
-		clinesdk.WithProvider(defaultClineProvider()),
-		clinesdk.WithModel(defaultClineModel()),
+		clinesdk.WithProvider(resolveClineProvider()),
+		clinesdk.WithModel(resolveClineModel()),
 		clinesdk.WithAPIKey(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY"))),
 		clinesdk.WithBaseURL(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL"))),
 		clinesdk.WithSystemPrompt(defaultClineSystemPrompt()),
@@ -63,17 +63,18 @@ func sharedAgentWorkspace() string {
 	return "."
 }
 
-// defaultClineProvider is the Cline provider id (e.g. "deepseek", "anthropic").
-func defaultClineProvider() string {
+// resolveClineProvider is the Cline provider id (e.g. "deepseek", "anthropic");
+// empty means "let the bridge fall back to the provider saved by cline auth".
+func resolveClineProvider() string {
 	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_PROVIDER"))
 }
 
-// defaultClineModel prefers the Cline-specific model, then the shared one.
-func defaultClineModel() string {
-	if m := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL")); m != "" {
-		return m
-	}
-	return strings.TrimSpace(os.Getenv("AUTONOMY_LLM_MODEL"))
+// resolveClineModel is the Cline model id. It deliberately does NOT fall back to
+// AUTONOMY_LLM_MODEL: that variable holds the default (Cursor) backend's model,
+// and those ids are meaningless to a Cline provider. Empty means "let the bridge
+// resolve the model from the saved cline auth config".
+func resolveClineModel() string {
+	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL"))
 }
 
 // defaultClineSystemPrompt is the session system prompt. The Cline SDK requires

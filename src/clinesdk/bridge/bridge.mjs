@@ -34,15 +34,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
-const PROTOCOL = "cline-bridge/1";
-const DEFAULT_MODE = "yolo";
-// The SDK requires a system prompt (it dereferences it while assembling the
-// session), so a caller that sends none gets this generic default instead of a
-// crash. autonomy always sends its own (AUTONOMY_CLINE_SYSTEM_PROMPT).
-const DEFAULT_SYSTEM_PROMPT =
-	"You are an autonomous coding agent working inside the configured workspace. " +
-	"Use the available tools to complete the task, verifying your work, and finish " +
-	"with a concise summary of what you changed and why.";
+import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, resolveClineDefaults } from "./config.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
 const core = { client: null, promise: null };
@@ -222,6 +214,21 @@ function usageDelta(before, after) {
 function createAgent(params) {
 	const agentId = `cls_${randomUUID().replace(/-/g, "")}`;
 	const cwd = params.cwd ?? process.cwd();
+	// The SDK requires both an explicit provider and model; fall back to what
+	// `cline auth` saved so a machine that already authenticated works as-is.
+	const defaults = params.providerId && params.modelId ? null : resolveClineDefaults();
+	const providerId = (params.providerId || defaults?.providerId || "").trim();
+	const modelId = (params.modelId || defaults?.modelId || "").trim();
+	if (!providerId || !modelId) {
+		throw rpcError(
+			"missing_provider",
+			"Cline provider and model are required: set AUTONOMY_CLINE_PROVIDER and " +
+				"AUTONOMY_CLINE_MODEL, or run `cline auth` to save a provider",
+		);
+	}
+	if (defaults) {
+		log("info", `resolved provider=${providerId} model=${modelId} from ${defaults.source}`);
+	}
 	const handle = {
 		agentId,
 		mode: normalizeMode(params.mode),
@@ -229,8 +236,8 @@ function createAgent(params) {
 		started: false,
 		prompts: 0,
 		config: {
-			providerId: params.providerId || undefined,
-			modelId: params.modelId || undefined,
+			providerId,
+			modelId,
 			apiKey: params.apiKey || undefined,
 			baseUrl: params.baseUrl || undefined,
 			cwd,
@@ -242,7 +249,7 @@ function createAgent(params) {
 		},
 	};
 	agents.set(agentId, handle);
-	return { agentId, mode: handle.mode, cwd, providerId: handle.config.providerId ?? null, modelId: handle.config.modelId ?? null };
+	return { agentId, mode: handle.mode, cwd, providerId, modelId };
 }
 
 /**

@@ -49,15 +49,24 @@ runtime → bridge
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `AUTONOMY_LLM_BACKEND` | `cursor` | 设为 `cline` 时，acquired agent（`code_edit` 等）走 Cline |
-| `AUTONOMY_CLINE_PROVIDER` | 空 | Cline provider id：`deepseek` / `anthropic` / `openai` / `openrouter` … |
-| `AUTONOMY_CLINE_MODEL` | `AUTONOMY_LLM_MODEL` | 模型 id，如 `deepseek-v4-pro` |
-| `AUTONOMY_CLINE_API_KEY` | 空 | provider key；留空时桥会使用 `cline auth` 保存的凭据 |
+| `AUTONOMY_LLM_BACKEND` | `cursor` | 设为 `cline` 时，acquired agent（`code_edit` 等）与 `LLMReasoner` 都走 Cline |
+| `AUTONOMY_CLINE_PROVIDER` | 空 → 用 `cline auth` 保存的 provider | Cline provider id：`deepseek` / `anthropic` / `openai` / `openrouter` … |
+| `AUTONOMY_CLINE_MODEL` | 空 → 用 `cline auth` 保存的 model | 模型 id，如 `deepseek-v4-pro`。**注意**：`AUTONOMY_LLM_MODEL` 是默认(Cursor)后端的模型，不会用于 Cline |
+| `AUTONOMY_CLINE_API_KEY` | 空 → 用 `cline auth` 保存的凭据 | provider key；通常不用设 |
 | `AUTONOMY_CLINE_BASE_URL` | 空 | 兼容 OpenAI 的自建端点等 |
-| `AUTONOMY_CLINE_SYSTEM_PROMPT` | 空 | 追加/覆盖 session system prompt |
+| `AUTONOMY_CLINE_SYSTEM_PROMPT` | 见下 | 覆盖 session system prompt（SDK **必须**有非空 system prompt） |
+| `AUTONOMY_CLINE_DATA_DIR` / `CLINE_DATA_DIR` / `CLINE_DIR` | `~/.cline` | 定位已保存的 Cline 配置（仅在 provider/model 未显式设置时使用） |
 | `AUTONOMY_CLINE_NODE_BIN` | `node` | Node 可执行文件 |
 | `AUTONOMY_CLINE_BRIDGE_SCRIPT` | `src/clinesdk/bridge/bridge.mjs` | 桥脚本路径 |
-| `AUTONOMY_LLM_TIMEOUT` | `3m` | **run 空闲预算**（见 PR #49）：有事件就续期，静默超过它才中断 |
+| `AUTONOMY_LLM_TIMEOUT` | `3m` | **run 空闲预算**：有事件就续期，静默超过它才中断 |
+
+**provider/model 的解析顺序**（SDK 两者都必填，缺了会内部 `undefined.trim()` 崩）：
+
+1. `AUTONOMY_CLINE_PROVIDER` + `AUTONOMY_CLINE_MODEL`（显式）
+2. `cline auth` 保存的配置（`<data-dir>/settings/providers.json` 的 `lastUsedProvider` + 它的 `model`）
+3. 都没有 → 桥直接返回 `missing_provider` 错误，提示去设 env 或 `cline auth`
+
+所以：**只要这台机器 `cline auth` 过，`AUTONOMY_LLM_BACKEND=cline` 一个变量就能跑**（桥会打印解析结果）。
 
 ## 会话语义
 
@@ -99,11 +108,14 @@ payload —— 与原 Cursor 适配器同样的保真度策略，因此 `llm_mes
 
 ```bash
 ./scripts/install-cline-bridge.sh          # npm install @cline/sdk（node_modules 已 gitignore）
+export AUTONOMY_LLM_BACKEND=cline          # 若已 `cline auth`，这样就能跑（provider/model 自动解析）
+# 需要显式指定时：
 export AUTONOMY_CLINE_PROVIDER=deepseek
 export AUTONOMY_CLINE_MODEL=deepseek-v4-pro
-export AUTONOMY_CLINE_API_KEY=sk-...       # 或先用 cline auth 保存凭据
-export AUTONOMY_LLM_BACKEND=cline
-go run ./cmd/autonomy                      # code_edit 等 capability 现在走 Cline
+export AUTONOMY_CLINE_API_KEY=sk-...       # 可选：已 `cline auth` 则不需要
+export PROJECT_ROOT=$(pwd)
+export AUTONOMY_REASONER=llm
+go run ./cmd/autonomy                      # LLMReasoner 与 code_edit 现在都走 Cline
 ```
 
 - 无 Node 的单元/集成测试：`go test ./src/...`（用 `src/clinesdk/fakebridge` 假桥覆盖协议与映射）。
