@@ -134,10 +134,14 @@ protocol and mapping: [docs/cline-reasoner.md](docs/cline-reasoner.md).
 
 ```bash
 ./scripts/install-cline-bridge.sh            # npm install @cline/sdk for the bridge
-export AUTONOMY_CLINE_PROVIDER=deepseek      # or anthropic, openai, openrouter, ...
+export AUTONOMY_LLM_BACKEND=cline            # enough when the machine ran `cline auth`
+# Optional explicit provider/model (otherwise the saved cline auth config is used;
+# AUTONOMY_LLM_MODEL is the default Cursor backend's model and does not apply here):
+export AUTONOMY_CLINE_PROVIDER=deepseek
 export AUTONOMY_CLINE_MODEL=deepseek-v4-pro
-export AUTONOMY_CLINE_API_KEY=sk-...         # optional: `cline auth` credentials also work
-export AUTONOMY_LLM_BACKEND=cline
+export AUTONOMY_CLINE_API_KEY=sk-...         # optional: `cline auth` credentials are reused
+export PROJECT_ROOT=$(pwd)
+export AUTONOMY_REASONER=llm
 go run ./cmd/autonomy
 ```
 

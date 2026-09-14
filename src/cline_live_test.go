@@ -21,7 +21,9 @@ func TestClineAgentLive(t *testing.T) {
 		t.Skip("set CLINE_LIVE=1 to run")
 	}
 	if os.Getenv("AUTONOMY_CLINE_PROVIDER") == "" || os.Getenv("AUTONOMY_CLINE_MODEL") == "" {
-		t.Skip("AUTONOMY_CLINE_PROVIDER and AUTONOMY_CLINE_MODEL are required")
+		// Allowed: the bridge falls back to the provider/model saved by
+		// `cline auth`, so an authenticated machine can run with no env at all.
+		t.Logf("AUTONOMY_CLINE_PROVIDER/MODEL unset; relying on the saved cline auth config")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
@@ -32,7 +34,7 @@ func TestClineAgentLive(t *testing.T) {
 		Lifecycle: autonomy.AgentLifecycleEphemeral,
 		Workspace: t.TempDir(),
 	}
-	if err := agent.AttachCline(ctx, ""); err != nil {
+	if err := agent.AttachCline(ctx); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if agent.LLMProvider != autonomy.LLMProviderCline || agent.LLMAgentID == "" {

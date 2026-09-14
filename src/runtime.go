@@ -70,7 +70,7 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 			return nil, err
 		}
 	case AgentBackendCline:
-		if err := agent.AttachCline(ctx, opts.Model); err != nil {
+		if err := agent.AttachCline(ctx); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
@@ -110,7 +110,7 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	if s == nil || s.agent == nil {
 		return "", fmt.Errorf("nil agent session")
 	}
-	switch s.agent.Backend {
+	switch s.agent.effectiveBackend() {
 	case AgentBackendCursor, AgentBackendCline:
 	default:
 		return "", fmt.Errorf("prompt unsupported for backend %q", s.agent.Backend)

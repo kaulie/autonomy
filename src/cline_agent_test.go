@@ -51,7 +51,7 @@ func installFakeClineClient(t *testing.T) {
 func newClineTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent := &Agent{ID: 9001, Name: "agent-9001", Lifecycle: AgentLifecycleEphemeral, Workspace: t.TempDir()}
-	if err := agent.AttachCline(context.Background(), ""); err != nil {
+	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("attach cline: %v", err)
 	}
 	return agent
@@ -61,7 +61,7 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 	installFakeClineClient(t)
 	agent := newClineTestAgent(t)
 
-	if err := agent.AttachCline(context.Background(), ""); err != nil {
+	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if agent.Backend != AgentBackendCline || agent.LLMProvider != LLMProviderCline {
@@ -72,7 +72,7 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 	}
 	// Attaching twice is a no-op (same handle).
 	handle := agent.clineAgent.ID
-	if err := agent.AttachCline(context.Background(), ""); err != nil {
+	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("re-attach: %v", err)
 	}
 	if agent.clineAgent.ID != handle {

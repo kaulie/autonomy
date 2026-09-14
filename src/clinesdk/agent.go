@@ -74,11 +74,14 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, bridgeErr("decode createAgent: %v", err)
 	}
+	// The bridge resolves a missing provider/model from the saved cline auth
+	// config, so adopt what it actually used (this is also what gets recorded on
+	// the agent and in reason_turns.model).
 	return &Agent{
 		client:     f.client,
 		ID:         res.AgentID,
-		ProviderID: provider,
-		ModelID:    model,
+		ProviderID: firstNonEmpty(res.ProviderID, provider),
+		ModelID:    firstNonEmpty(res.ModelID, model),
 		Mode:       mode,
 		CWD:        res.CWD,
 	}, nil

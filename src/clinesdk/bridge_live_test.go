@@ -26,7 +26,9 @@ func TestClineBridgeLive(t *testing.T) {
 	provider := os.Getenv("AUTONOMY_CLINE_PROVIDER")
 	model := os.Getenv("AUTONOMY_CLINE_MODEL")
 	if provider == "" || model == "" {
-		t.Skip("AUTONOMY_CLINE_PROVIDER and AUTONOMY_CLINE_MODEL are required")
+		// Allowed: the bridge falls back to the provider/model saved by
+		// `cline auth`, so an authenticated machine can run with no env at all.
+		t.Logf("AUTONOMY_CLINE_PROVIDER/MODEL unset; relying on the saved cline auth config")
 	}
 	workspace := t.TempDir()
 	client := clinesdk.NewClient(
@@ -44,7 +46,7 @@ func TestClineBridgeLive(t *testing.T) {
 		t.Fatalf("ping: %v", err)
 	}
 	t.Logf("bridge sdk=%s node=%s providers=%d", info.SDK, info.Node, len(providers))
-	if !containsString(providers, provider) {
+	if provider != "" && !containsString(providers, provider) {
 		t.Fatalf("provider %q not in bridge catalog", provider)
 	}
 

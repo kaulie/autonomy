@@ -13,7 +13,10 @@ import (
 // AttachCline binds a resident Cline SDK session (through the Node bridge) to
 // this autonomy agent. All Cline-backed agents go through here so the shared
 // bridge client is the only bridge used.
-func (a *Agent) AttachCline(ctx context.Context, model string) error {
+//
+// The model comes from AUTONOMY_CLINE_MODEL, or — when that is unset — from the
+// provider/model saved by `cline auth`, resolved by the bridge.
+func (a *Agent) AttachCline(ctx context.Context) error {
 	if a == nil {
 		return fmt.Errorf("nil agent")
 	}
@@ -28,12 +31,11 @@ func (a *Agent) AttachCline(ctx context.Context, model string) error {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if model == "" {
-		model = defaultClineModel()
-	}
 	agent, err := client.Agents().Create(ctx, clinesdk.CreateOptions{
-		ProviderID:   defaultClineProvider(),
-		ModelID:      model,
+		ProviderID:   resolveClineProvider(),
+		ModelID:      resolveClineModel(),
+		APIKey:       strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
+		BaseURL:      strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
 		CWD:          cwd,
 		SystemPrompt: defaultClineSystemPrompt(),
 		Mode:         clineModeFor(ReasonModeAgent),
@@ -45,8 +47,10 @@ func (a *Agent) AttachCline(ctx context.Context, model string) error {
 	a.LLMAgentID = agent.ID
 	a.Backend = AgentBackendCline
 	a.LLMProvider = LLMProviderCline
-	a.Model = model
+	a.Model = agent.ModelID
 	persistAgent(a)
+	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s provider=%s model=%s cwd=%s\n",
+		agent.ID, agent.ProviderID, agent.ModelID, agent.CWD)
 	return nil
 }
 
@@ -63,14 +67,12 @@ func clineModeFor(mode ReasonMode) string {
 // ensureClineSession attaches a session if needed and makes sure it runs in the
 // requested mode. A Cline session is mode-sticky, so a mode switch replaces the
 // session (the prompt carries the context, so nothing is lost).
-func (a *Agent) ensureClineSession(ctx context.Context, model, cwd, mode string) (string, error) {
+func (a *Agent) ensureClineSession(ctx context.Context, cwd, mode string) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("nil agent")
 	}
 	if a.clineAgent == nil {
-		// AttachCline pins the agent-level defaults; the requested mode is
-		// applied by promptClineMode below.
-		if err := a.AttachCline(ctx, model); err != nil {
+		if err := a.AttachCline(ctx); err != nil {
 			return "", err
 		}
 	}
@@ -81,6 +83,8 @@ func (a *Agent) ensureClineSession(ctx context.Context, model, cwd, mode string)
 		modeAgent, err := sharedClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
 			ProviderID:   a.clineAgent.ProviderID,
 			ModelID:      a.clineAgent.ModelID,
+			APIKey:       strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
+			BaseURL:      strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
 			CWD:          a.clineAgent.CWD,
 			SystemPrompt: defaultClineSystemPrompt(),
 			Mode:         mode,
@@ -117,7 +121,7 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 	}
 	// A Cline session is mode-sticky, so make sure the attached session runs in
 	// the requested mode before sending.
-	if _, err := a.ensureClineSession(ctx, "", a.Workspace, mode); err != nil {
+	if _, err := a.ensureClineSession(ctx, a.Workspace, mode); err != nil {
 		return failure(err)
 	}
 	if a.clineAgent == nil {

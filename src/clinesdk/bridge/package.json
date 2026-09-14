@@ -12,6 +12,7 @@
 		"@cline/sdk": "0.0.82"
 	},
 	"scripts": {
-		"smoke": "node smoke.mjs"
+		"smoke": "node smoke.mjs",
+		"test": "node --test"
 	}
 }
