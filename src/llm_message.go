@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,38 +28,114 @@ import (
 //
 // Seq starts at 1 (the user input is 0). The caller places the assistant row one
 // past the last row returned here so it stays the final message of the run.
+//
+// It is a thin wrapper over chatAggregator — the very accumulator a live run
+// feeds event by event — so a stream derived at the end and a stream derived
+// while it runs can never disagree.
 func aggregateChatMessages(events []LLMEvent) []LLMMessage {
-	var groups []*chatGroup
-	byCallID := map[string]*chatGroup{}
+	agg := newChatAggregator()
+	bySeq := map[int]LLMMessage{}
 	for _, ev := range events {
-		switch ev.Channel {
-		case LLMChannelThought:
-			if n := len(groups); n > 0 && groups[n-1].role == LLMMessageRoleThinking {
-				groups[n-1].appendText(ev)
-				continue
-			}
-			g := &chatGroup{role: LLMMessageRoleThinking, createdAt: ev.CreatedAt}
-			g.appendText(ev)
-			groups = append(groups, g)
-		case LLMChannelTool:
-			callID := payloadString(ev.Payload, "call_id")
-			if callID != "" {
-				if g, ok := byCallID[callID]; ok {
-					g.mergeTool(ev)
-					continue
-				}
-			}
-			g := &chatGroup{role: LLMMessageRoleTool, callID: callID, createdAt: ev.CreatedAt}
-			g.mergeTool(ev)
-			groups = append(groups, g)
-			if callID != "" {
-				byCallID[callID] = g
-			}
+		for _, m := range agg.add(ev) {
+			bySeq[m.Seq] = m
 		}
 	}
-	out := make([]LLMMessage, 0, len(groups))
-	for i, g := range groups {
-		out = append(out, g.message(i+1))
+	for _, m := range agg.flush() {
+		bySeq[m.Seq] = m
+	}
+	out := make([]LLMMessage, 0, len(bySeq))
+	for _, m := range bySeq {
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
+}
+
+// chatAggregator folds a run's stream into aggregated messages. It is the single
+// implementation behind both derivations:
+//
+//   - aggregateChatMessages folds a whole stream (finish/backfill/replay);
+//   - LLMTrace feeds it events as they arrive and persists each message the
+//     moment it is complete, so a live run is readable in llm_messages instead
+//     of only appearing once the run ends.
+//
+// A message is *complete* when its content can no longer change: a thinking
+// block when the next tool message starts (or the run ends), a tool message when
+// its result arrives. Callers must be able to re-write a message (upsert): a
+// tool call whose call_id shows up again after it was emitted is re-emitted.
+type chatAggregator struct {
+	groups   []*chatGroup
+	byCallID map[string]*chatGroup
+}
+
+func newChatAggregator() *chatAggregator {
+	return &chatAggregator{byCallID: map[string]*chatGroup{}}
+}
+
+// add folds one event in and returns the messages it completed, in seq order.
+func (a *chatAggregator) add(ev LLMEvent) []LLMMessage {
+	switch ev.Channel {
+	case LLMChannelThought:
+		if n := len(a.groups); n > 0 && a.groups[n-1].role == LLMMessageRoleThinking {
+			a.groups[n-1].appendText(ev)
+			return nil
+		}
+		g := &chatGroup{role: LLMMessageRoleThinking, seq: len(a.groups) + 1}
+		g.appendText(ev)
+		a.groups = append(a.groups, g)
+		return nil
+	case LLMChannelTool:
+		callID := payloadString(ev.Payload, "call_id")
+		if callID != "" {
+			if g, ok := a.byCallID[callID]; ok {
+				g.mergeTool(ev)
+				return a.emit(g)
+			}
+		}
+		// Starting a tool message also closes the open thinking block: thinking
+		// only merges while it stays the last group, exactly as before.
+		out := a.closeThinking()
+		g := &chatGroup{role: LLMMessageRoleTool, callID: callID, seq: len(a.groups) + 1, createdAt: ev.CreatedAt}
+		g.mergeTool(ev)
+		a.groups = append(a.groups, g)
+		if callID != "" {
+			a.byCallID[callID] = g
+		}
+		return append(out, a.emit(g)...)
+	}
+	return nil
+}
+
+// closeThinking emits the open thinking block, which ends when the next group
+// starts (or at flush).
+func (a *chatAggregator) closeThinking() []LLMMessage {
+	if n := len(a.groups); n > 0 && a.groups[n-1].role == LLMMessageRoleThinking && !a.groups[n-1].emitted {
+		return a.emit(a.groups[n-1])
+	}
+	return nil
+}
+
+// emit returns a group's message once it can no longer change: a closed thinking
+// block, or a tool call that has its result (a tool call without one may still
+// receive the result, so it stays open).
+func (a *chatAggregator) emit(g *chatGroup) []LLMMessage {
+	if g.role == LLMMessageRoleTool && !g.hasResult {
+		return nil
+	}
+	g.emitted = true
+	return []LLMMessage{g.message()}
+}
+
+// flush returns the still-open groups at the end of a stream (a trailing
+// thinking block, a tool call that never returned) in seq order.
+func (a *chatAggregator) flush() []LLMMessage {
+	var out []LLMMessage
+	for _, g := range a.groups {
+		if g.emitted {
+			continue
+		}
+		g.emitted = true
+		out = append(out, g.message())
 	}
 	return out
 }
@@ -66,11 +143,16 @@ func aggregateChatMessages(events []LLMEvent) []LLMMessage {
 // chatGroup accumulates one aggregated message while walking the stream: text
 // deltas for thinking, or the call+result fields for a tool call.
 type chatGroup struct {
-	role   LLMMessageRole
-	callID string
-	name   string
-	args   any
-	result any
+	// seq is the group's position in the run's message order (1-based, the user
+	// input is 0). It is fixed when the group is created, so a message written
+	// while the run streams keeps the seq the final derivation gives it.
+	seq     int
+	emitted bool
+	role    LLMMessageRole
+	callID  string
+	name    string
+	args    any
+	result  any
 	// hasResult distinguishes an absent result from a JSON null.
 	hasResult bool
 	text      strings.Builder
@@ -144,8 +226,8 @@ func (g *chatGroup) mergeTool(ev LLMEvent) {
 	}
 }
 
-func (g *chatGroup) message(seq int) LLMMessage {
-	m := LLMMessage{Seq: seq, Role: g.role, CreatedAt: g.createdAt}
+func (g *chatGroup) message() LLMMessage {
+	m := LLMMessage{Seq: g.seq, Role: g.role, CreatedAt: g.createdAt}
 	switch g.role {
 	case LLMMessageRoleThinking:
 		m.Content = g.text.String()

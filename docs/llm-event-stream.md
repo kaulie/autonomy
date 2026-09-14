@@ -88,13 +88,19 @@ CREATE INDEX IF NOT EXISTS idx_llm_events_turn_kind ON llm_events(turn_id, kind)
 BeginLLMTrace(agent, taskID, step, mode, input)   → 建 header + 写 user 消息（status=running）
    ↓  每个 provider 事件
 LLMTrace.Emit(LLMEvent)                            → 缓冲，按批写 llm_events
+   │                                               ＋ 边聚合边写 llm_messages（消息一完成就落库 + 打日志）
    ↓  run 结束
-LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assistant 消息（link input）+ 回填 run_id
+LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合行 + 回写 header + 写 assistant 消息（link input）+ 回填 run_id
 ```
 
 - 事件按 `llmEventFlushSize`（默认 64）批量落库，`Finish` 时强制 flush。
-- `llm_messages`（user 输入 + assistant 返回）**始终写**；`AUTONOMY_LLM_EVENTS` 只控制 `llm_events`。
+- `llm_messages` **始终写**（user 输入、thinking/tool 聚合行、assistant 返回），而且是**边跑边写**：
+  长 run 中途就能查表/看日志，不必等 `Finish`（见 [llm-message.md](llm-message.md)）。
+  `AUTONOMY_LLM_EVENTS` 只控制 `llm_events`。
 - 落库是 **best-effort**：失败只打 stderr，绝不让模型调用失败。没有 store 时 trace 是安全 no-op。
+- 日志就是"消息"：每条 `llm_messages` 落库行打一行 `[autonomy] llm seq=… <role> …`
+  （`src/llm_message_log.go`，`AUTONOMY_LLM_TRACE=0` 可关，`AUTONOMY_LLM_TRACE_MAX` 限宽）；
+  原始事件流不进日志，provider 桥各自的 trace 是 opt-in（如 `AUTONOMY_CLINE_TRACE=1`）。
 
 ### 开关：`AUTONOMY_LLM_EVENTS`
 
@@ -115,7 +121,9 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assis
 | 中立事件模型 / provider 适配器注册 | `src/llm_event.go` |
 | Cursor 事件映射 | `src/llm_event_cursor.go` |
 | Cline 事件映射 | `src/llm_event_cline.go`（见 [cline-reasoner.md](cline-reasoner.md)） |
-| header + 事件写入编排 | `src/llm_trace.go` |
+| header + 事件写入 / 边跑边写的消息编排 | `src/llm_trace.go` |
+| 事件流 → 消息聚合 | `src/llm_message.go`（见 [llm-message.md](llm-message.md)） |
+| 每行消息 → 日志 | `src/llm_message_log.go` |
 | 表结构 & 读写 | `src/sqlite_store.go` |
 | 落库调用点 | `src/reasoner.go`（plan 模式）、`src/runtime.go`（agent 模式） |
 

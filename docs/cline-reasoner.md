@@ -56,7 +56,10 @@ runtime → bridge
 | `AUTONOMY_CLINE_BASE_URL` | 空 | 兼容 OpenAI 的自建端点等 |
 | `AUTONOMY_CLINE_SYSTEM_PROMPT` | 见下 | 覆盖 session system prompt（SDK **必须**有非空 system prompt） |
 | `AUTONOMY_CLINE_INTERACTIVE` | `0` | 桥默认以 **headless** 方式启动 SDK（`interactive: false`）。设为 `1` 恢复 web-cursor 那种"有 UI 应答"的模式；**无 UI 时不要开**，否则 SDK 的交互请求没人回答，表现就是"零事件卡死" |
-| `AUTONOMY_CLINE_TRACE` | `0` | 设为 `1`（或复用 `AUTONOMY_LLM_DEBUG=1`）后，桥会把 SDK 的**每个事件**打到 stderr，用来诊断"到底有没有事件在流" |
+| `AUTONOMY_CLINE_TRACE` | `0` | 桥 stderr 的 trace 级别：**`0`（默认）= 静默**（可读日志在 autonomy 侧，见"日志"一节）；`signal` = 只打里程碑（thinking 块、tool-call，带内容）；`1`（或 `AUTONOMY_LLM_DEBUG=1`）= 全量，每个事件一行（含 `chunk` 回声）。显式设了 `AUTONOMY_CLINE_TRACE` 时它优先于 `AUTONOMY_LLM_DEBUG` |
+| `AUTONOMY_CLINE_TRACE_MAX` | `600` | 桥 `signal` 行里**每个字段**（thinking 文本、工具入参/输出）的字符预算，超出截断并标 `…(+Nch)` |
+| `AUTONOMY_LLM_TRACE` | `1` | autonomy 侧的 `llm_messages` 日志：每个消息行一条（见"日志"一节）；`0` / `off` / `silent` 关掉 |
+| `AUTONOMY_LLM_TRACE_MAX` | `500` | 该日志里每个字段的字符预算 |
 | `AUTONOMY_CLINE_DATA_DIR` / `CLINE_DATA_DIR` / `CLINE_DIR` | `~/.cline` | 定位已保存的 Cline 配置（仅在 provider/model 未显式设置时使用） |
 | `AUTONOMY_CLINE_NODE_BIN` | `node` | Node 可执行文件 |
 | `AUTONOMY_CLINE_BRIDGE_SCRIPT` | `src/clinesdk/bridge/bridge.mjs` | 桥脚本路径 |
@@ -100,6 +103,45 @@ runtime → bridge
 `llm_events.event_type` 保留 provider 判别符（如 `agent_event:content_end:tool`），`payload` 保留原生
 payload —— 与原 Cursor 适配器同样的保真度策略，因此 `llm_messages` 的聚合（thinking / tool）无需改动。
 
+## 日志（run 日志 = `llm_messages`，桥默认闭嘴）
+
+run 的**可读日志在 autonomy 侧**：一条 `llm_messages` 行 = 一行日志，**行落库时即打**（见
+`src/llm_message_log.go`，机制见 docs/llm-message.md）。也就是 thinking 块 / tool 调用+返回 /
+assistant 返回 / user 输入各一行，**没有**逐 token 噪声：
+
+```
+[autonomy] llm seq=0 user: 看一下桥里 trace 是怎么打日志的
+[autonomy] llm seq=1 thinking (1.834s): 先看仓库结构和现有测试，再决定改哪里
+[autonomy] llm seq=2 tool execute_command call=toolu_01 args={"command":"ls src/clinesdk"} -> bridge  bridge.go …
+[autonomy] llm seq=3 assistant: 找到了：桥在 bridge.mjs 里，事件是原样透传的
+```
+
+- `AUTONOMY_LLM_TRACE=0`（或 `off`/`silent`）关掉这组日志；`AUTONOMY_LLM_TRACE_MAX`（默认 500）
+  是每个字段的字符预算，超出截断并标 `…(+Nch)`。
+- **桥不参与**：`AUTONOMY_CLINE_TRACE` 默认 `0` = 桥什么都不打（逐字事件属于 `llm_events` 的保真回放，
+  不是日志）。要桥这一层的信息时才开：
+  - `AUTONOMY_CLINE_TRACE=signal`：桥打里程碑（thinking 块 / tool 调用，带内容，见下）；
+  - `AUTONOMY_CLINE_TRACE=1`（或 `AUTONOMY_LLM_DEBUG=1`）：桥打**每个**事件（`[cline-bridge] trace: event chunk/chunk …`），
+    用来排查"到底有没有事件在流"；同时 Go 侧 `AUTONOMY_LLM_DEBUG=1` 会打 `[cline event +…] <事件标签>`。
+- 保活类日志照旧：`[cline Wait] still running events=N last=… silent=…s`（15s 一次）与
+  `[cline Wait] begin/aborted` 等阶段行。
+
+`signal` 档（仅桥、可选）打什么：
+
+| 事件 | 输出 |
+|---|---|
+| `content_end/reasoning` | `think <thinking 全文>`（压成一行，按宽度截断；`redacted` 时是 `think <redacted>`） |
+| `content_end/text` | `assistant <模型这一轮说的话>` |
+| `content_start/tool` | `tool <name> start call=<id> args=<入参 JSON>` |
+| `content_end/tool` | `tool <name> end call=<id> ok <耗时>ms out=<输出>`（失败时 `failed error=<消息>`） |
+| `iteration_start` / `iteration_end` | `iteration <n> start` / `iteration <n> end tools=<k>` |
+| `usage` | `usage in=… out=… cache_read=… cost=$…` |
+| `notice` / `done` / `error` / `status` / `ended` | 各一行 |
+
+丢掉**只有**逐字噪声：`chunk`（agent 回声 + stdout/stderr 流）、text/reasoning 的 `content_start`
+增量、`content_update`（工具流式输出，结果在 `content_end/tool` 里）、`session_snapshot`（元数据 dump）、
+`hook`（与上面的 tool/done/error 重复）。
+
 ## Token 与成本
 
 - 首次 `start` 的 result 自带 usage；**常驻 `send` 的 result 不带**，桥用 `getAccumulatedUsage` 的
@@ -139,6 +181,7 @@ go run ./cmd/autonomy                      # LLMReasoner 与 code_edit 现在都
 | 常驻会话第 2 轮 | `text="hello-from-cline"`（真的跑了 shell 工具），usage in 3444/out 105/cacheRead 3072（`accumulated_delta`） |
 | 常驻会话第 3 轮（记忆） | `"You asked me to reply with exactly \"pong\" and not use any tools."` ✅ |
 | autonomy 层（`TestClineAgentLive`） | `text="pong"`，usage in 1671/out 32/cost 0.0755¢；事件 channel 分布 assistant=3 / thought=30 / meta=5 / status=2 / result=1 |
+| run 日志 / 边跑边写消息（`TestLLMTraceLiveMessages`，2026-09-14 实测） | 桥只打 `info:` 行（默认静默），autonomy 侧打：`[autonomy] llm seq=0 user: Use the shell tool to run exactly: echo hi-from-llm-trace — …` → `seq=1 thinking (1.013s): The user wants me to run exactly: echo hi-from-llm-trace using shell tool, then reply with just the output. I need to use run_commands with the command. Let me do that.` → `seq=2 tool run_commands call=call_00_axoqJCMiuCepDERsElk08340 args={"commands":["echo hi-from-llm-trace"]} -> [{"query":"echo hi-from-llm-trace","result":"hi-from-llm-trace\n","success":true}]` → `seq=3 assistant: hi-from-llm-trace`；**这 4 行在 run 期间就写进 `llm_messages`**（不是 `Finish` 之后才出现） |
 
 坑（已修）：SDK 在 **没有 system prompt** 时会内部 `undefined.trim()` 抛错（`Cannot read
 properties of undefined (reading 'trim')`），所以桥会兜底一个通用 prompt，autonomy 侧
@@ -149,8 +192,9 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
 症状：`decide: cline wait: run idle for 3m0s: no provider activity`，且桥在 `start session=…` 之后
 **一条事件都没有**。这说明 run 在 provider 应答前就停了，按顺序看：
 
-1. `AUTONOMY_CLINE_TRACE=1` 重跑：确认是否真的零事件（正常首轮应有几百条 `status/iteration_start/
-   content_start:reasoning`…）。
+1. 先看 **run 日志**（autonomy 侧的 `[autonomy] llm seq=… ` 行）与保活行 `[cline Wait] still running events=N silent=…s`：
+   正常 run 至少会有 begin + 心跳；连这个都没有才是真的零事件。要桥这一层的逐字确认就
+   `AUTONOMY_CLINE_TRACE=1` 重跑（那时每个 `agent_event` / `chunk` 都会有一行）。
 2. 零事件 → 先怀疑**交互式卡住**（`AUTONOMY_CLINE_INTERACTIVE` 不要开）或 **provider 侧排队/限流**
    （换个 provider/model 或稍后重试）。
 3. 有事件但中途静默超过 `AUTONOMY_LLM_TIMEOUT`（默认 3m）→ 调大该值即可；看门狗只在**静默**时触发，
@@ -166,3 +210,9 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
    `AUTONOMY_REASONER=local` 仍与 provider 无关。
 4. 工具执行仍由 Cline 在 agent workspace 内完成（与 Cursor 路径一致），autonomy 的 capability/policy
    只治理 autonomy 自己的动作。
+5. **常驻 session 在第 2 次 `send` 前就消失了**（2026-09-14 复测）：`start` 之后 SDK 会发 `ended`，
+   紧接着 `client.send` 报 `session_not_found: session not found: cls-…`。用
+   `CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=deepseek AUTONOMY_CLINE_MODEL=deepseek-v4-pro go test
+   ./src/clinesdk -run TestClineBridgeLive -v` 3.7s 内即可复现（`origin/main` 同样复现，与 trace 无关），
+   但上文表格里"第 2/3 轮"是通过的 —— 也就是这条路径**已经退化**，需要单独排查 session 生命周期
+   （`start` / `send` 的差别，或 web-cursor 的调用方式差异）。

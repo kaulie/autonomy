@@ -147,6 +147,15 @@ go run ./cmd/autonomy
 
 Live smoke (optional): `CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=... AUTONOMY_CLINE_MODEL=... go test ./src/clinesdk -run TestClineBridgeLive -timeout 6m -v`
 
+The run log is the conversation, not the token stream: autonomy logs one line per
+`llm_messages` row as it is written — `[autonomy] llm seq=2 tool execute_command
+call=… args=… -> …` — so thinking and tool activity is visible while a long run is
+still streaming. `AUTONOMY_LLM_TRACE=0` silences it, `AUTONOMY_LLM_TRACE_MAX` caps
+each field. The Cline bridge stays quiet by default; `AUTONOMY_CLINE_TRACE=signal`
+adds its own milestone lines and `=1` the full per-event firehose for debugging.
+
+Bridge unit tests (trace policy, config resolution): `cd src/clinesdk/bridge && npm test`.
+
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
