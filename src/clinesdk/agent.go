@@ -3,8 +3,11 @@ package clinesdk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // AgentFactory creates resident Cline sessions.
@@ -168,17 +171,22 @@ func (r *Run) Prompt() string { return r.prompt }
 // A cancelled context (an idle timeout, for example) aborts the wait and asks
 // the bridge to stop the session so the provider stops generating.
 func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResult, error) {
+	events := 0
 	for {
 		ev, ok, err := r.stream.next(ctx)
 		if err != nil {
 			r.cancelRun()
 			res := r.baseResult(LLMStatusCancelled)
 			res.ErrorMessage = err.Error()
-			return res, err
+			return res, r.describeWaitError(err, events)
 		}
 		if !ok {
 			break
 		}
+		events++
+		// Provider activity resets the run's idle budget. Without this the budget
+		// would bound the *total* run time instead of silence, killing busy runs.
+		llmrun.Touch(ctx)
 		if r.agent.SessionID == "" && ev.SessionID != "" {
 			r.agent.SessionID = ev.SessionID
 		}
@@ -191,7 +199,7 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 		r.cancelRun()
 		res := r.baseResult(LLMStatusCancelled)
 		res.ErrorMessage = err.Error()
-		return res, err
+		return res, r.describeWaitError(err, events)
 	}
 	res, err := r.decodeResult(raw)
 	if err != nil {
@@ -206,6 +214,20 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 // Wait is WaitStream without event delivery.
 func (r *Run) Wait(ctx context.Context) (*RunResult, error) {
 	return r.WaitStream(ctx, nil)
+}
+
+// describeWaitError explains a failed wait. A run that produced no events at all
+// stalled before the provider answered, which needs a different investigation
+// than a run that went quiet midway.
+func (r *Run) describeWaitError(err error, events int) error {
+	if err == nil {
+		return nil
+	}
+	if events > 0 {
+		return err
+	}
+	return fmt.Errorf("%w (no SDK events arrived at all: check the provider status/quota for %s/%s; AUTONOMY_CLINE_TRACE=1 traces provider events)",
+		err, r.agent.ProviderID, r.agent.ModelID)
 }
 
 // cancelRun asks the bridge to stop the session after a cancelled wait, so a

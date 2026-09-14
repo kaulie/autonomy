@@ -99,6 +99,35 @@ func TestResidentSendStreamsEventsAndKeepsSession(t *testing.T) {
 	}
 }
 
+// TestBusyRunOutlivesTheIdleBudget is the regression test for the stall that
+// killed real Cline runs: the idle budget must bound *silence*, not the total
+// run time, so a run that keeps producing events has to survive.
+func TestBusyRunOutlivesTheIdleBudget(t *testing.T) {
+	client := newFakeClient(t)
+	agent, err := client.Agents().Create(context.Background(), clinesdk.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The fake bridge streams for ~720ms (12 events, 60ms apart) while the idle
+	// budget is only 250ms: without per-event touches this aborts at 250ms.
+	wd := llmrun.NewIdleWatchdog(context.Background(), 250*time.Millisecond)
+	defer wd.Stop()
+	ctx := llmrun.WithIdleWatchdog(wd.Context(), wd)
+
+	events := 0
+	run, err := agent.Send(ctx, "stream slowly please")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	res, err := run.WaitStream(ctx, func(clinesdk.RunEvent) { events++ })
+	if err != nil {
+		t.Fatalf("busy run was aborted after %d events: %v", events, err)
+	}
+	if res.Text != "slow but alive" || events < 10 {
+		t.Fatalf("res=%+v events=%d want the whole run", res, events)
+	}
+}
+
 func TestWaitAbortsOnContextCancel(t *testing.T) {
 	client := newFakeClient(t)
 	agent, err := client.Agents().Create(context.Background(), clinesdk.CreateOptions{})
