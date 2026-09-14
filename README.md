@@ -100,7 +100,10 @@ export CURSOR_API_KEY=...
 export PROJECT_ROOT=/absolute/path/to/autonomy   # required; policy + SQLite under this root
 export AUTONOMY_REASONER=llm
 export AUTONOMY_LLM_MODEL=composer-2
-# Optional: AUTONOMY_LLM_TIMEOUT=3m (default). CreateAgent/Send/Wait share this deadline.
+# Optional: AUTONOMY_LLM_TIMEOUT=3m (default). Idle budget per provider run: the
+# watchdog restarts on every provider event, so a run is aborted only after this
+# much silence (create/send/wait share it) — long runs are never cut by wall
+# clock. A run that receives nothing but keepalives still counts as idle.
 # Keep HTTPS_PROXY if you need it for Cursor API egress. The Go client already
 # disables proxy for loopback Bridge RPCs; unsetting proxy can make CreateAgent hang.
 # Stage timing logs go to stderr by default. AUTONOMY_LLM_DEBUG=0 silences SDK traces;
