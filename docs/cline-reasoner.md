@@ -56,7 +56,8 @@ runtime → bridge
 | `AUTONOMY_CLINE_BASE_URL` | 空 | 兼容 OpenAI 的自建端点等 |
 | `AUTONOMY_CLINE_SYSTEM_PROMPT` | 见下 | 覆盖 session system prompt（SDK **必须**有非空 system prompt） |
 | `AUTONOMY_CLINE_INTERACTIVE` | `0` | 桥默认以 **headless** 方式启动 SDK（`interactive: false`）。设为 `1` 恢复 web-cursor 那种"有 UI 应答"的模式；**无 UI 时不要开**，否则 SDK 的交互请求没人回答，表现就是"零事件卡死" |
-| `AUTONOMY_CLINE_TRACE` | `0` | 设为 `1`（或复用 `AUTONOMY_LLM_DEBUG=1`）后，桥会把 SDK 的**每个事件**打到 stderr，用来诊断"到底有没有事件在流" |
+| `AUTONOMY_CLINE_TRACE` | `0` | 桥 stderr 的 trace 级别：**`0`（默认）= 信号**——只打 thinking 块、tool-call（带入参/输出）和生命周期，带内容（见下）；`1`（或 `AUTONOMY_LLM_DEBUG=1`）= 全量，每个事件一行（含 `chunk` 回声）；`silent` / `quiet` 或 `AUTONOMY_LLM_DEBUG=0` = 静默。显式设了 `AUTONOMY_CLINE_TRACE` 时它优先于 `AUTONOMY_LLM_DEBUG` |
+| `AUTONOMY_CLINE_TRACE_MAX` | `600` | 信号行里**每个字段**（thinking 文本、工具入参/输出）的字符预算，超出截断并标 `…(+Nch)` |
 | `AUTONOMY_CLINE_DATA_DIR` / `CLINE_DATA_DIR` / `CLINE_DIR` | `~/.cline` | 定位已保存的 Cline 配置（仅在 provider/model 未显式设置时使用） |
 | `AUTONOMY_CLINE_NODE_BIN` | `node` | Node 可执行文件 |
 | `AUTONOMY_CLINE_BRIDGE_SCRIPT` | `src/clinesdk/bridge/bridge.mjs` | 桥脚本路径 |
@@ -100,6 +101,36 @@ runtime → bridge
 `llm_events.event_type` 保留 provider 判别符（如 `agent_event:content_end:tool`），`payload` 保留原生
 payload —— 与原 Cursor 适配器同样的保真度策略，因此 `llm_messages` 的聚合（thinking / tool）无需改动。
 
+## trace：默认只打 thinking / tool-call（带内容）
+
+Cline 一次 run 会吐几千条事件，其中绝大多数是逐字噪声（`chunk` 是 SDK 把同一条 agent 事件再回声一次；text / reasoning 是**每个增量一个 `content_start`**）。所以桥默认只打**里程碑**，并且**带内容**：
+
+| 事件 | 输出 |
+|---|---|
+| `content_end/reasoning` | `think <thinking 全文>`（压成一行，按宽度截断；`redacted` 时是 `think <redacted>`） |
+| `content_end/text` | `assistant <模型这一轮说的话>` |
+| `content_start/tool` | `tool <name> start call=<id> args=<入参 JSON>` |
+| `content_end/tool` | `tool <name> end call=<id> ok <耗时>ms out=<输出>`（失败时 `failed error=<消息>`） |
+| `iteration_start` / `iteration_end` | `iteration <n> start` / `iteration <n> end tools=<k>` |
+| `usage` | `usage in=… out=… cache_read=… cost=$…` |
+| `notice` / `done` / `error` | 各一行（noticeType+message / reason+iterations / 错误消息） |
+| `status` / `ended` | `status <状态>` / `ended <reason>` |
+
+丢掉的**只有**逐字噪声：`chunk`（agent 回声 + stdout/stderr 流）、text/reasoning 的 `content_start` 增量、`content_update`（工具流式输出，结果在 `content_end/tool` 里）、`session_snapshot`（元数据 dump）、`hook`（与上面的 tool/done/error 重复）。
+
+样例（一次长 run 的骨架，`[cline-bridge] signal:` 一行一条）：
+
+```
+[cline-bridge] signal: iteration 1 start session=cls-… req=req-2
+[cline-bridge] signal: think 先看仓库结构和现有测试，再决定改哪里 session=cls-… req=req-2
+[cline-bridge] signal: tool execute_command start call=toolu_01 args={"command":"ls src/clinesdk"} session=cls-… req=req-2
+[cline-bridge] signal: tool execute_command end call=toolu_01 ok 38ms out=bridge  bridge.go  client.go … session=cls-… req=req-2
+[cline-bridge] signal: assistant 找到了：桥在 bridge.mjs 里，事件是原样透传的 session=cls-… req=req-2
+[cline-bridge] signal: usage in=1637 out=4 cache_read=1536 cost=$0.000053 session=cls-… req=req-2
+```
+
+要逐字排查"到底有没有事件在流"时再用 `AUTONOMY_CLINE_TRACE=1`：桥会打**每个**事件（`[cline-bridge] trace: event chunk/chunk …`）；Go 侧 `AUTONOMY_LLM_DEBUG=1` 另外打 `[cline event +…] <事件标签>` 的逐条标签。也就是说：**默认那档已经能看见"模型在想什么 / 调了什么工具"**，只有需要看 provider 原始事件流时才升到全量。
+
 ## Token 与成本
 
 - 首次 `start` 的 result 自带 usage；**常驻 `send` 的 result 不带**，桥用 `getAccumulatedUsage` 的
@@ -139,6 +170,7 @@ go run ./cmd/autonomy                      # LLMReasoner 与 code_edit 现在都
 | 常驻会话第 2 轮 | `text="hello-from-cline"`（真的跑了 shell 工具），usage in 3444/out 105/cacheRead 3072（`accumulated_delta`） |
 | 常驻会话第 3 轮（记忆） | `"You asked me to reply with exactly \"pong\" and not use any tools."` ✅ |
 | autonomy 层（`TestClineAgentLive`） | `text="pong"`，usage in 1671/out 32/cost 0.0755¢；事件 channel 分布 assistant=3 / thought=30 / meta=5 / status=2 / result=1 |
+| 桥 trace（`AUTONOMY_CLINE_TRACE=0`，deepseek-v4-pro，2026-09-14 复测） | stderr 只有 signal 行：`status running` → `iteration 1 start` → `usage in=1637 out=28 cache_read=1536 cost=$0.000073863` → `assistant pong.` → `think The user says reply with exactly "pong". Do not use any tools. So I just respond with pong.` → `iteration 1 end tools=0` → `done completed iterations=1` → `status completed` → `ended completed`；**没有** `chunk/chunk` 这类逐字行 |
 
 坑（已修）：SDK 在 **没有 system prompt** 时会内部 `undefined.trim()` 抛错（`Cannot read
 properties of undefined (reading 'trim')`），所以桥会兜底一个通用 prompt，autonomy 侧
@@ -149,8 +181,9 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
 症状：`decide: cline wait: run idle for 3m0s: no provider activity`，且桥在 `start session=…` 之后
 **一条事件都没有**。这说明 run 在 provider 应答前就停了，按顺序看：
 
-1. `AUTONOMY_CLINE_TRACE=1` 重跑：确认是否真的零事件（正常首轮应有几百条 `status/iteration_start/
-   content_start:reasoning`…）。
+1. 先看**默认的 signal 行**：正常首轮至少会有 `iteration 1 start` + `status …`（若 `think`/`tool` 也出现说明模型已经在工作）；
+   连 signal 行都没有，才是真的零事件。要逐字确认就 `AUTONOMY_CLINE_TRACE=1` 重跑（那时每个
+   `agent_event` / `chunk` 都会有一行）。
 2. 零事件 → 先怀疑**交互式卡住**（`AUTONOMY_CLINE_INTERACTIVE` 不要开）或 **provider 侧排队/限流**
    （换个 provider/model 或稍后重试）。
 3. 有事件但中途静默超过 `AUTONOMY_LLM_TIMEOUT`（默认 3m）→ 调大该值即可；看门狗只在**静默**时触发，
@@ -166,3 +199,9 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
    `AUTONOMY_REASONER=local` 仍与 provider 无关。
 4. 工具执行仍由 Cline 在 agent workspace 内完成（与 Cursor 路径一致），autonomy 的 capability/policy
    只治理 autonomy 自己的动作。
+5. **常驻 session 在第 2 次 `send` 前就消失了**（2026-09-14 复测）：`start` 之后 SDK 会发 `ended`，
+   紧接着 `client.send` 报 `session_not_found: session not found: cls-…`。用
+   `CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=deepseek AUTONOMY_CLINE_MODEL=deepseek-v4-pro go test
+   ./src/clinesdk -run TestClineBridgeLive -v` 3.7s 内即可复现（`origin/main` 同样复现，与 trace 无关），
+   但上文表格里"第 2/3 轮"是通过的 —— 也就是这条路径**已经退化**，需要单独排查 session 生命周期
+   （`start` / `send` 的差别，或 web-cursor 的调用方式差异）。

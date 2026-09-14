@@ -35,6 +35,7 @@ import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
 import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, messageOf, resolveClineDefaults } from "./config.mjs";
+import { eventLabel, signalLine, traceLevel, traceWidth } from "./trace.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
 const core = { client: null, promise: null };
@@ -51,21 +52,19 @@ function log(level, message) {
 	process.stderr.write(`[cline-bridge] ${level}: ${message}\n`);
 }
 
-// AUTONOMY_CLINE_TRACE=1 (or the shared AUTONOMY_LLM_DEBUG=1) logs every event
-// the SDK emits, which is how a "no provider activity" stall gets diagnosed.
-const TRACE = /^(1|true|on|yes)$/i.test(process.env.AUTONOMY_CLINE_TRACE ?? process.env.AUTONOMY_LLM_DEBUG ?? "");
+// Trace policy (see trace.mjs). "signal" is the default and prints the run's
+// milestones *with their content* — thinking blocks, tool calls with their
+// arguments and output, lifecycle — while the per-token `chunk` echo is dropped.
+// "full" (AUTONOMY_CLINE_TRACE=1 / AUTONOMY_LLM_DEBUG=1) prints every event,
+// which is how a "no provider activity" stall gets diagnosed; "silent" prints
+// nothing.
+const TRACE = traceLevel();
+const TRACE_WIDTH = traceWidth();
 
 // Headless by default: autonomy has no UI to answer SDK interaction prompts, and
 // an unanswered prompt looks exactly like a stalled run (no events at all).
 // AUTONOMY_CLINE_INTERACTIVE=1 restores the web-cursor-style interactive host.
 const INTERACTIVE = /^(1|true|on|yes)$/i.test(process.env.AUTONOMY_CLINE_INTERACTIVE ?? "");
-
-function summarizeEvent(event) {
-	const inner = event?.payload?.event ?? event;
-	const type = inner?.type ?? event?.type ?? "?";
-	const content = inner?.contentType ? `:${inner.contentType}` : "";
-	return `${event?.type ?? "?"}/${type}${content}`;
-}
 
 function rpcError(code, message) {
 	const err = new Error(message);
@@ -92,15 +91,30 @@ function normalizeMode(mode) {
 	return String(mode ?? "").trim().toLowerCase() === "plan" ? "plan" : DEFAULT_MODE;
 }
 
+/**
+ * traceEvent writes one run event to stderr under the configured trace level.
+ * "signal" is the readable default: the model's thinking blocks and tool calls
+ * with their content, plus the lifecycle milestones — the per-chunk noise (the
+ * `chunk` echo stream and content deltas) is dropped. "full" is the firehose.
+ */
+function traceEvent(event, sessionId, agent) {
+	if (TRACE === "silent") return;
+	const where = `session=${sessionId ?? "-"} req=${agent?.currentRequest ?? "-"}`;
+	if (TRACE === "full") {
+		log("trace", `event ${eventLabel(event)} ${where}`);
+		return;
+	}
+	const line = signalLine(event, TRACE_WIDTH);
+	if (line) log("signal", `${line} ${where}`);
+}
+
 /** SDK event fan-out: every core event is forwarded, tagged with its owner. */
 function onCoreEvent(event) {
 	const sessionId = event?.payload?.sessionId ?? null;
 	const agentId = sessionId ? sessionOwners.get(sessionId) ?? null : null;
 	const agent = agentId ? agents.get(agentId) : null;
 	if (agent) noteRunActivity(agent, event?.payload?.event ?? event);
-	if (TRACE) {
-		log("trace", `event ${summarizeEvent(event)} session=${sessionId ?? "-"} req=${agent?.currentRequest ?? "-"}`);
-	}
+	traceEvent(event, sessionId, agent);
 	write({
 		type: "event",
 		requestId: agent?.currentRequest ?? null,

@@ -126,12 +126,20 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 	// message must come from the same buffered reader.
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	// Keep draining stderr forever so a full pipe cannot block the bridge.
+	// Keep draining stderr forever so a full pipe cannot block the bridge. The
+	// bridge already tags its own lines ("[cline-bridge] info: …"), so only
+	// untagged output (a Node warning, for example) gets the prefix added here —
+	// otherwise every line reads "[cline-bridge] [cline-bridge] …".
 	go func() {
 		stderrScanner := bufio.NewScanner(stderr)
 		stderrScanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for stderrScanner.Scan() {
-			fmt.Fprintf(os.Stderr, "[cline-bridge] %s\n", stderrScanner.Text())
+			line := stderrScanner.Text()
+			if strings.HasPrefix(line, "[cline-bridge]") {
+				fmt.Fprintln(os.Stderr, line)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "[cline-bridge] %s\n", line)
 		}
 	}()
 

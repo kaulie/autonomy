@@ -147,6 +147,12 @@ go run ./cmd/autonomy
 
 Live smoke (optional): `CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=... AUTONOMY_CLINE_MODEL=... go test ./src/clinesdk -run TestClineBridgeLive -timeout 6m -v`
 
+Logs are readable by default: the bridge traces **one line per milestone with its
+content** — `[cline-bridge] signal: think <thinking>` / `tool <name> start call=…
+args=…` / `tool <name> end … out=…` / `iteration …` / `usage …`. The per-chunk
+noise is dropped. `AUTONOMY_CLINE_TRACE=1` switches to the full per-event firehose
+for debugging; `AUTONOMY_LLM_DEBUG=0` silences the bridge.
+
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
