@@ -20,9 +20,12 @@ reason_turns (1)  ────  run header：provider/status/usage/耗时/run_id
       └──▶ llm_events   (N) ── provider 原始流（逐事件，可选，见 llm-event-stream.md）
 ```
 
-- `seq` 是 run 内顺序：`0` = user 输入；`1..N` = thinking/tool 聚合行（按事件发生顺序）；
+- `seq` 是 run 内顺序：`0` = 该 run 的输入；`1..N` = thinking/tool 聚合行（按事件发生顺序）；
   assistant（最终返回）排在最后，为 `N+1`。无中间行时 assistant 仍为 `1`。
-- `role`：`user` | `assistant` | `thinking` | `tool`。
+- `role`：`user` | `agent` | `assistant` | `thinking` | `tool`。
+  `user` 与 `agent` 都是"这条 run 的输入**由谁写**"：`user` = 用户（人）的任务，`agent` = **另一个 agent 委托给它的子任务**
+  （capability 把工作交给 worker agent）。用户只写顶层 task 的输入，往下每一层都是 agent 对 agent，
+  所以委托出去的 run 不能再显示成 `user` 在说话。
 - `parent_id`：除 user 行外，每行都指向本次 run 的 user 行 id —— 这条边就是「产物 → 输入」的溯源链。
 - `content` 存逐字原文；`normalized_content` 是派生形式（assistant 的 ```json fence 抽取、
   tool 行的 `{name, args, call_id}`）。
@@ -36,8 +39,8 @@ CREATE TABLE IF NOT EXISTS llm_messages (
   task_id            TEXT    NOT NULL DEFAULT '',
   agent_id           INTEGER NOT NULL DEFAULT 0,
   step               INTEGER NOT NULL DEFAULT 0,
-  seq                INTEGER NOT NULL DEFAULT 0,   -- run 内顺序：user=0, 中间行 1..N, assistant=N+1
-  role               TEXT    NOT NULL DEFAULT '',  -- user | assistant | thinking | tool
+  seq                INTEGER NOT NULL DEFAULT 0,   -- run 内顺序：输入=0, 中间行 1..N, assistant=N+1
+  role               TEXT    NOT NULL DEFAULT '',  -- 输入作者: user | agent；产物: assistant | thinking | tool
   parent_id          INTEGER,                      -- 非 user 行 → 本次 run 的 user 消息 id（溯源）
   content            TEXT    NOT NULL DEFAULT '',
   normalized_content TEXT    NOT NULL DEFAULT '',
@@ -125,7 +128,11 @@ Finish(res)
 - 顺序按事件发生先后；`seq` 在组创建时就定下（= 创建序），所以边跑边写的 `seq` 与最终派生的一致；
   assistant 永远是最后一行。
 - `content` 是工具**返回**（结果），调用参数放 `normalized_content`。
-- `parent_id` 统一指向本 run 的 user 行（一次 run 只有一条 user 输入，中间产物与返回都回答它）。
+- `parent_id` 统一指向本 run 的输入行（seq=0，role 为 `user` 或 `agent`：一次 run 只有一条输入，
+  中间产物与返回都回答它）。
+- 输入行的 `role` 就是**委托可见性**：`runtimeAgentSession.Prompt` 是 capability 委托给 worker 的入口，
+  它用 `BeginLLMTraceFrom(agent, LLMMessageRoleAgent, …)` 开 trace，所以那条 `seq=0` 行记的是
+  **agent 在说话**（谁委托的），而不是用户又发了一次任务。
 
 ## 保留：header 内容列不移除
 
