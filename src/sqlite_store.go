@@ -750,16 +750,30 @@ WHERE id = ?
 	if err != nil {
 		return fmt.Errorf("finish reason turn: %w", err)
 	}
+	// The stream may already have been aggregated while it ran (LLMTrace writes
+	// each message as it completes). Re-deriving here is the safety net for
+	// callers that only appended events; the upsert makes the second pass a
+	// no-op for rows that are already correct.
 	events, err := s.ListLLMEvents(h.TurnID)
 	if err != nil {
 		return err
 	}
-	assistantSeq, err := s.recordAggregatedMessages(h.TurnID, h.InputMessageID, events)
-	if err != nil {
+	if err := s.recordAggregatedMessages(h.TurnID, h.InputMessageID, events); err != nil {
 		return err
 	}
-	if err := s.recordAssistantMessage(h, res, assistantSeq); err != nil {
+	// The assistant row is written once, at the seq one past everything stored so
+	// far (aggregated rows may have been written while the run streamed). A
+	// replayed finish finds it already there and leaves it alone.
+	if _, exists, err := s.assistantMessageSeq(h.TurnID); err != nil {
 		return err
+	} else if !exists {
+		assistantSeq, err := s.nextMessageSeq(h.TurnID)
+		if err != nil {
+			return err
+		}
+		if err := s.recordAssistantMessage(h, res, assistantSeq); err != nil {
+			return err
+		}
 	}
 	if res.ProviderRunID != "" {
 		if _, err := s.db.Exec(`UPDATE llm_events SET run_id = ? WHERE turn_id = ? AND run_id = ''`,
@@ -800,40 +814,112 @@ FROM reason_turns WHERE id = ?
 }
 
 // recordAggregatedMessages derives the thinking/tool messages from a run's raw
-// stream and writes them (seq 1..N, parent_id = the user input). It returns the
-// seq the assistant row must use, which is one past the last aggregated row so
-// the return stays final. With no aggregated rows that is 1, the original layout.
-// It is idempotent: INSERT OR IGNORE on UNIQUE(turn_id, seq) makes a replayed
-// finish a no-op.
-func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) (int, error) {
-	rows := aggregateChatMessages(events)
-	for _, m := range rows {
+// stream and writes them (seq 1..N, parent_id = the user input). The seq the
+// assistant row takes is read back from the table (nextMessageSeq) rather than
+// assumed here, because the same rows may already have been written while the run
+// was streaming. Re-writing a row is an upsert, so a replayed finish is a no-op.
+func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) error {
+	for _, m := range aggregateChatMessages(events) {
 		m.TurnID = turnID
 		m.ParentID = parentID
 		if err := s.insertDerivedMessage(m); err != nil {
-			return 0, err
+			return err
 		}
 	}
-	return len(rows) + 1, nil
+	return nil
 }
 
-// insertDerivedMessage writes one aggregated llm_messages row, copying
-// task/agent/step/provider/model/run_id/status from the run header.
+// upsertDerivedMessageSQL writes one aggregated (thinking/tool) message row,
+// copying task/agent/step/provider/model/run_id/status from the run header. It is
+// keyed by (turn_id, seq): a re-write updates the row in place, so a message that
+// is persisted while the run streams and then grows (or is re-derived at finish)
+// stays one row with its original id.
+const upsertDerivedMessageSQL = `
+INSERT INTO llm_messages
+(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, run_id, status, ?
+FROM reason_turns WHERE id = ?
+ON CONFLICT(turn_id, seq) DO UPDATE SET
+  role = excluded.role,
+  parent_id = excluded.parent_id,
+  content = excluded.content,
+  normalized_content = excluded.normalized_content,
+  created_at = excluded.created_at
+`
+
+// AppendLLMMessages upserts aggregated messages for a run that is still
+// streaming (see the Store contract). Idempotent on (turn_id, seq).
+func (s *SQLiteStore) AppendLLMMessages(turnID int64, messages []LLMMessage) error {
+	if turnID == 0 || len(messages) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin llm messages tx: %w", err)
+	}
+	stmt, err := tx.Prepare(upsertDerivedMessageSQL)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare llm message insert: %w", err)
+	}
+	defer stmt.Close()
+	for _, m := range messages {
+		var parent any
+		if m.ParentID != 0 {
+			parent = m.ParentID
+		}
+		if _, err := stmt.Exec(m.Seq, string(m.Role), parent, m.Content, m.NormalizedContent,
+			formatTime(m.CreatedAt), turnID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("append %s message seq=%d: %w", m.Role, m.Seq, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit llm messages: %w", err)
+	}
+	return nil
+}
+
+// insertDerivedMessage writes one aggregated llm_messages row (see
+// upsertDerivedMessageSQL).
 func (s *SQLiteStore) insertDerivedMessage(m LLMMessage) error {
 	var parent any
 	if m.ParentID != 0 {
 		parent = m.ParentID
 	}
-	_, err := s.db.Exec(`
-INSERT OR IGNORE INTO llm_messages
-(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
-SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, run_id, status, ?
-FROM reason_turns WHERE id = ?
-`, m.Seq, string(m.Role), parent, m.Content, m.NormalizedContent, formatTime(m.CreatedAt), m.TurnID)
-	if err != nil {
+	if _, err := s.db.Exec(upsertDerivedMessageSQL,
+		m.Seq, string(m.Role), parent, m.Content, m.NormalizedContent, formatTime(m.CreatedAt), m.TurnID); err != nil {
 		return fmt.Errorf("insert %s message: %w", m.Role, err)
 	}
 	return nil
+}
+
+// assistantMessageSeq reports whether the run already has its assistant row, and
+// at which seq. A replayed finish must not append a second one.
+func (s *SQLiteStore) assistantMessageSeq(turnID int64) (int, bool, error) {
+	var seq int
+	err := s.db.QueryRow(`SELECT seq FROM llm_messages WHERE turn_id = ? AND role = ? ORDER BY seq LIMIT 1`,
+		turnID, string(LLMMessageRoleAssistant)).Scan(&seq)
+	switch {
+	case err == sql.ErrNoRows:
+		return 0, false, nil
+	case err != nil:
+		return 0, false, fmt.Errorf("lookup assistant message: %w", err)
+	}
+	return seq, true, nil
+}
+
+// nextMessageSeq is the seq the next llm_messages row of a run takes: one past
+// the highest seq already stored (the user input is 0). It is read from the table
+// rather than derived from the event stream because aggregated rows may already
+// have been written while the run was streaming.
+func (s *SQLiteStore) nextMessageSeq(turnID int64) (int, error) {
+	var seq int
+	if err := s.db.QueryRow(
+		`SELECT COALESCE(MAX(seq), 0) + 1 FROM llm_messages WHERE turn_id = ?`, turnID).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("next llm message seq: %w", err)
+	}
+	return seq, nil
 }
 
 // ListLLMEvents returns a run's stream events in Seq order for replay/analysis.

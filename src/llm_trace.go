@@ -27,8 +27,11 @@ func llmEventStreamEnabled() bool {
 
 // LLMTrace records one LLM interaction. It opens a reason_turns row as the run
 // header and records the user-input llm_message, appends the provider's stream
-// events to llm_events, then finalizes the header with status, usage, and
-// duration and records the assistant llm_message linked to that input.
+// events to llm_events, aggregates the stream into conversation messages
+// (thinking blocks, tool calls with their results) and writes each one as soon as
+// it completes — logging that row to stderr — then finalizes the header with
+// status, usage, and duration and records the assistant llm_message linked to
+// that input.
 //
 // Persistence is best-effort: failures are logged and never fail the model
 // call, so observability degrades instead of the run breaking. A trace with no
@@ -44,6 +47,10 @@ type LLMTrace struct {
 	// events is false when AUTONOMY_LLM_EVENTS disables raw stream persistence;
 	// the run header is still recorded, only llm_events writes are skipped.
 	events bool
+	// aggregator folds the same live events into conversation messages, so the
+	// thinking/tool rows are written (and logged) while the run streams instead of
+	// only when it ends. nil when the trace is inert.
+	aggregator *chatAggregator
 }
 
 // BeginLLMTrace opens a run header for one LLM interaction. The returned trace
@@ -73,28 +80,59 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 		return t
 	}
 	t.handle = handle
+	t.aggregator = newChatAggregator()
 	t.active = true
+	// The user input is an llm_messages row too, so the run's log starts with it.
+	logLLMMessage(LLMMessage{Seq: llmMessageSeqUser, Role: LLMMessageRoleUser, Content: input})
 	return t
 }
 
 // Emit appends one stream event. Seq, CreatedAt and ElapsedMS are assigned here
 // so adapters only report what the provider actually sent. It is a no-op when
-// raw stream persistence is disabled (AUTONOMY_LLM_EVENTS).
+// raw stream persistence is disabled (AUTONOMY_LLM_EVENTS) — but only for the
+// raw rows: the aggregated messages are still persisted and logged as they
+// complete, because they are the run's conversation rather than its replay.
 func (t *LLMTrace) Emit(ev LLMEvent) {
-	if t == nil || !t.active || !t.events {
+	if t == nil || !t.active {
 		return
 	}
-	ev.Seq = t.seq
-	t.seq++
 	if ev.CreatedAt.IsZero() {
 		ev.CreatedAt = time.Now()
 	}
-	if ev.ElapsedMS == 0 {
-		ev.ElapsedMS = time.Since(t.start).Milliseconds()
+	if t.events {
+		ev.Seq = t.seq
+		t.seq++
+		if ev.ElapsedMS == 0 {
+			ev.ElapsedMS = time.Since(t.start).Milliseconds()
+		}
+		t.buf = append(t.buf, ev)
+		if len(t.buf) >= llmEventFlushSize {
+			t.flush()
+		}
 	}
-	t.buf = append(t.buf, ev)
-	if len(t.buf) >= llmEventFlushSize {
-		t.flush()
+	t.emitMessages(t.aggregator.add(ev))
+}
+
+// emitMessages persists the aggregated messages that just became complete and
+// mirrors each one to stderr. That log line *is* the readable run log: one line
+// per llm_messages row (user input, thinking block, tool call + result, assistant
+// return) instead of one per token. Both writes are best-effort, like the raw
+// stream: a store failure is logged and never fails the model call.
+func (t *LLMTrace) emitMessages(messages []LLMMessage) {
+	if len(messages) == 0 {
+		return
+	}
+	rows := make([]LLMMessage, 0, len(messages))
+	for _, m := range messages {
+		m.TurnID = t.handle.TurnID
+		m.ParentID = t.handle.InputMessageID
+		rows = append(rows, m)
+	}
+	if err := t.store.AppendLLMMessages(t.handle.TurnID, rows); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] append llm messages: %v\n", err)
+	}
+	for _, m := range rows {
+		logLLMMessage(m)
 	}
 }
 
@@ -117,6 +155,10 @@ func (t *LLMTrace) Finish(res LLMRunResult) {
 		res.EventCount = t.seq
 	}
 	t.flush()
+	// Close whatever the stream left open (a trailing thinking block, a tool call
+	// that never returned) before the assistant row is appended, so the return
+	// stays the run's last message.
+	t.emitMessages(t.aggregator.flush())
 	if err := t.store.FinishReasonTurn(t.handle, res); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] finish llm trace: %v\n", err)
 	}

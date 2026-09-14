@@ -31,6 +31,13 @@ type Store interface {
 	BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 	// AppendLLMEvents appends a batch of neutral stream events to a run.
 	AppendLLMEvents(turnID int64, runID string, events []LLMEvent) error
+	// AppendLLMMessages upserts aggregated conversation messages (the thinking/
+	// tool rows derived from the stream) for a run that is still streaming, so a
+	// consumer can follow the conversation before the run ends. Rows are keyed by
+	// (turn_id, seq) and a re-write updates the existing row, which is how a
+	// message that grows after being written (a tool call that returns later) is
+	// kept correct.
+	AppendLLMMessages(turnID int64, messages []LLMMessage) error
 	// FinishReasonTurn finalizes the header with status, usage, and timing,
 	// records the assistant message (linked to the user input via the handle),
 	// and backfills the run id onto events written before it was known.

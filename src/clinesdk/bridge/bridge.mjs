@@ -52,12 +52,12 @@ function log(level, message) {
 	process.stderr.write(`[cline-bridge] ${level}: ${message}\n`);
 }
 
-// Trace policy (see trace.mjs). "signal" is the default and prints the run's
-// milestones *with their content* — thinking blocks, tool calls with their
-// arguments and output, lifecycle — while the per-token `chunk` echo is dropped.
-// "full" (AUTONOMY_CLINE_TRACE=1 / AUTONOMY_LLM_DEBUG=1) prints every event,
-// which is how a "no provider activity" stall gets diagnosed; "silent" prints
-// nothing.
+// Trace policy (see trace.mjs). The bridge is silent by default: the readable
+// run log is written on the autonomy side, one line per llm_messages row (see
+// src/llm_message_log.go). AUTONOMY_CLINE_TRACE=signal opts into this bridge's
+// milestone lines (thinking blocks, tool calls with their content), and
+// AUTONOMY_CLINE_TRACE=1 (or AUTONOMY_LLM_DEBUG=1) into the full firehose, which
+// is how a "no provider activity" stall gets diagnosed.
 const TRACE = traceLevel();
 const TRACE_WIDTH = traceWidth();
 

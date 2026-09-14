@@ -7,24 +7,21 @@ function agentEvent(inner) {
 	return { type: "agent_event", payload: { sessionId: "cls-1", event: inner } };
 }
 
-test("traceLevel: AUTONOMY_CLINE_TRACE=0 keeps the signal trace", () => {
-	assert.equal(traceLevel({}), "signal");
-	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "0" }), "signal");
-	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "false" }), "signal");
+test("traceLevel: the bridge is silent unless asked to speak", () => {
+	assert.equal(traceLevel({}), "silent");
+	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "0" }), "silent");
+	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "off" }), "silent");
+	assert.equal(traceLevel({ AUTONOMY_LLM_DEBUG: "0" }), "silent");
+	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "signal" }), "signal");
 	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "1" }), "full");
 	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "true" }), "full");
-	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "silent" }), "silent");
-});
-
-test("traceLevel: AUTONOMY_LLM_DEBUG keeps the Cursor client's meaning", () => {
 	assert.equal(traceLevel({ AUTONOMY_LLM_DEBUG: "1" }), "full");
 	assert.equal(traceLevel({ AUTONOMY_LLM_DEBUG: "verbose" }), "full");
-	assert.equal(traceLevel({ AUTONOMY_LLM_DEBUG: "0" }), "silent");
-	assert.equal(traceLevel({ AUTONOMY_LLM_DEBUG: "" }), "signal");
 });
 
-test("traceLevel: the specific knob wins over the shared one", () => {
-	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "0", AUTONOMY_LLM_DEBUG: "1" }), "signal");
+test("traceLevel: an explicit AUTONOMY_CLINE_TRACE wins", () => {
+	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "signal", AUTONOMY_LLM_DEBUG: "1" }), "signal");
+	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "0", AUTONOMY_LLM_DEBUG: "1" }), "silent");
 	assert.equal(traceLevel({ AUTONOMY_CLINE_TRACE: "1", AUTONOMY_LLM_DEBUG: "0" }), "full");
 });
 

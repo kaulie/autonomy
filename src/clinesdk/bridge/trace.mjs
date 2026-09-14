@@ -3,20 +3,19 @@
  *
  * A Cline run emits thousands of events and most of them are per-token noise:
  * `chunk` is the SDK's own JSON echo of the stream, and text/reasoning arrive as
- * one `content_start` per *delta*. What a human reading a log needs is the run's
- * skeleton — what the model is thinking, which tool it calls with which
- * arguments, and what came back.
+ * one `content_start` per *delta*. The run's readable log is therefore written on
+ * the autonomy side, one line per llm_messages row (see src/llm_message_log.go) —
+ * so the bridge keeps quiet unless it is explicitly asked to speak:
  *
- * So the bridge traces at three levels:
+ *   silent (default)                   nothing
+ *   signal (AUTONOMY_CLINE_TRACE=signal) milestones *with* their content:
+ *                                      thinking blocks, tool calls and their
+ *                                      output, plus lifecycle lines
+ *   full   (AUTONOMY_CLINE_TRACE=1)    every raw event, one line each (this is the
+ *                                      one used to diagnose "no provider activity")
  *
- *   signal (default, AUTONOMY_CLINE_TRACE=0)  milestones, with their content
- *   full   (AUTONOMY_CLINE_TRACE=1)           every raw event, one line each
- *   silent (AUTONOMY_LLM_DEBUG=0)             nothing at all
- *
- * AUTONOMY_CLINE_TRACE wins when it is set, so `=0` means "signal only" rather
- * than "silent"; AUTONOMY_LLM_DEBUG keeps its Cursor-client meaning (=1 verbose
- * firehose, =0 silence) so one variable can quiet both backends. Use
- * AUTONOMY_CLINE_TRACE=silent for a quiet Cline bridge.
+ * AUTONOMY_LLM_DEBUG keeps its Cursor-client meaning (=1 verbose firehose, =0
+ * silence) so one variable can trace both backends.
  */
 import { coerceText, messageOf } from "./config.mjs";
 
@@ -24,8 +23,7 @@ import { coerceText, messageOf } from "./config.mjs";
 export const DEFAULT_WIDTH = 600;
 
 const LEVEL_ON = new Set(["1", "true", "on", "yes", "full", "verbose", "debug", "trace", "all"]);
-const LEVEL_OFF = new Set(["0", "false", "off", "no", "silent", "quiet", "none"]);
-const LEVEL_QUIET = new Set(["silent", "quiet", "none"]);
+const LEVEL_SIGNAL = new Set(["signal", "milestones"]);
 /** SKIPPED_CORE lists the core event types that never make a signal line. */
 const SKIPPED_CORE = new Set(["chunk", "session_snapshot", "hook"]);
 
@@ -35,19 +33,19 @@ function norm(value) {
 
 /**
  * traceLevel resolves the bridge trace level: "full", "signal" or "silent".
- * AUTONOMY_CLINE_TRACE is the specific knob (anything unrecognized means
- * "signal", including 0/false/off); AUTONOMY_LLM_DEBUG is the shared one.
+ * Default is "silent": the readable log is the autonomy side's llm_messages log.
+ * AUTONOMY_CLINE_TRACE opts in (=1 every event, =signal milestones);
+ * AUTONOMY_LLM_DEBUG keeps its Cursor-client meaning (=1 firehose).
  */
 export function traceLevel(env = process.env) {
 	const cline = norm(env.AUTONOMY_CLINE_TRACE);
 	if (cline) {
-		if (LEVEL_QUIET.has(cline)) return "silent";
-		return LEVEL_ON.has(cline) ? "full" : "signal";
+		if (LEVEL_ON.has(cline)) return "full";
+		if (LEVEL_SIGNAL.has(cline)) return "signal";
+		return "silent";
 	}
-	const debug = norm(env.AUTONOMY_LLM_DEBUG);
-	if (LEVEL_ON.has(debug)) return "full";
-	if (LEVEL_OFF.has(debug)) return "silent";
-	return "signal";
+	if (LEVEL_ON.has(norm(env.AUTONOMY_LLM_DEBUG))) return "full";
+	return "silent";
 }
 
 /**

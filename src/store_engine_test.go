@@ -18,6 +18,7 @@ func (fakeStore) BeginReasonTurn(ReasonTurn) (ReasonTurnHandle, error) {
 	return ReasonTurnHandle{}, nil
 }
 func (fakeStore) AppendLLMEvents(int64, string, []LLMEvent) error { return nil }
+func (fakeStore) AppendLLMMessages(int64, []LLMMessage) error     { return nil }
 func (fakeStore) FinishReasonTurn(ReasonTurnHandle, LLMRunResult) error {
 	return nil
 }

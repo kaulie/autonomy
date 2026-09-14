@@ -61,30 +61,60 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task   ON llm_messages(task_id, step
 
 ## 写入流程
 
+消息是**边跑边写**的：一次 run 的 thinking 块 / tool 调用一旦"不会再变"（thinking 块在下一个
+tool 消息开始时结束，tool 消息在它的返回到达时结束），就立刻落库**并打一行日志**——所以长 run 在
+跑的过程中就能从表里和 stderr 上看到进展，不必等 `Finish`（`AppendLLMMessages`）。
+
 ```
 BeginLLMTrace(agent, taskID, step, mode, input)
   → BeginReasonTurn：建 header，写 user 消息(seq=0)，返回 handle{TurnID, InputMessageID}
-      ↓  Emit(ev) 逐条写入 llm_events
-      ↓  run 结束
+       ↓  Emit(ev) 逐条：llm_events（可选，AUTONOMY_LLM_EVENTS）
+       │                    ＋ 聚合：消息一完成就 AppendLLMMessages(seq 固定为创建序) + 打日志
+       ↓  run 结束
 Finish(res)
+  → 冲掉仍未闭合的聚合行（尾部 thinking 块、没返回的 tool）
   → FinishReasonTurn(handle, res)：更新 header，
-       读回本 run 的 llm_events → 聚合 thinking/tool → 写中间消息(seq=1..N, parent_id=InputMessageID)
-       写 assistant 消息(seq=N+1, parent_id=InputMessageID)
+       读回本 run 的 llm_events 再聚合一遍作为兜底（upsert，(turn_id, seq) 幂等）
+       写 assistant 消息(seq = 当前最大 seq + 1，parent_id=InputMessageID)
 ```
 
-- **流式路径**（plan / agent 模式）走 `BeginLLMTrace` / `Finish`，见 `src/llm_trace.go`。
+- **流式路径**（plan / agent 模式）走 `BeginLLMTrace` / `Emit` / `Finish`，见 `src/llm_trace.go`。
 - **一次性路径** `InsertReasonTurn` 在同一事务里写 header + user + assistant 两条消息并互链
   （本地 reasoner 无原始流，故无中间行）。
 - `Store.ListLLMMessages(turnID)` 按 `seq` 返回该 run 的消息。
+- `AUTONOMY_LLM_EVENTS=0` 只关**原始流**（`llm_events`）；聚合出的 `llm_messages` 照写，因为它是
+  对话本身而不是回放。
+- 端到端验证（opt-in，真 provider）：`CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=… AUTONOMY_CLINE_MODEL=…
+  go test ./src -run TestLLMTraceLiveMessages -v` —— 断言 thinking/tool/assistant 三行都在 `Finish`
+  之前就已落库。
 
-## 聚合规则（从原始流 → 消息层）
+## 日志：一行一个消息
 
-中间行由纯函数 `aggregateChatMessages(events)`（`src/llm_message.go`）从本 run 的
-`llm_events` 派生；聚合放在纯函数里、由 engine 调用，逻辑与数据库无关：
+每条 `llm_messages` 行落库时同步打一行 stderr（`src/llm_message_log.go`），run 的日志因此就是
+"对话"，而不是逐 token 流：
+
+```
+[autonomy] llm seq=0 user: 看一下桥里 trace 是怎么打日志的
+[autonomy] llm seq=1 thinking (1.834s): 先看仓库结构和现有测试，再决定改哪里
+[autonomy] llm seq=2 tool execute_command call=toolu_01 args={"command":"ls"} -> {"exit":0,…}
+[autonomy] llm seq=3 assistant: 找到了：桥在 bridge.mjs 里，事件是原样透传的
+```
+
+- `AUTONOMY_LLM_TRACE=0` / `off` / `silent` 关掉；默认开。
+- `AUTONOMY_LLM_TRACE_MAX`（默认 500）是每个字段的字符预算，超出截断并标 `…(+Nch)`。
+- 保活类日志（心跳 / 阶段行）不属于消息层，仍由各 SDK 客户端照常打。
+
+## 聚合规则（原始流 → 消息层）
+
+中间行由 `chatAggregator`（`src/llm_message.go`）从事件流派生，**流式**进行：
+
+- 一次 run 里边跑边喂（`LLMTrace.Emit` → `AppendLLMMessages`）：消息一旦不会再变就落库；
+- 整条流一次性派生（`aggregateChatMessages(events)`，finish 兜底 / 回填）就是"喂完再 `flush()`"，
+  两条路径共用同一个 aggregator，所以不可能不一致。
 
 | 原始事件（`llm_events`） | 聚合为 | `content` | `normalized_content` |
 |---|---|---|---|
-| `thought`（连续的 `thinking` chunk 段） | **1 行**（`role=thinking`），把该段所有 `text_delta` 拼接 | 整段推理文本 | 空 |
+| `thought`（连续的 `thinking` chunk 段） | **1 行**（`role=thinking`），把该段所有 `text_delta` 拼接 | 整段推理文本 | 空（`{"duration_ms":N}` 当能算出时长时） |
 | `tool`（同一 `call_id` 的 `running` 调用 + `completed` 返回） | **每个 `call_id` 1 行**（`role=tool`） | 工具返回（`result` 的 JSON） | `{name, args, call_id}` |
 | `assistant`（逐 chunk） | **不产生行** —— 由 `reason_turns.raw_output` 写为最终 assistant 行 | 最终返回 | 归一化输出 |
 | `status` / `meta` / `result` | 跳过（无对话文本） | — | — |
@@ -92,7 +122,8 @@ Finish(res)
 要点：
 
 - 只聚合、不删原始：`llm_events` 仍保留逐事件（逐 token）全保真流水。
-- 顺序按事件发生先后；assistant 永远是最后一行。
+- 顺序按事件发生先后；`seq` 在组创建时就定下（= 创建序），所以边跑边写的 `seq` 与最终派生的一致；
+  assistant 永远是最后一行。
 - `content` 是工具**返回**（结果），调用参数放 `normalized_content`。
 - `parent_id` 统一指向本 run 的 user 行（一次 run 只有一条 user 输入，中间产物与返回都回答它）。
 
@@ -113,6 +144,7 @@ Finish(res)
 | 关注点 | 文件 |
 |--------|------|
 | `Store` 契约 / `LLMMessage` / `LLMMessageRole` / `ReasonTurnHandle` | `src/store.go` |
-| 原始流 → 聚合消息（纯函数，DB 无关） | `src/llm_message.go` |
-| 表结构 / 读写 / 聚合写入 / 回填 | `src/sqlite_store.go` |
-| header + 消息写入编排 | `src/llm_trace.go` |
+| 流式聚合器 + 整条流派生（DB 无关） | `src/llm_message.go` |
+| 每行消息 → 日志（`AUTONOMY_LLM_TRACE` / `_MAX`） | `src/llm_message_log.go` |
+| 表结构 / 读写 / 聚合写入（upsert）/ 回填 | `src/sqlite_store.go` |
+| header + 消息写入编排（边跑边写） | `src/llm_trace.go` |
