@@ -166,27 +166,46 @@ type Run struct {
 // Prompt is the prompt that started this run.
 func (r *Run) Prompt() string { return r.prompt }
 
-// Wait drains the run's event stream until the session answers, invoking
+// WaitStream drains the run's event stream until the session answers, invoking
 // onEvent for every native provider event in arrival order (onEvent may be nil).
 // A cancelled context (an idle timeout, for example) aborts the wait and asks
 // the bridge to stop the session so the provider stops generating.
 func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResult, error) {
 	events := 0
+	arrived := 0
+	last := ""
+	started := time.Now()
+	lastEventAt := time.Now()
+	Trace("Wait", "begin agent=%s model=%s prompt_bytes=%d", r.agent.ID, r.agent.ModelID, len(r.prompt))
+	stopHB := startHeartbeat(func() (int, string, time.Duration) {
+		return events, last, time.Since(lastEventAt)
+	})
+	defer stopHB()
+
 	for {
 		ev, ok, err := r.stream.next(ctx)
 		if err != nil {
 			r.cancelRun()
 			res := r.baseResult(LLMStatusCancelled)
 			res.ErrorMessage = err.Error()
-			return res, r.describeWaitError(err, events)
+			Trace("Wait", "aborted after %s events=%d last=%s: %v", time.Since(started).Round(time.Millisecond), events, last, err)
+			return res, r.describeWaitError(err, arrived)
 		}
 		if !ok {
 			break
 		}
-		events++
+		arrived++
+		if !isAgentEcho(ev) {
+			events++
+			last = eventLabel(ev)
+			lastEventAt = time.Now()
+		}
 		// Provider activity resets the run's idle budget. Without this the budget
 		// would bound the *total* run time instead of silence, killing busy runs.
 		llmrun.Touch(ctx)
+		if TraceVerbose() {
+			Trace("event", "%s", last)
+		}
 		if r.agent.SessionID == "" && ev.SessionID != "" {
 			r.agent.SessionID = ev.SessionID
 		}
@@ -199,7 +218,7 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 		r.cancelRun()
 		res := r.baseResult(LLMStatusCancelled)
 		res.ErrorMessage = err.Error()
-		return res, r.describeWaitError(err, events)
+		return res, r.describeWaitError(err, arrived)
 	}
 	res, err := r.decodeResult(raw)
 	if err != nil {
@@ -214,6 +233,58 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 // Wait is WaitStream without event delivery.
 func (r *Run) Wait(ctx context.Context) (*RunResult, error) {
 	return r.WaitStream(ctx, nil)
+}
+
+// eventLabel renders one native event for progress logs.
+func eventLabel(ev RunEvent) string {
+	if ev.Type == "" {
+		return "?"
+	}
+	inner := ev.Payload["event"]
+	if m, ok := inner.(map[string]any); ok {
+		if t, ok := m["type"].(string); ok {
+			if ct, ok := m["contentType"].(string); ok {
+				return ev.Type + "/" + t + ":" + ct
+			}
+			return ev.Type + "/" + t
+		}
+	}
+	if stream, ok := ev.Payload["stream"].(string); ok {
+		return ev.Type + ":" + stream
+	}
+	return ev.Type
+}
+
+// isAgentEcho reports whether an event is the SDK's verbatim JSON echo of the
+// agent stream. The neutral mapping drops those (they duplicate agent_event), so
+// progress counters skip them too and match what actually gets persisted.
+func isAgentEcho(ev RunEvent) bool {
+	if ev.Type != "chunk" {
+		return false
+	}
+	stream, _ := ev.Payload["stream"].(string)
+	return stream == "" || stream == "agent"
+}
+
+// startHeartbeat logs progress every 15s until stopped, so a long run is
+// visibly alive instead of looking like a hang (the states probe events, the
+// last event label and the time since that event).
+func startHeartbeat(state func() (int, string, time.Duration)) func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				events, last, silent := state()
+				Trace("Wait", "still running events=%d last=%s silent=%s", events, last, silent.Round(time.Second))
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // describeWaitError explains a failed wait. A run that produced no events at all
