@@ -443,3 +443,70 @@ func preparePolicyRoot(t *testing.T) string {
 	}
 	return root
 }
+
+// TestSQLiteStoreMigratesLLMEventsKind proves an existing database (llm_events
+// without the kind column) is migrated in place and the column round-trips.
+func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pre-kind schema: every column except kind.
+	_, err = db.Exec(`CREATE TABLE llm_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id INTEGER NOT NULL DEFAULT 0,
+		run_id TEXT NOT NULL DEFAULT '',
+		seq INTEGER NOT NULL DEFAULT 0,
+		offset_token TEXT NOT NULL DEFAULT '',
+		channel TEXT NOT NULL DEFAULT '',
+		event_type TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		text_delta TEXT NOT NULL DEFAULT '',
+		payload TEXT NOT NULL DEFAULT '{}',
+		elapsed_ms INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO llm_events
+		(turn_id, run_id, seq, channel, event_type, role, name, text_delta, payload, elapsed_ms, created_at)
+		VALUES (1, 'run-old', 0, 'thought', 'thinking', 'assistant', '', 'old', '{}', 0, '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer store.Close()
+
+	// The old row survives with an empty kind, and new rows round-trip one.
+	events, err := store.ListLLMEvents(1)
+	if err != nil {
+		t.Fatalf("list legacy events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != "thinking" || events[0].Kind != "" {
+		t.Fatalf("legacy events=%+v want the old row with an empty kind", events)
+	}
+	if err := store.AppendLLMEvents(1, "run-new", []LLMEvent{{
+		Seq: 1, Channel: LLMChannelTool, Kind: LLMKindToolCallCompleted,
+		EventType: "tool_call", Role: "tool", CreatedAt: time.Now(),
+		Payload: map[string]any{"call_id": "c1"},
+	}}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	events, err = store.ListLLMEvents(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[1].Kind != LLMKindToolCallCompleted {
+		t.Fatalf("events=%+v want the kind to round-trip", events)
+	}
+}

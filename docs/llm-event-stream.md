@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS llm_events (
   seq          INTEGER NOT NULL DEFAULT 0,   -- 一次交互内 0-based 单调递增，排序键
   offset_token TEXT    NOT NULL DEFAULT '',  -- provider 断点续传游标
   channel      TEXT    NOT NULL DEFAULT '',  -- 中立粗分类 assistant|tool|thought|status|result|error|meta
+  kind         TEXT    NOT NULL DEFAULT '',  -- 中立细分类（规范）assistant_delta|tool_call_completed|…
   event_type   TEXT    NOT NULL DEFAULT '',  -- provider 原始判别符，逐字保留
   role         TEXT    NOT NULL DEFAULT '',  -- user|assistant|tool|system
   name         TEXT    NOT NULL DEFAULT '',  -- 工具名 / step 名
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS llm_events (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_events_turn_seq ON llm_events(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_run  ON llm_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, event_type);
+CREATE INDEX IF NOT EXISTS idx_llm_events_turn_kind ON llm_events(turn_id, kind);
 ```
 
 设计要点：
@@ -146,6 +148,52 @@ LLMTrace.Finish(LLMRunResult)                      → 回写 header + 写 assis
    }
    trace.Finish(LLMRunResult{ProviderRunID: id, Status: LLMStatusFinished, RawOutput: text})
    ```
+
+## provider 中立契约：`kind` + 规范 payload 键
+
+`llm_events` 每一行都有三层表达，**新增 provider 只需实现一个 `LLMStreamAdapter`**：
+
+| 层 | 列/字段 | 语义 |
+|---|---|---|
+| 粗粒度 | `channel` | `assistant / thought / tool / status / result / error / meta` |
+| **细粒度（规范）** | **`kind`** | `assistant_delta`、`assistant`、`thought_delta`、`thought`、`thought_end`、`tool_call_started`、`tool_call_delta`、`tool_call_completed`、`status`、`usage`、`run_result`、`error`、`meta` |
+| 原文（逐字保留） | `event_type` + `payload` | provider 自己的判别符与字段，一个都不改 |
+
+`kind.Family()` 把粒度变体归到同一语义（**消费方不必关心流式粒度**）：
+
+```
+assistant  ← assistant, assistant_delta
+thought    ← thought, thought_delta, thought_end
+tool_call  ← tool_call_started, tool_call_delta, tool_call_completed
+```
+
+**规范 payload 键**（与 provider 原生键并存，原生键永不改名/丢弃）：
+
+| 键 | 含义 | Cursor 来源 | Cline 来源 |
+|---|---|---|---|
+| `text` | 事件自身的文本（增量或整块） | `text` / `message.content[].text` | `text` / `accumulated` / `reasoning` |
+| `duration_ms` | 耗时（可选：provider 上报时填） | `thinking_duration_ms`（思考）、工具耗时 | 工具 `durationMs`；思考由聚合层按事件跨度推导 |
+| `call_id` | 工具调用 id | `call_id` | `toolCallId` |
+| `name` | 工具名 | `name` | `toolName` |
+| `args` / `result` | 工具入参与输出 | `args` / `result` | `input` / `output` |
+| `status` | 运行状态；工具事件为 `running/completed/failed` | `status` | 由事件类型归一（`content_start`→running、`content_end`→completed） |
+| `stream` / `chunk` | 流式工具输出分片 | — | `update.stream` / `update.chunk` |
+| `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` / `total_tokens` | token 用量 | `usage.*` | `inputTokens` / `outputTokens` / `cacheReadTokens` … |
+| `cost_usd` | 成本（**USD**，仅在 provider 上报 USD 时填） | —（Cursor 流不含成本） | `totalCost` / `cost` |
+
+**粒度差异是 provider 能力差异，不是语义差异**（有意不抹平）：Cursor 的思考/回答是**整块**（一条消息 + 上报时长），Cline 是**逐 token 增量** + 块结束标记；思考块结束事件把全文放在 `payload.text`，但**不重复写入 `text_delta`**（否则聚合出的 thinking 消息会翻倍）。
+
+**一致性由测试兜底**：`src/llm_event_contract_test.go` 是契约的**可执行版本** —— 表里每个语义都要求两个后端给出同一 `family` + 同一 `channel` + 同一批规范键。新增 provider 时照表补样例即可，漂移会直接测挂。
+
+查询示例：
+
+```sql
+-- 每个 run 的思考增量与工具调用（不看 provider 差异）
+SELECT kind, count(*) FROM llm_events WHERE turn_id = ? GROUP BY kind;
+-- 某次工具调用的入参/结果（两个后端字段名一致）
+SELECT kind, json_extract(payload,'$.name'), json_extract(payload,'$.args'), json_extract(payload,'$.result')
+FROM llm_events WHERE json_extract(payload,'$.call_id') = ? ORDER BY seq;
+```
 
 ## 后端对齐：thinking / 状态事件契约
 

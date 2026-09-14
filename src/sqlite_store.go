@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS llm_events (
   seq INTEGER NOT NULL DEFAULT 0,
   offset_token TEXT NOT NULL DEFAULT '',
   channel TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT '',
   event_type TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL DEFAULT '',
@@ -171,6 +172,16 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, step);
 
 	// reason_turns additions for databases that predate these columns. Fresh
 	// databases already create them above; this keeps older DBs usable.
+	// kind is the provider-neutral fine-grained classification (assistant_delta,
+	// tool_call_completed, ...). Older databases predate the column.
+	if err := s.ensureColumn("llm_events", "kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate llm_events.kind: %w", err)
+	}
+	// Index it only after the column is guaranteed to exist, so legacy
+	// databases without kind migrate cleanly.
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_llm_events_turn_kind ON llm_events(turn_id, kind)`); err != nil {
+		return fmt.Errorf("migrate llm_events kind index: %w", err)
+	}
 	if err := s.ensureColumn("reason_turns", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.mode: %w", err)
 	}
@@ -692,8 +703,8 @@ func (s *SQLiteStore) AppendLLMEvents(turnID int64, runID string, events []LLMEv
 		return fmt.Errorf("begin llm events tx: %w", err)
 	}
 	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO llm_events
-(turn_id, run_id, seq, offset_token, channel, event_type, role, name, text_delta, payload, elapsed_ms, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+(turn_id, run_id, seq, offset_token, channel, kind, event_type, role, name, text_delta, payload, elapsed_ms, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("prepare llm event insert: %w", err)
@@ -701,7 +712,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	defer stmt.Close()
 	for _, ev := range events {
 		if _, err := stmt.Exec(
-			turnID, runID, ev.Seq, ev.OffsetToken, string(ev.Channel), ev.EventType,
+			turnID, runID, ev.Seq, ev.OffsetToken, string(ev.Channel), string(ev.Kind), ev.EventType,
 			ev.Role, ev.Name, ev.TextDelta, ev.PayloadJSON(), ev.ElapsedMS, formatTime(ev.CreatedAt),
 		); err != nil {
 			_ = tx.Rollback()
@@ -827,7 +838,7 @@ FROM reason_turns WHERE id = ?
 
 // ListLLMEvents returns a run's stream events in Seq order for replay/analysis.
 func (s *SQLiteStore) ListLLMEvents(turnID int64) ([]LLMEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, offset_token, channel, event_type, role, name, text_delta, payload, elapsed_ms, created_at
+	rows, err := s.db.Query(`SELECT seq, offset_token, channel, kind, event_type, role, name, text_delta, payload, elapsed_ms, created_at
 FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 	if err != nil {
 		return nil, fmt.Errorf("query llm events: %w", err)
@@ -838,14 +849,16 @@ FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 		var (
 			ev        LLMEvent
 			channel   string
+			kind      string
 			payload   string
 			createdAt string
 		)
-		if err := rows.Scan(&ev.Seq, &ev.OffsetToken, &channel, &ev.EventType, &ev.Role, &ev.Name,
+		if err := rows.Scan(&ev.Seq, &ev.OffsetToken, &channel, &kind, &ev.EventType, &ev.Role, &ev.Name,
 			&ev.TextDelta, &payload, &ev.ElapsedMS, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan llm event: %w", err)
 		}
 		ev.Channel = LLMEventChannel(channel)
+		ev.Kind = LLMEventKind(kind)
 		ev.CreatedAt = parseTime(createdAt)
 		if payload != "" {
 			var m map[string]any

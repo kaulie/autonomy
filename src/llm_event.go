@@ -59,6 +59,10 @@ type LLMEvent struct {
 	OffsetToken string
 	// Channel is the coarse classification used for filtering.
 	Channel LLMEventChannel
+	// Kind is the provider-neutral, fine-grained classification consumers switch
+	// on (assistant_delta, tool_call_completed, ...). Adapters fill it, so the same
+	// semantic looks the same from every provider.
+	Kind LLMEventKind
 	// EventType is the provider's native discriminator, verbatim.
 	EventType string
 	// Role is the message author when known: user | assistant | tool | system.
