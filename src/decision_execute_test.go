@@ -2,8 +2,11 @@ package autonomy
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaulie/autonomy/src/capability"
 )
 
 // recordingAction records that it ran, so a test can see which actions of a plan
@@ -77,5 +80,82 @@ func TestRuntimeExecuteWithoutActions(t *testing.T) {
 		if !strings.Contains(result.Message, typ) {
 			t.Fatalf("%s: result=%+v", typ, result)
 		}
+	}
+}
+
+// TestExecuteDecisionFailureDoesNotFailTheTask: a plan that stops at a failing
+// action leaves the task alive — the result carries the error, and it is the
+// task's *last* cycle that decides the final status (see Autonomy.Run).
+func TestExecuteDecisionFailureDoesNotFailTheTask(t *testing.T) {
+	var calls []string
+	boom := errors.New("action exploded")
+	rt := &Autonomy{Runtime: NewRuntime(NewAgentFactory()), MaxSteps: 2}
+	result := rt.executeDecision(&Agent{ID: 7001, Name: "agent-7001"}, Decision{
+		Type:    "plan",
+		Actions: []Action{recordingAction{name: "a", calls: &calls, err: boom}},
+	})
+	if !errors.Is(result.Err, boom) {
+		t.Fatalf("result.Err=%v, want the action's error", result.Err)
+	}
+	if !strings.Contains(result.Message, "1/1") {
+		t.Fatalf("result=%+v, want it to name the failing action", result)
+	}
+	if got := strings.Join(calls, ","); got != "a" {
+		t.Fatalf("executed %q", got)
+	}
+}
+
+// TestMaxStepsComesFromTheEnvironment: the cycle budget can be raised without a
+// rebuild (AUTONOMY_MAX_STEPS), and falls back to the struct/default otherwise.
+func TestMaxStepsComesFromTheEnvironment(t *testing.T) {
+	rt := &Autonomy{}
+	if got := rt.maxSteps(); got != DefaultMaxSteps {
+		t.Fatalf("default maxSteps=%d, want %d", got, DefaultMaxSteps)
+	}
+	rt.MaxSteps = 5
+	if got := rt.maxSteps(); got != 5 {
+		t.Fatalf("maxSteps=%d, want the struct's 5", got)
+	}
+	t.Setenv("AUTONOMY_MAX_STEPS", "3")
+	if got := rt.maxSteps(); got != 3 {
+		t.Fatalf("maxSteps=%d, want the environment's 3", got)
+	}
+	t.Setenv("AUTONOMY_MAX_STEPS", "nonsense")
+	if got := rt.maxSteps(); got != 5 {
+		t.Fatalf("maxSteps=%d, want the struct's 5 again", got)
+	}
+}
+
+// TestRunKeepsDecidingAfterAFailedCycle drives the real loop with the local
+// reasoner (whose plan names asset.change without a target, so every cycle
+// fails): with a budget of two cycles the task must decide twice instead of
+// aborting after the first failure, and end reporting the failure.
+func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prevStore, prevAuto, prevFlag := _store, _autonomy, bootstrapFlag
+	t.Cleanup(func() { _store, _autonomy, bootstrapFlag = prevStore, prevAuto, prevFlag })
+	_store = store
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f, Store: store}
+	bootstrapFlag = true
+	t.Setenv("AUTONOMY_MAX_STEPS", "2")
+	t.Setenv("AUTONOMY_REASONER", "local")
+
+	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
+	task := &Task{ID: "t-fail-loop", Description: "d", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	if err := rt.Run(task); err == nil {
+		t.Fatal("Run returned nil; the last cycle failed")
+	}
+	var turns int
+	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, task.ID).Scan(&turns); err != nil {
+		t.Fatal(err)
+	}
+	if turns != 2 {
+		t.Fatalf("reason_turns=%d, want 2 (the loop must decide again after a failed cycle)", turns)
 	}
 }

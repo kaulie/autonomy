@@ -3,6 +3,9 @@ package autonomy
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/kaulie/autonomy/src/capability"
 )
@@ -123,24 +126,23 @@ func (r *Autonomy) Run(task *Task) error {
 	var err error
 	var decision Decision
 	var result Result
+	var history []Result
 	for r.ShouldContinue(agent) {
 		steps++
-		if steps > r.MaxSteps {
+		if steps > r.maxSteps() {
 			break
 		}
-		decision, err = agent.DecideAtStep(steps)
+		decision, err = agent.DecideAtStep(steps, history)
 		if err != nil {
 			task.Status = "error"
 			persistTask(task)
 			return fmt.Errorf("decide: %w", err)
 		}
-		result, err = r.Runtime.Execute(decision)
-		if err != nil {
-			task.Status = "error"
-			persistTask(task)
-			return fmt.Errorf("execute decision: %w", err)
-		}
-		agent.Observe(result)
+		// A failed action stops this cycle, not the task: the failure is observed
+		// and handed to the next decision (see executeDecision).
+		result = r.executeDecision(agent, decision)
+		err = result.Err
+		history = append(history, result)
 	}
 
 	// ret, err := agent.Result()
@@ -171,6 +173,37 @@ func (r *Autonomy) finishAgent(agent *Agent) {
 	} else {
 		persistAgent(agent)
 	}
+}
+
+// executeDecision runs one decision's plan and tells the agent what happened.
+// A failed action (see Runtime.Execute: the plan stops at its first failure)
+// ends the cycle without failing the task: the result carries the error, the
+// next decision sees it in previous_actions, and the task ends as error only if
+// the last cycle failed.
+func (r *Autonomy) executeDecision(agent *Agent, decision Decision) Result {
+	result, err := r.Runtime.Execute(decision)
+	if err != nil {
+		result.Err = err
+	}
+	if agent != nil {
+		agent.Observe(result)
+	}
+	return result
+}
+
+// maxSteps is how many decision cycles a task may run: Autonomy.MaxSteps, or
+// AUTONOMY_MAX_STEPS when set. It is the loop's budget, not its goal (see
+// docs/execution-loop.md); the default keeps one cycle per task.
+func (r *Autonomy) maxSteps() int {
+	if env := strings.TrimSpace(os.Getenv("AUTONOMY_MAX_STEPS")); env != "" {
+		if n, err := strconv.Atoi(env); err == nil && n > 0 {
+			return n
+		}
+	}
+	if r.MaxSteps > 0 {
+		return r.MaxSteps
+	}
+	return DefaultMaxSteps
 }
 
 func (r *Autonomy) ShouldContinue(agent *Agent) bool {

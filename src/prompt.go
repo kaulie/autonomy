@@ -149,7 +149,34 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 		m["additional_input"] = map[string]string{"text": text}
 	}
 	m["context"] = json.RawMessage(formatRuntimeContextContainersJSON(ctx))
+	// previous_actions is what this task already did: the planner's own plan from
+	// an earlier cycle and how it went, so re-planning is not blind (AGENT_V2
+	// names previous_action as an evidence source).
+	if len(ctx.History) > 0 {
+		m["previous_actions"] = formatPreviousActionsJSON(ctx.History)
+	}
 	return mustJSON(m)
+}
+
+// formatPreviousActionsJSON lists the task's earlier cycles, oldest first.
+func formatPreviousActionsJSON(history []Result) []map[string]any {
+	out := make([]map[string]any, 0, len(history))
+	for i, result := range history {
+		entry := map[string]any{
+			"step":    i + 1,
+			"message": result.Message,
+			"status":  "ok",
+		}
+		if result.Err != nil {
+			entry["status"] = "failed"
+			entry["error"] = result.Err.Error()
+		}
+		if len(result.Output) > 0 {
+			entry["output"] = result.Output
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func formatWorldJSON(ctx DecisionContext) []byte {
