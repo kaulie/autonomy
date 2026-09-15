@@ -62,23 +62,84 @@ func loadAgentPolicy() (string, error) {
 	return string(b), nil
 }
 
-// buildReasoningPrompt sends AGENT_V2.md through to the model, filling every
-// {{...}} placeholder (Task / GoalType / World / Runtime Context / Completion
-// Principles / Constructs). No extra appendix is appended; the policy already
-// contains the ## Runtime Context section.
-func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
+// A reasoning session is multi-turn: the Cline session / Cursor agent keeps the
+// conversation, so AGENT_V2.md is sent once and every later decision cycle sends
+// only what changed. The prompt therefore has two halves — a frame and a delta.
+//
+// reasoningDeltaPlaceholders are the placeholders whose values change per cycle
+// (task status, world, context entities, previous actions keep growing): they are
+// the delta. reasoningDeltaMarker replaces them inside the frame, so the frame
+// stays byte-identical for the session's lifetime while each decision message
+// still carries the current values.
+const reasoningDeltaMarker = "→ supplied with each decision message (see the Delta block)"
+
+var reasoningDeltaPlaceholders = []string{"{{TASK}}", "{{CONTEXT_ENTITY}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}"}
+
+// buildReasoningFrame is the stable half of the reasoning prompt: AGENT_V2.md
+// with the per-session placeholders (Goal Type / Completion Principles /
+// Constructs) filled in, and the per-cycle placeholders replaced by a marker.
+// It is sent once per session — on the first decision cycle after the session
+// was created; later cycles send only buildReasoningDelta.
+func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, error) {
 	raw, err := loadAgentPolicy()
 	if err != nil {
 		return "", err
 	}
-	policy := applyPolicyPlaceholders(raw, policyPlaceholders(ctx, input))
+	values := policyPlaceholders(ctx, input)
+	for _, key := range reasoningDeltaPlaceholders {
+		values[key] = reasoningDeltaMarker
+	}
+	policy := applyPolicyPlaceholders(raw, values)
+	if !strings.HasSuffix(policy, "\n") {
+		policy += "\n"
+	}
+	return policy, nil
+}
+
+// buildReasoningDelta is the per-cycle half: the current Task / Context Entity /
+// World / Runtime Context values (Runtime Context already carries the agent, the
+// step and previous_actions) as one JSON block. It is what every decision cycle
+// sends, frame or no frame.
+func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, error) {
+	payload := struct {
+		Task          json.RawMessage `json:"task"`
+		ContextEntity json.RawMessage `json:"context_entity"`
+		World         json.RawMessage `json:"world"`
+		RuntimeCtx    json.RawMessage `json:"runtime_context"`
+	}{
+		Task:          formatTaskJSON(ctx.Task),
+		ContextEntity: formatContextEntitiesJSON(ctx),
+		World:         formatWorldJSON(ctx),
+		RuntimeCtx:    formatRuntimeContextJSON(ctx, input),
+	}
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal reasoning delta: %w", err)
+	}
 
 	var b strings.Builder
-	b.WriteString(policy)
-	if !strings.HasSuffix(policy, "\n") {
-		b.WriteByte('\n')
-	}
+	fmt.Fprintf(&b, "## Decision Cycle %d — current values\n", ctx.Step)
+	fmt.Fprintf(&b, "Current values for the placeholders marked \"%s\" above.\n\n", reasoningDeltaMarker)
+	b.WriteString("```json\n")
+	b.Write(raw)
+	b.WriteString("\n```\n\n")
+	b.WriteString("Reply with the AGENT_V2 Output Schema JSON for this cycle.\n")
 	return b.String(), nil
+}
+
+// buildReasoningPrompt is the message for a session's FIRST decision cycle: the
+// frame plus this cycle's delta. Later cycles send only the delta, because the
+// session already holds the frame.
+func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
+	frame, err := buildReasoningFrame(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	delta, err := buildReasoningDelta(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return frame + "\n" + delta, nil
 }
 
 func fencedJSON(raw []byte) string {

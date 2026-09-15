@@ -49,6 +49,14 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 - 之前的每轮结果都作为 `DecisionContext.History` 传给下一次 decide，prompt 的 Runtime Context 里渲染成
   `previous_actions: [{step, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
   **每个 action 的原始 input/output 都原样保留、不合并**，planner 自己决定看哪条（例如 `code_edit` 的 `summary`/`workspace`）—— 这就是"观察结果再决定"的那一半。
+- **消息是增量的**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），所以 AGENT_V2 的
+  **frame**（Role / Delegation / Output Schema / Completion Principles / Constructs + Goal Type）只在
+  **一个会话的第一轮**发送；之后每轮只发 **delta**（当前 Task / Context Entity / World / Runtime Context，
+  Runtime Context 里已经带着 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
+  frame 里的 per-cycle 占位符渲染成 `reasoningDeltaMarker`，所以 frame 整段字节不变、能吃到 prompt cache。
+  是否发 frame 由 `Agent.needsLLMFrame()` 决定：新会话（Cursor `Create` / Cline 新 handle（含 mode|cwd 变化））
+  为真，且只有 run **成功之后**才 `markLLMFrameSent()` —— 首轮失败会重发 frame，不会让会话裸着没有指令；
+  `Resume` 回来的会话视为已有 frame。见 `src/prompt.go` / `src/reasoner.go` / `src/llm_frame_test.go`。
 - step 的 `capability` 未注册 → 该位置变成 `NothingAction{Reason}`：**只跳过这一步，后面的 action 照常执行**（旧实现会让整份 plan 消失）。
 - `type` 不是 `plan`（`done` / `blocked` / `need_input`）时 `Actions` 为空，`Execute` 不执行任何动作，且不是错误。
 - 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 1`）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。

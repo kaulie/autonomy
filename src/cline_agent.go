@@ -67,6 +67,9 @@ func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error 
 	}
 	a.clineAgents[key] = agent
 	a.setClineSession(agent)
+	// A brand-new session starts with no instructions: the next decision cycle
+	// sends the AGENT_V2 frame again (see Agent.needsLLMFrame).
+	a.resetLLMFrame()
 	a.LLMAgentID = agent.ID
 	a.Backend = AgentBackendCline
 	a.LLMProvider = LLMProviderCline

@@ -77,6 +77,8 @@ runtime → bridge
 
 - 一个 autonomy `Agent` ↔ **一个常驻 Cline session**：第一次 `send` 由 `ClineCore.start` 起会话，
   之后每次 `send` 都是 `ClineCore.send`，上下文与 prompt cache 复用。
+- **第一条 message 就是 AGENT_V2 frame**：session 的第一轮 prompt = frame + 本轮 delta，之后每轮只有 delta
+  （会话自己记得 frame，`Agent.needsLLMFrame()` 判断，见 docs/execution-loop.md）。
 - **常驻的前提是 `interactive: true`**（`AUTONOMY_CLINE_INTERACTIVE` 默认就是它）。SDK 里"常驻"与
   "interactive"是同义词：非 interactive 的 session 被当作单次 run，run 一结束 `finalizeSingleRun` →
   `shutdownSession` 就把它从活动表删掉（并 emit `ended`），下一次 `send` 报
@@ -212,7 +214,9 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
 
 ## 已知边界（后续可做）
 
-1. 切模式换 session 时**没有**用 `readLiveMessages` 播种历史（web-cursor 会）；当前依赖 prompt 自带上下文。
+1. 切模式换 session 时**没有**用 `readLiveMessages` 播种历史（web-cursor 会）。所以每次**新建** session
+   （切 mode/cwd、桥重启后的首个 run）都重新发一次 AGENT_V2 frame：常驻会话内的后续轮只发增量 delta
+   （`Agent.needsLLMFrame()`，见 docs/execution-loop.md 与 `src/llm_frame_test.go`）。
 2. 桥目前一个进程服务所有 session；若 Node 侧崩溃，`Client.ensure` 目前不会自动重启（会显式报错）。
 3. 只接了 agent 路径 + `LLMReasoner`（后者通过 `AUTONOMY_LLM_BACKEND=cline` 一同生效）；
    `AUTONOMY_REASONER=local` 仍与 provider 无关。

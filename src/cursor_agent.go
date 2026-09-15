@@ -37,7 +37,8 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 		cAgent *cursorsdk.Agent
 		err    error
 	)
-	if a.LLMAgentID != "" && !a.IsEphemeral() {
+	resumed := a.LLMAgentID != "" && !a.IsEphemeral()
+	if resumed {
 		cAgent, err = client.Agents().Resume(ctx, a.LLMAgentID, model)
 		if err != nil {
 			return fmt.Errorf("resume cursor agent: %w", err)
@@ -53,6 +54,10 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	}
 	a.cursorAgent = cAgent
 	a.LLMAgentID = cAgent.ID
+	// A resumed session already holds the reasoning frame from its earlier turns;
+	// a freshly created one starts empty and needs it on its first decision cycle
+	// (see Agent.needsLLMFrame).
+	a.llmFrameSent = resumed
 	a.Backend = AgentBackendCursor
 	a.LLMProvider = LLMProviderCursor
 	a.Model = model

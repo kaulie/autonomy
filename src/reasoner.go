@@ -97,11 +97,11 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
-	prompt, err := buildReasoningPrompt(ctx, input)
+	prompt, sentFrame, err := reasoningPrompt(ctx, input)
 	if err != nil {
 		return ReasoningResult{}, fmt.Errorf("build prompt: %w", err)
 	}
-	stage("prompt", "ready bytes=%d elapsed=%s", len(prompt), time.Since(tPrompt).Round(time.Millisecond))
+	stage("prompt", "ready bytes=%d frame=%v elapsed=%s", len(prompt), sentFrame, time.Since(tPrompt).Round(time.Millisecond))
 	if cursorsdk.TraceVerbose() {
 		stage("prompt", "body:\n%s", prompt)
 	}
@@ -114,6 +114,10 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		trace.Finish(runRes)
 		return ReasoningResult{}, err
 	}
+	// The frame counts as delivered only once the session actually answered: a
+	// failed first cycle must resend it instead of leaving the session without
+	// its instructions.
+	ctx.Agent.markLLMFrameSent()
 	stage("prompt_run", "done text_bytes=%d elapsed=%s total=%s",
 		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
@@ -128,6 +132,19 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	stage("parse", "ok type=%s reason=%q actions=%d total=%s",
 		decision.Type, decision.Reason, len(decision.Actions), time.Since(t0).Round(time.Millisecond))
 	return ReasoningResult{Decision: decision}, nil
+}
+
+// reasoningPrompt builds the message for one decision cycle. The AGENT_V2 frame
+// (the instructions that do not change per cycle) travels only on a session's
+// first cycle; later cycles send just the delta, because the session already
+// holds the frame. See Agent.needsLLMFrame.
+func reasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, bool, error) {
+	if ctx.Agent.needsLLMFrame() {
+		prompt, err := buildReasoningPrompt(ctx, input)
+		return prompt, true, err
+	}
+	prompt, err := buildReasoningDelta(ctx, input)
+	return prompt, false, err
 }
 
 // reasonTaskID returns the task id carried by a decision context, if any.

@@ -49,14 +49,44 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, err := loadAgentPolicy()
+	frame, err := buildReasoningFrame(ctx, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	filledPolicy := applyPolicyPlaceholders(raw, policyPlaceholders(ctx, ReasoningInput{Text: "extra"}))
-	if !strings.HasPrefix(prompt, filledPolicy) {
-		t.Fatalf("prompt must start with full AGENT_V2.md (placeholders only)")
+	delta, err := buildReasoningDelta(ctx, ReasoningInput{Text: "extra"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	// The first cycle's message is the frame plus this cycle's delta; later
+	// cycles send only the delta (the session already holds the frame).
+	if !strings.HasPrefix(prompt, frame) {
+		t.Fatalf("prompt must start with the AGENT_V2 frame")
+	}
+	if !strings.HasSuffix(strings.TrimSpace(prompt), strings.TrimSpace(delta)) {
+		t.Fatalf("prompt must end with this cycle's delta")
+	}
+	if prompt != buildFramePlusDelta(t, ctx) {
+		t.Fatalf("prompt must be frame + delta verbatim")
+	}
+
+	// Per-cycle values (task / context entity / world / runtime context) moved
+	// out of the frame: the frame stays byte-identical for the session, so its
+	// placeholders become a marker and the values travel in the delta.
+	for _, perCycle := range []string{`"id": "t1"`, `"agent-10001"`, `"assets"`, `"additional_input"`} {
+		if strings.Contains(frame, perCycle) {
+			t.Fatalf("frame must not carry per-cycle value %s", perCycle)
+		}
+		if !strings.Contains(delta, perCycle) {
+			t.Fatalf("delta missing per-cycle value %s\n%s", perCycle, delta)
+		}
+	}
+	if !strings.Contains(frame, reasoningDeltaMarker) {
+		t.Fatalf("frame must mark where the per-cycle values come from")
+	}
+	if strings.Contains(delta, "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("delta must not repeat the frame:\n%s", delta)
+	}
+
 	for _, placeholder := range []string{
 		"{{TASK}}", "{{GOAL_TYPE}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}",
 		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}", "{{CONTEXT_ENTITY}}",
@@ -81,6 +111,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		"## World",
 		"## Runtime Context",
 		"## Constructs",
+		"## Decision Cycle 2",
 		`"id": "t1"`,
 		`"assets"`,
 		`"agent-10001"`,
@@ -98,14 +129,31 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		}
 	}
 
-	taskRaw := extractFencedJSON(prompt, "## Task")
-	var taskJSON map[string]any
-	if err := json.Unmarshal([]byte(taskRaw), &taskJSON); err != nil {
-		t.Fatalf("task json: %v\n%s", err, taskRaw)
+	var payload struct {
+		Task map[string]any `json:"task"`
 	}
-	if taskJSON["id"] != "t1" || taskJSON["domain"] != "server" {
-		t.Fatalf("task=%v", taskJSON)
+	taskRaw := extractFencedJSON(delta, "## Decision Cycle")
+	if err := json.Unmarshal([]byte(taskRaw), &payload); err != nil {
+		t.Fatalf("delta json: %v\n%s", err, taskRaw)
 	}
+	if payload.Task["id"] != "t1" || payload.Task["domain"] != "server" {
+		t.Fatalf("task=%v", payload.Task)
+	}
+}
+
+// buildFramePlusDelta is the contract buildReasoningPrompt must satisfy: frame
+// then delta, verbatim.
+func buildFramePlusDelta(t *testing.T, ctx DecisionContext) string {
+	t.Helper()
+	frame, err := buildReasoningFrame(ctx, ReasoningInput{Text: "extra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta, err := buildReasoningDelta(ctx, ReasoningInput{Text: "extra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return frame + "\n" + delta
 }
 
 func TestFormatContextEntitiesJSON(t *testing.T) {
