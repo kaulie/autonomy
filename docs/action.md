@@ -32,11 +32,15 @@ Action 是某次 [Capability](capability.md) 的**实际执行实例**：从意�
 
 | 形态 | 说明 |
 |---|---|
-| `Action` 接口 | `Execute(ctx DecisionContext) error`；`Runtime.Execute` 按 `Decision.Actions` 的顺序调用 |
+| `Action` 接口 | `Execute(ctx DecisionContext) (ActionResult, error)`：返回**这次执行的记录**——实际拿到的 input 与产出的 output；`Runtime.Execute` 按 `Decision.Actions` 顺序调用并逐条收集 |
 | `CapabilityAction{Name, Input, ExpectedEffect, EvidenceRefs}` | 已注册能力的一次执行；后两个字段来自 plan step（`expected_effect` / `evidence_refs`），用于留痕"这一步想改变什么、依据哪条 evidence" |
-| `NothingAction{Reason}` | 空动作：step 写了 `noop`/`none`，或写了一个未注册的能力（`Reason` 会打印出来，而不是静默什么都不做） |
+| `NothingAction{Reason}` | 空动作：step 写了 `noop`/`none`，或写了一个未注册的能力（`Reason` 会打印出来，并以 `output.reason` 留痕，而不是静默什么都不做） |
 
-一个 plan 里的多个 action 属于**同一轮**执行（见 [execution-loop.md](execution-loop.md)）；执行完（或中途失败）后由下一轮 Decide 重新规划。该轮的 `Result`（`Message` / `Err` / `Output`）会进入下一次 decide 的 `previous_actions`，所以 Action 的失败不是静默的。
+一个 plan 里的多个 action 属于**同一轮**执行（见 [execution-loop.md](execution-loop.md)）；该轮的 `Result` 逐条保留，再交给下一次 decide：
+
+- `Result.Actions []ActionResult`：**每个 action 一条记录，原始 input / output 都保留**（`Capability` / `Input`（含 runtime 补的 `task_id` 等默认值）/ `Output` / `Error` / `ExpectedEffect` / `EvidenceRefs`）。**不做合并、不做取舍** —— 由消费者（下一轮 decide、UI）自己决定看哪条。
+- `Message`：`executed N action(s): <capability 列表>`，或 `action i/N (<capability>) failed: <err>`。
+- `Err`：失败的 action 的错误（`Run` 用"最后一轮是否失败"决定 task 状态）；失败的 action 记录里同样保留它已产出的 output。
 
 ## 不变式
 

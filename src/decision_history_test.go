@@ -43,38 +43,73 @@ func TestDecideAtStepPassesTheHistory(t *testing.T) {
 }
 
 // TestRuntimeContextRendersPreviousActions: the planner prompt carries the
-// earlier cycles as previous_actions (status / error / output), which is what
-// AGENT_V2's previous_action evidence source refers to.
+// earlier cycles as previous_actions, one entry per cycle and one per action,
+// each with its raw input/output (status / error / expected_effect / evidence
+// refs included) — the thing AGENT_V2's previous_action evidence source refers
+// to, and the consumer decides which of them matters.
 func TestRuntimeContextRendersPreviousActions(t *testing.T) {
-	type previousAction struct {
-		Step    int               `json:"step"`
-		Message string            `json:"message"`
-		Status  string            `json:"status"`
-		Error   string            `json:"error"`
-		Output  map[string]string `json:"output"`
+	type seenAction struct {
+		Capability     string            `json:"capability"`
+		Input          map[string]string `json:"input"`
+		Output         map[string]string `json:"output"`
+		Error          string            `json:"error"`
+		ExpectedEffect string            `json:"expected_effect"`
+		EvidenceRefs   []string          `json:"evidence_refs"`
+	}
+	type seenStep struct {
+		Step    int          `json:"step"`
+		Message string       `json:"message"`
+		Status  string       `json:"status"`
+		Error   string       `json:"error"`
+		Actions []seenAction `json:"actions"`
 	}
 	var dumped struct {
-		Previous []previousAction `json:"previous_actions"`
+		Previous []seenStep `json:"previous_actions"`
 	}
 
 	ctx := DecisionContext{History: []Result{
-		{Message: "executed 1 action(s)"},
-		{Message: "action 1/1 failed: boom", Err: errors.New("boom"), Output: map[string]string{"summary": "half done"}},
+		{
+			Message: "executed 1 action(s): code_edit",
+			Actions: []ActionResult{{
+				Capability: "code_edit",
+				Input:      map[string]string{"instruction": "standardise the events"},
+				Output:     map[string]string{"summary": "renamed the events"},
+			}},
+		},
+		{
+			Message: "action 1/1 (code_edit) failed: boom",
+			Err:     errors.New("boom"),
+			Actions: []ActionResult{{
+				Capability:     "code_edit",
+				Output:         map[string]string{"summary": "half done"},
+				Error:          "boom",
+				ExpectedEffect: "renames the events",
+				EvidenceRefs:   []string{"E1"},
+			}},
+		},
 	}}
 	if err := json.Unmarshal(formatRuntimeContextJSON(ctx, ReasoningInput{}), &dumped); err != nil {
 		t.Fatal(err)
 	}
 	if len(dumped.Previous) != 2 {
-		t.Fatalf("previous_actions=%+v, want 2", dumped.Previous)
+		t.Fatalf("previous_actions=%+v, want 2 cycles", dumped.Previous)
 	}
-	if dumped.Previous[0].Step != 1 || dumped.Previous[0].Status != "ok" {
-		t.Fatalf("previous_actions[0]=%+v", dumped.Previous[0])
+	first := dumped.Previous[0]
+	if first.Step != 1 || first.Status != "ok" || len(first.Actions) != 1 {
+		t.Fatalf("previous_actions[0]=%+v", first)
 	}
-	if dumped.Previous[1].Status != "failed" || dumped.Previous[1].Error != "boom" {
-		t.Fatalf("previous_actions[1]=%+v", dumped.Previous[1])
+	if first.Actions[0].Input["instruction"] != "standardise the events" ||
+		first.Actions[0].Output["summary"] != "renamed the events" {
+		t.Fatalf("previous_actions[0].actions[0]=%+v, want its raw input and output", first.Actions[0])
 	}
-	if dumped.Previous[1].Output["summary"] != "half done" {
-		t.Fatalf("previous_actions[1].output=%+v", dumped.Previous[1].Output)
+	second := dumped.Previous[1]
+	if second.Status != "failed" || second.Error != "boom" {
+		t.Fatalf("previous_actions[1]=%+v", second)
+	}
+	failed := second.Actions[0]
+	if failed.Error != "boom" || failed.Output["summary"] != "half done" ||
+		failed.ExpectedEffect != "renames the events" || len(failed.EvidenceRefs) != 1 {
+		t.Fatalf("previous_actions[1].actions[0]=%+v, want the failed action's record", failed)
 	}
 
 	// No earlier cycles: the key stays out entirely.

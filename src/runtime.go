@@ -38,19 +38,34 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 // cycle's worth of work, so all of its steps run here; the first failing step
 // ends the cycle (the next decision sees the world it left behind). done /
 // blocked / need_input carry no actions and execute nothing.
+//
+// Each action's record — its raw input and output — is collected into the Result,
+// per action and in order, so the next decision sees what actually happened
+// (previous_actions) and can decide for itself which entry matters.
 func (r *Runtime) Execute(decision Decision) (Result, error) {
 	if len(decision.Actions) == 0 {
 		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
+	result := Result{}
+	ran := make([]string, 0, len(decision.Actions))
 	for i, action := range decision.Actions {
 		if action == nil {
 			continue
 		}
-		if err := action.Execute(decision.Ctx); err != nil {
-			return Result{Message: fmt.Sprintf("action %d/%d failed: %v", i+1, len(decision.Actions), err)}, err
+		record, err := action.Execute(decision.Ctx)
+		if err != nil {
+			record.Error = err.Error()
+		}
+		result.Actions = append(result.Actions, record)
+		ran = append(ran, record.Capability)
+		if err != nil {
+			result.Err = err
+			result.Message = fmt.Sprintf("action %d/%d (%s) failed: %v", i+1, len(decision.Actions), record.Capability, err)
+			return result, err
 		}
 	}
-	return Result{Message: fmt.Sprintf("executed %d action(s)", len(decision.Actions))}, nil
+	result.Message = fmt.Sprintf("executed %d action(s): %s", len(ran), strings.Join(ran, ", "))
+	return result, nil
 }
 
 // AcquireAgent registers an agent via AgentFactory and attaches the requested backend.

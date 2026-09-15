@@ -10,16 +10,25 @@ import (
 )
 
 // recordingAction records that it ran, so a test can see which actions of a plan
-// the runtime executed and in which order.
+// the runtime executed, in which order, and what input/output each report.
 type recordingAction struct {
 	name  string
 	calls *[]string
 	err   error
+	out   map[string]string
 }
 
-func (a recordingAction) Execute(DecisionContext) error {
+func (a recordingAction) Execute(DecisionContext) (ActionResult, error) {
 	*a.calls = append(*a.calls, a.name)
-	return a.err
+	out := a.out
+	if out == nil {
+		out = map[string]string{"ran_" + a.name: a.name}
+	}
+	return ActionResult{
+		Capability: a.name,
+		Input:      map[string]string{"for": a.name},
+		Output:     out,
+	}, a.err
 }
 
 // TestRuntimeExecutesEveryPlanActionInOrder: a decision carries the whole plan,
@@ -43,6 +52,18 @@ func TestRuntimeExecutesEveryPlanActionInOrder(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "3 action") {
 		t.Fatalf("result=%+v, want it to report 3 actions", result)
+	}
+	if len(result.Actions) != 3 {
+		t.Fatalf("result.Actions=%+v, want one record per action", result.Actions)
+	}
+	for i, name := range []string{"a", "b", "c"} {
+		record := result.Actions[i]
+		if record.Capability != name || record.Input["for"] != name || record.Output["ran_"+name] != name {
+			t.Fatalf("result.Actions[%d]=%+v, want that action's own input and output", i, record)
+		}
+	}
+	if !strings.Contains(result.Message, "executed 3 action(s)") {
+		t.Fatalf("result.Message=%q, want it to count what it ran", result.Message)
 	}
 }
 
