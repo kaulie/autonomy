@@ -102,10 +102,35 @@ type Presentation struct {
 	Content string `json:"content"`
 }
 
+// ActionResult is one action's record in a cycle: what ran, the input it was
+// actually called with, what it produced, and how it ended. Input and output are
+// kept verbatim per action — never merged or summarised — so the consumer (the
+// next decision, a UI) decides which entry matters.
+type ActionResult struct {
+	// Capability is the capability the step named ("nothing" for a skipped step).
+	Capability string
+	// Input is the input the capability was called with, after the runtime's task
+	// defaults, verbatim.
+	Input map[string]string
+	// Output is what the capability returned, verbatim; a capability that failed
+	// keeps whatever it produced before failing.
+	Output map[string]string
+	// Error is empty when the action succeeded (filled in by Runtime.Execute).
+	Error string
+	// ExpectedEffect and EvidenceRefs are the plan step's own metadata
+	// (AGENT_V2: what the step was meant to change, and on which evidence).
+	ExpectedEffect string
+	EvidenceRefs   []string
+}
+
 // Result is what happened after executing a decision.
 type Result struct {
-	Message    string
-	Output     map[string]string
-	Err        error
-	WorldState map[string]string // optional patches applied by UpdateWorld
+	Message string
+	// Actions holds one record per executed action, in plan order, with each
+	// action's raw input and output. Nothing is merged away: a consumer that only
+	// wants "the" output picks the entry it cares about.
+	Actions []ActionResult
+	Err     error
+	// WorldState optionally patches asset state (applied by UpdateWorld).
+	WorldState map[string]string
 }

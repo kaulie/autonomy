@@ -39,47 +39,33 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 // ends the cycle (the next decision sees the world it left behind). done /
 // blocked / need_input carry no actions and execute nothing.
 //
-// What the actions produced is folded into the Result, so the next decision gets
-// their output (code_edit's summary, for example) as previous_actions instead of
-// a bare "it ran".
+// Each action's record — its raw input and output — is collected into the Result,
+// per action and in order, so the next decision sees what actually happened
+// (previous_actions) and can decide for itself which entry matters.
 func (r *Runtime) Execute(decision Decision) (Result, error) {
 	if len(decision.Actions) == 0 {
 		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
 	result := Result{}
-	run := make([]string, 0, len(decision.Actions))
+	ran := make([]string, 0, len(decision.Actions))
 	for i, action := range decision.Actions {
 		if action == nil {
 			continue
 		}
-		name := actionName(action)
-		run = append(run, name)
-		out, err := action.Execute(decision.Ctx)
-		result.Output = mergeOutput(result.Output, out)
+		record, err := action.Execute(decision.Ctx)
+		if err != nil {
+			record.Error = err.Error()
+		}
+		result.Actions = append(result.Actions, record)
+		ran = append(ran, record.Capability)
 		if err != nil {
 			result.Err = err
-			result.Message = fmt.Sprintf("action %d/%d (%s) failed: %v", i+1, len(decision.Actions), name, err)
+			result.Message = fmt.Sprintf("action %d/%d (%s) failed: %v", i+1, len(decision.Actions), record.Capability, err)
 			return result, err
 		}
 	}
-	result.Message = fmt.Sprintf("executed %d action(s): %s", len(run), strings.Join(run, ", "))
+	result.Message = fmt.Sprintf("executed %d action(s): %s", len(ran), strings.Join(ran, ", "))
 	return result, nil
-}
-
-// mergeOutput folds one action's output into the cycle's. Later actions win on a
-// key collision; a plan's steps normally report different keys (a worker's
-// summary, an asset's new state, …).
-func mergeOutput(into, from map[string]string) map[string]string {
-	if len(from) == 0 {
-		return into
-	}
-	if into == nil {
-		into = make(map[string]string, len(from))
-	}
-	for k, v := range from {
-		into[k] = v
-	}
-	return into
 }
 
 // AcquireAgent registers an agent via AgentFactory and attaches the requested backend.

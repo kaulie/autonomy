@@ -9,24 +9,13 @@ import (
 	"github.com/kaulie/autonomy/src/capability"
 )
 
-// Action is one concrete execution of a capability against a target. Execute
-// reports what the action produced (the capability's output map, e.g. code_edit's
-// summary/workspace), which the Runtime folds into the cycle's Result so the next
-// decision can see it (previous_actions).
+// Action is one concrete execution of a capability against a target. Execute runs
+// it and returns the action's record — the effective input and the raw output —
+// which Runtime.Execute collects into the cycle's Result so the next decision can
+// see what actually happened (previous_actions). An error means the action
+// failed; the record still carries the input and whatever output it produced.
 type Action interface {
-	Execute(ctx DecisionContext) (map[string]string, error)
-}
-
-// actionName labels an action for the cycle result and for logs.
-func actionName(action Action) string {
-	switch a := action.(type) {
-	case CapabilityAction:
-		return a.Name
-	case NothingAction:
-		return "nothing"
-	default:
-		return fmt.Sprintf("%T", action)
-	}
+	Execute(ctx DecisionContext) (ActionResult, error)
 }
 
 // NothingAction is a plan step that executes nothing: a noop/none step, or one
@@ -36,13 +25,16 @@ type NothingAction struct {
 	Reason string
 }
 
-func (a NothingAction) Execute(ctx DecisionContext) (map[string]string, error) {
+func (a NothingAction) Execute(ctx DecisionContext) (ActionResult, error) {
+	record := ActionResult{Capability: "nothing"}
 	if reason := strings.TrimSpace(a.Reason); reason != "" {
 		fmt.Printf("NothingAction: %s\n", reason)
-		return nil, nil
+		// Why nothing ran is the only thing this action can report.
+		record.Output = map[string]string{"reason": reason}
+		return record, nil
 	}
 	fmt.Println("NothingAction: Execute")
-	return nil, nil
+	return record, nil
 }
 
 // CapabilityAction looks up a registered capability and runs it.
@@ -55,15 +47,20 @@ type CapabilityAction struct {
 	EvidenceRefs   []string
 }
 
-func (a CapabilityAction) Execute(ctx DecisionContext) (map[string]string, error) {
+func (a CapabilityAction) Execute(ctx DecisionContext) (ActionResult, error) {
+	record := ActionResult{
+		Capability:     strings.ToLower(strings.TrimSpace(a.Name)),
+		ExpectedEffect: a.ExpectedEffect,
+		EvidenceRefs:   a.EvidenceRefs,
+	}
 	f := activeCapabilityFactory()
 	if f == nil {
-		return nil, fmt.Errorf("capability factory not ready")
+		return record, fmt.Errorf("capability factory not ready")
 	}
 	name := strings.ToLower(strings.TrimSpace(a.Name))
 	cap := f.Get(name)
 	if cap == nil {
-		return nil, fmt.Errorf("unknown capability %q", a.Name)
+		return record, fmt.Errorf("unknown capability %q", a.Name)
 	}
 	in := copyStringMap(a.Input)
 	// The runtime deliberately does not default a workspace into the input: a
@@ -78,14 +75,18 @@ func (a CapabilityAction) Execute(ctx DecisionContext) (map[string]string, error
 			in["instruction"] = ctx.Task.Description
 		}
 	}
+	// The record keeps the input the capability was actually called with, not the
+	// plan's raw step input: the task defaults the runtime added are part of what
+	// ran.
+	record.Input = in
 	out, err := cap.Run(in)
+	// A failed capability may still have produced something; keep it verbatim.
+	record.Output = out
 	if err != nil {
-		// A failed capability may still report what it produced before failing;
-		// the Runtime keeps that in the cycle result.
-		return out, err
+		return record, err
 	}
 	fmt.Printf("CapabilityAction %s: %v\n", name, out)
-	return out, nil
+	return record, nil
 }
 
 func activeCapabilityFactory() *capability.Factory {

@@ -54,27 +54,46 @@ func TestCapabilityOutputReachesTheCycleResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Output["summary"] != "renamed the events" || result.Output["status"] != "ok" {
-		t.Fatalf("result.Output=%v, want the capability's own output", result.Output)
+	if len(result.Actions) != 1 {
+		t.Fatalf("result.Actions=%+v, want one record", result.Actions)
 	}
-	if fake.in["task_id"] != "task-1" || fake.in["instruction"] != "standardise events" {
-		t.Fatalf("capability input=%v, want the task defaults", fake.in)
+	record := result.Actions[0]
+	if record.Capability != "fake" {
+		t.Fatalf("record.Capability=%q", record.Capability)
+	}
+	// The record keeps the input the capability was actually called with (task
+	// defaults included) and its output verbatim.
+	if record.Input["task_id"] != "task-1" || record.Input["instruction"] != "standardise events" {
+		t.Fatalf("record.Input=%v, want the effective input", record.Input)
+	}
+	if record.Output["summary"] != "renamed the events" || record.Output["status"] != "ok" {
+		t.Fatalf("record.Output=%v, want the capability's own output", record.Output)
+	}
+	if record.Error != "" {
+		t.Fatalf("record.Error=%q, want empty", record.Error)
 	}
 
 	// …and it is what the next decision sees.
 	raw := string(formatRuntimeContextJSON(DecisionContext{History: []Result{result}}, ReasoningInput{}))
 	var dumped struct {
 		Previous []struct {
-			Status string            `json:"status"`
-			Output map[string]string `json:"output"`
+			Status  string `json:"status"`
+			Actions []struct {
+				Capability string            `json:"capability"`
+				Input      map[string]string `json:"input"`
+				Output     map[string]string `json:"output"`
+			} `json:"actions"`
 		} `json:"previous_actions"`
 	}
 	if err := json.Unmarshal([]byte(raw), &dumped); err != nil {
 		t.Fatal(err)
 	}
-	if len(dumped.Previous) != 1 || dumped.Previous[0].Status != "ok" ||
-		dumped.Previous[0].Output["summary"] != "renamed the events" {
+	if len(dumped.Previous) != 1 || dumped.Previous[0].Status != "ok" || len(dumped.Previous[0].Actions) != 1 {
 		t.Fatalf("previous_actions=%s", raw)
+	}
+	seen := dumped.Previous[0].Actions[0]
+	if seen.Capability != "fake" || seen.Output["summary"] != "renamed the events" || seen.Input["task_id"] != "task-1" {
+		t.Fatalf("previous_actions action=%+v, want the raw input and output", seen)
 	}
 }
 
@@ -91,8 +110,14 @@ func TestFailedCapabilityOutputIsKept(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the capability's error")
 	}
-	if result.Output["summary"] != "half done" {
-		t.Fatalf("result.Output=%v, want the partial output of the failed action", result.Output)
+	if len(result.Actions) != 1 {
+		t.Fatalf("result.Actions=%+v, want the failed action's record", result.Actions)
+	}
+	if result.Actions[0].Output["summary"] != "half done" {
+		t.Fatalf("record.Output=%v, want the partial output of the failed action", result.Actions[0].Output)
+	}
+	if result.Actions[0].Error != "boom" {
+		t.Fatalf("record.Error=%q, want the failure", result.Actions[0].Error)
 	}
 	if !strings.Contains(result.Message, "fake") {
 		t.Fatalf("result.Message=%q, want it to name the capability", result.Message)

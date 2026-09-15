@@ -158,7 +158,10 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 	return mustJSON(m)
 }
 
-// formatPreviousActionsJSON lists the task's earlier cycles, oldest first.
+// formatPreviousActionsJSON lists the task's earlier cycles, oldest first. Each
+// cycle keeps its actions verbatim — capability, input, output, error, and the
+// step's expected_effect/evidence_refs — because the planner, not this layer,
+// decides which of them matters.
 func formatPreviousActionsJSON(history []Result) []map[string]any {
 	out := make([]map[string]any, 0, len(history))
 	for i, result := range history {
@@ -171,8 +174,28 @@ func formatPreviousActionsJSON(history []Result) []map[string]any {
 			entry["status"] = "failed"
 			entry["error"] = result.Err.Error()
 		}
-		if len(result.Output) > 0 {
-			entry["output"] = result.Output
+		if len(result.Actions) > 0 {
+			actions := make([]map[string]any, 0, len(result.Actions))
+			for _, a := range result.Actions {
+				item := map[string]any{"capability": a.Capability}
+				if len(a.Input) > 0 {
+					item["input"] = a.Input
+				}
+				if len(a.Output) > 0 {
+					item["output"] = a.Output
+				}
+				if a.Error != "" {
+					item["error"] = a.Error
+				}
+				if a.ExpectedEffect != "" {
+					item["expected_effect"] = a.ExpectedEffect
+				}
+				if len(a.EvidenceRefs) > 0 {
+					item["evidence_refs"] = a.EvidenceRefs
+				}
+				actions = append(actions, item)
+			}
+			entry["actions"] = actions
 		}
 		out = append(out, entry)
 	}
