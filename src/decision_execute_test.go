@@ -10,16 +10,23 @@ import (
 )
 
 // recordingAction records that it ran, so a test can see which actions of a plan
-// the runtime executed and in which order.
+// the runtime executed, in which order, and what output reached the result.
 type recordingAction struct {
 	name  string
 	calls *[]string
 	err   error
+	out   map[string]string
 }
 
-func (a recordingAction) Execute(DecisionContext) error {
+func (a recordingAction) Execute(DecisionContext) (map[string]string, error) {
 	*a.calls = append(*a.calls, a.name)
-	return a.err
+	if a.err != nil {
+		return a.out, a.err
+	}
+	if a.out == nil {
+		a.out = map[string]string{"ran_" + a.name: a.name}
+	}
+	return a.out, nil
 }
 
 // TestRuntimeExecutesEveryPlanActionInOrder: a decision carries the whole plan,
@@ -43,6 +50,14 @@ func TestRuntimeExecutesEveryPlanActionInOrder(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "3 action") {
 		t.Fatalf("result=%+v, want it to report 3 actions", result)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if result.Output["ran_"+name] != name {
+			t.Fatalf("result.Output=%v, want every action's output (missing %q)", result.Output, name)
+		}
+	}
+	if !strings.Contains(result.Message, "executed 3 action(s)") {
+		t.Fatalf("result.Message=%q, want it to count what it ran", result.Message)
 	}
 }
 

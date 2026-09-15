@@ -38,19 +38,48 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 // cycle's worth of work, so all of its steps run here; the first failing step
 // ends the cycle (the next decision sees the world it left behind). done /
 // blocked / need_input carry no actions and execute nothing.
+//
+// What the actions produced is folded into the Result, so the next decision gets
+// their output (code_edit's summary, for example) as previous_actions instead of
+// a bare "it ran".
 func (r *Runtime) Execute(decision Decision) (Result, error) {
 	if len(decision.Actions) == 0 {
 		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
+	result := Result{}
+	run := make([]string, 0, len(decision.Actions))
 	for i, action := range decision.Actions {
 		if action == nil {
 			continue
 		}
-		if err := action.Execute(decision.Ctx); err != nil {
-			return Result{Message: fmt.Sprintf("action %d/%d failed: %v", i+1, len(decision.Actions), err)}, err
+		name := actionName(action)
+		run = append(run, name)
+		out, err := action.Execute(decision.Ctx)
+		result.Output = mergeOutput(result.Output, out)
+		if err != nil {
+			result.Err = err
+			result.Message = fmt.Sprintf("action %d/%d (%s) failed: %v", i+1, len(decision.Actions), name, err)
+			return result, err
 		}
 	}
-	return Result{Message: fmt.Sprintf("executed %d action(s)", len(decision.Actions))}, nil
+	result.Message = fmt.Sprintf("executed %d action(s): %s", len(run), strings.Join(run, ", "))
+	return result, nil
+}
+
+// mergeOutput folds one action's output into the cycle's. Later actions win on a
+// key collision; a plan's steps normally report different keys (a worker's
+// summary, an asset's new state, …).
+func mergeOutput(into, from map[string]string) map[string]string {
+	if len(from) == 0 {
+		return into
+	}
+	if into == nil {
+		into = make(map[string]string, len(from))
+	}
+	for k, v := range from {
+		into[k] = v
+	}
+	return into
 }
 
 // AcquireAgent registers an agent via AgentFactory and attaches the requested backend.

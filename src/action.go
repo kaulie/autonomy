@@ -9,9 +9,24 @@ import (
 	"github.com/kaulie/autonomy/src/capability"
 )
 
-// Action is one concrete execution of a capability against a target.
+// Action is one concrete execution of a capability against a target. Execute
+// reports what the action produced (the capability's output map, e.g. code_edit's
+// summary/workspace), which the Runtime folds into the cycle's Result so the next
+// decision can see it (previous_actions).
 type Action interface {
-	Execute(ctx DecisionContext) error
+	Execute(ctx DecisionContext) (map[string]string, error)
+}
+
+// actionName labels an action for the cycle result and for logs.
+func actionName(action Action) string {
+	switch a := action.(type) {
+	case CapabilityAction:
+		return a.Name
+	case NothingAction:
+		return "nothing"
+	default:
+		return fmt.Sprintf("%T", action)
+	}
 }
 
 // NothingAction is a plan step that executes nothing: a noop/none step, or one
@@ -21,13 +36,13 @@ type NothingAction struct {
 	Reason string
 }
 
-func (a NothingAction) Execute(ctx DecisionContext) error {
+func (a NothingAction) Execute(ctx DecisionContext) (map[string]string, error) {
 	if reason := strings.TrimSpace(a.Reason); reason != "" {
 		fmt.Printf("NothingAction: %s\n", reason)
-		return nil
+		return nil, nil
 	}
 	fmt.Println("NothingAction: Execute")
-	return nil
+	return nil, nil
 }
 
 // CapabilityAction looks up a registered capability and runs it.
@@ -40,15 +55,15 @@ type CapabilityAction struct {
 	EvidenceRefs   []string
 }
 
-func (a CapabilityAction) Execute(ctx DecisionContext) error {
+func (a CapabilityAction) Execute(ctx DecisionContext) (map[string]string, error) {
 	f := activeCapabilityFactory()
 	if f == nil {
-		return fmt.Errorf("capability factory not ready")
+		return nil, fmt.Errorf("capability factory not ready")
 	}
 	name := strings.ToLower(strings.TrimSpace(a.Name))
 	cap := f.Get(name)
 	if cap == nil {
-		return fmt.Errorf("unknown capability %q", a.Name)
+		return nil, fmt.Errorf("unknown capability %q", a.Name)
 	}
 	in := copyStringMap(a.Input)
 	// The runtime deliberately does not default a workspace into the input: a
@@ -65,10 +80,12 @@ func (a CapabilityAction) Execute(ctx DecisionContext) error {
 	}
 	out, err := cap.Run(in)
 	if err != nil {
-		return err
+		// A failed capability may still report what it produced before failing;
+		// the Runtime keeps that in the cycle result.
+		return out, err
 	}
 	fmt.Printf("CapabilityAction %s: %v\n", name, out)
-	return nil
+	return out, nil
 }
 
 func activeCapabilityFactory() *capability.Factory {
