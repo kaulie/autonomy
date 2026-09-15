@@ -210,6 +210,28 @@ func TestMonitorWatchWindowIsBounded(t *testing.T) {
 	}
 }
 
+// TestMonitorDoesNotBlameASucceededDeploymentForScaryLogLines: a rollout that
+// finished fine is not reported as a problem just because a retried step logged
+// a scary word.
+func TestMonitorDoesNotBlameASucceededDeploymentForScaryLogLines(t *testing.T) {
+	obs := observeOnce(deployment.Snapshot{
+		ID: "d11", State: deployment.StateSucceeded,
+		Logs: []string{"warn: connection refused, retrying", "step 2: ok"},
+	})
+	out, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{
+		"deployment": "d11", "endpoint": "http://deploy.internal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["problem"] != "false" || out["terminal"] != "true" {
+		t.Fatalf("problem/terminal = %q/%q", out["problem"], out["terminal"])
+	}
+	if _, ok := out["signals"]; ok {
+		t.Fatalf("succeeded deployment reported signals: %q", out["signals"])
+	}
+}
+
 // TestMonitorUnknownStateIsNotInvented: when the source does not say, the
 // monitor reports unknown instead of guessing a state.
 func TestMonitorUnknownStateIsNotInvented(t *testing.T) {
@@ -225,34 +247,56 @@ func TestMonitorUnknownStateIsNotInvented(t *testing.T) {
 	}
 }
 
-// TestMonitorRequiresADeployment: no deployment, nothing to follow.
-func TestMonitorRequiresADeployment(t *testing.T) {
-	_, err := (deployment.Monitor{Observer: observeOnce(deployment.Snapshot{})}).Run(map[string]string{"endpoint": "http://x"})
-	if err == nil || !strings.Contains(err.Error(), "missing deployment") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-// TestMonitorRequiresAnEndpoint: with no URL there is nothing to observe, and
-// that is an error (not a silent "unknown").
-func TestMonitorRequiresAnEndpoint(t *testing.T) {
-	t.Setenv(deployment.EnvEndpoint, "")
-	_, err := (deployment.Monitor{Observer: observeOnce(deployment.Snapshot{})}).Run(map[string]string{"deployment": "d8"})
-	if err == nil || !strings.Contains(err.Error(), deployment.EnvEndpoint) {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-// TestMonitorFallsBackToEnvEndpoint: one configured endpoint serves every
-// deployment the pipeline starts.
-func TestMonitorFallsBackToEnvEndpoint(t *testing.T) {
-	t.Setenv(deployment.EnvEndpoint, "http://deploy.internal/")
+// TestMonitorDefaultsToTheConfiguredDeploymentAPI: with no URL in the input the
+// monitor uses $DEPLOYMENT_API_URL — the same variable service.deploy and the
+// gateway use — falling back to the local control plane.
+func TestMonitorDefaultsToTheConfiguredDeploymentAPI(t *testing.T) {
+	t.Setenv(deployment.EnvAPIURL, "http://deploy.internal/")
 	obs := observeOnce(deployment.Snapshot{ID: "d9", State: deployment.StateRunning})
 	if _, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{"deployment": "d9"}); err != nil {
 		t.Fatal(err)
 	}
 	if obs.last.Endpoint != "http://deploy.internal/" {
 		t.Fatalf("endpoint=%q", obs.last.Endpoint)
+	}
+
+	t.Setenv(deployment.EnvAPIURL, "")
+	obs = observeOnce(deployment.Snapshot{ID: "d9", State: deployment.StateRunning})
+	if _, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{"deployment": "d9"}); err != nil {
+		t.Fatal(err)
+	}
+	if obs.last.Endpoint != deployment.DefaultAPIURL {
+		t.Fatalf("endpoint=%q, want the local control plane %q", obs.last.Endpoint, deployment.DefaultAPIURL)
+	}
+}
+
+// TestMonitorAcceptsWhatServiceDeployReturns: the pipeline id (and the poll
+// path) that service.deploy hands back name the thing to monitor.
+func TestMonitorAcceptsWhatServiceDeployReturns(t *testing.T) {
+	obs := observeOnce(deployment.Snapshot{ID: "p-1", State: deployment.StateRunning})
+	out, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{
+		"pipeline_id": "p-1", "poll": "/api/pipelines/p-1", "endpoint": "http://deploy.internal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.last.Deployment != "p-1" {
+		t.Fatalf("deployment=%q", obs.last.Deployment)
+	}
+	if obs.last.Poll != "/api/pipelines/p-1" {
+		t.Fatalf("poll=%q", obs.last.Poll)
+	}
+	if out["deployment"] != "p-1" {
+		t.Fatalf("out deployment=%q", out["deployment"])
+	}
+}
+
+// TestMonitorRequiresSomethingToFollow: no deployment and no poll path means
+// nothing to observe.
+func TestMonitorRequiresSomethingToFollow(t *testing.T) {
+	_, err := (deployment.Monitor{Observer: observeOnce(deployment.Snapshot{})}).Run(map[string]string{"endpoint": "http://x"})
+	if err == nil || !strings.Contains(err.Error(), "missing deployment") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -285,7 +329,7 @@ func TestMonitorMetadata(t *testing.T) {
 // TestParseRequestDefaultsAndBounds: every optional input has a documented
 // default, and out-of-range values are clamped rather than trusted.
 func TestParseRequestDefaultsAndBounds(t *testing.T) {
-	t.Setenv(deployment.EnvEndpoint, "http://deploy.internal")
+	t.Setenv(deployment.EnvAPIURL, "http://deploy.internal")
 
 	req, err := deployment.ParseRequest(map[string]string{"deployment": "d11"})
 	if err != nil {

@@ -59,10 +59,10 @@ func TestHTTPObserverReadsStatusAndInlineLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !srv.asked("/deployments/deployment-abc") {
+	if !srv.asked("/api/pipelines/deployment-abc") {
 		t.Fatalf("paths=%v", srv.paths)
 	}
-	if srv.asked("/deployments/deployment-abc/logs") {
+	if srv.asked("/api/pipelines/deployment-abc/logs") {
 		t.Fatalf("fetched logs even though the status carried them: %v", srv.paths)
 	}
 	if snap.ID != "deployment-abc" || snap.State != deployment.StateRunning || snap.Phase != "rollout" {
@@ -88,6 +88,8 @@ func TestHTTPObserverNormalizesStateVocabulary(t *testing.T) {
 		"failed":      deployment.StateFailed,
 		"Timed Out":   deployment.StateFailed,
 		"in-progress": deployment.StateRunning,
+		"packaging":   deployment.StateRunning,
+		"deploying":   deployment.StateRunning,
 		"queued":      deployment.StatePending,
 		"wat":         deployment.StateUnknown,
 	}
@@ -131,7 +133,7 @@ func TestHTTPObserverFetchesSeparateLogsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !srv.asked("/deployments/dep-2/logs") {
+	if !srv.asked("/api/pipelines/dep-2/logs") {
 		t.Fatalf("paths=%v", srv.paths)
 	}
 	if len(snap.Logs) != 2 || !strings.Contains(strings.Join(snap.Logs, "\n"), "OOMKilled") {
@@ -231,6 +233,65 @@ func TestHTTPObserverUsesExplicitStatusURL(t *testing.T) {
 	}
 }
 
+// TestHTTPObserverReadsControlPlanePipeline: the shape service.deploy's poll
+// endpoint answers with — requestId/serviceId/state/message/version.
+func TestHTTPObserverReadsControlPlanePipeline(t *testing.T) {
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"requestId":"req-77","serviceId":"checkout","ref":"main","state":"failed",`+
+			`"deployment":"checkout","version":"v1.2.3","message":"package failed: go build: exit status 1","deployRequestId":"dep-9"}`)
+	})
+	snap, err := srv.observer().Observe(context.Background(), deployment.Request{
+		Deployment: "req-77", Endpoint: srv.URL, Tail: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !srv.asked("/api/pipelines/req-77") {
+		t.Fatalf("paths=%v", srv.paths)
+	}
+	if snap.ID != "req-77" || snap.State != deployment.StateFailed {
+		t.Fatalf("id/state = %q/%q", snap.ID, snap.State)
+	}
+	if snap.Service != "checkout" || snap.Version != "v1.2.3" || snap.DeploymentName != "checkout" {
+		t.Fatalf("service/version/deployment = %q/%q/%q", snap.Service, snap.Version, snap.DeploymentName)
+	}
+	if !strings.Contains(snap.Message, "package failed") {
+		t.Fatalf("message=%q", snap.Message)
+	}
+	if len(snap.Logs) != 0 {
+		t.Fatalf("a 404 logs endpoint produced logs: %v", snap.Logs)
+	}
+}
+
+// TestHTTPObserverResolvesThePollPath: the relative poll path a trigger
+// capability hands back is resolved against the deployment API base URL.
+func TestHTTPObserverResolvesThePollPath(t *testing.T) {
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"requestId":"req-88","state":"deploying"}`)
+	})
+	snap, err := srv.observer().Observe(context.Background(), deployment.Request{
+		Deployment: "req-88", Poll: "/api/pipelines/req-88", Endpoint: srv.URL, Tail: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !srv.asked("/api/pipelines/req-88") {
+		t.Fatalf("paths=%v", srv.paths)
+	}
+	if snap.State != deployment.StateRunning {
+		t.Fatalf("state=%q", snap.State)
+	}
+}
+
 // TestMonitorOverHTTPAgainstAFakeDeploymentService is the end-to-end shape: the
 // capability with no injected observer builds its own HTTP one, follows the run
 // the pipeline started, and comes back with the failure and the reason.
@@ -261,7 +322,43 @@ func TestMonitorOverHTTPAgainstAFakeDeploymentService(t *testing.T) {
 	if !strings.Contains(out["suggestions"], "registry credentials") {
 		t.Fatalf("suggestions=%q", out["suggestions"])
 	}
-	if !srv.asked("/deployments/deployment-9f2") || !srv.asked("/deployments/deployment-9f2/logs") {
+	if !srv.asked("/api/pipelines/deployment-9f2") || !srv.asked("/api/pipelines/deployment-9f2/logs") {
 		t.Fatalf("paths=%v", srv.paths)
+	}
+}
+
+// TestMonitorPipelineFailureNamesTheControlPlanesReason: a pipeline that fails
+// without logs still comes back with why, taken from the control plane's own
+// message — the composition service.deploy → deployment.monitor.
+func TestMonitorPipelineFailureNamesTheControlPlanesReason(t *testing.T) {
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"requestId":"req-77","serviceId":"checkout","state":"failed","version":"v1.2.3",`+
+			`"message":"package failed: go build: exit code 1"}`)
+	})
+	out, err := (deployment.Monitor{}).Run(map[string]string{
+		"pipeline_id": "req-77", "poll": "/api/pipelines/req-77", "endpoint": srv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["state"] != "failed" || out["problem"] != "true" || !strings.Contains(out["signals"], "deployment_failed") {
+		t.Fatalf("state/problem/signals = %q/%q/%q", out["state"], out["problem"], out["signals"])
+	}
+	if out["service"] != "checkout" || out["version"] != "v1.2.3" {
+		t.Fatalf("service/version = %q/%q", out["service"], out["version"])
+	}
+	if !strings.Contains(out["diagnosis"], "package failed") {
+		t.Fatalf("diagnosis=%q", out["diagnosis"])
+	}
+	if !strings.Contains(out["message"], "package failed") {
+		t.Fatalf("message=%q", out["message"])
+	}
+	if !strings.Contains(out["suggestions"], "redeploy") {
+		t.Fatalf("suggestions=%q", out["suggestions"])
 	}
 }

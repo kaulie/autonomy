@@ -14,8 +14,10 @@ import (
 const (
 	httpTimeout  = 20 * time.Second
 	maxBodyBytes = 1 << 20 // 1 MiB per response
-	// statusPath is where a deployment lives under an endpoint base URL.
-	statusPath = "/deployments/"
+	// statusPath is where a deployment pipeline lives under the control plane
+	// base URL (agent-control-plane: GET /api/pipelines/<id>), matching what
+	// service.deploy returns in its `poll` output.
+	statusPath = "/api/pipelines/"
 	// snippetChars bounds an error body kept in an error message.
 	snippetChars = 200
 )
@@ -67,15 +69,25 @@ func (o *HTTPObserver) Observe(ctx context.Context, req Request) (Snapshot, erro
 	return payload.toSnapshot(req, logs), nil
 }
 
-// statusURLFor resolves the status URL: an explicit status_url wins, otherwise
-// it is derived from the endpoint base URL.
+// statusURLFor resolves the status URL: an explicit status_url wins, then the
+// relative poll path a trigger capability handed back, then the control plane's
+// pipeline path derived from the endpoint base URL.
 func statusURLFor(req Request) (string, error) {
 	if u := strings.TrimSpace(req.StatusURL); u != "" {
 		return u, nil
 	}
 	base := strings.TrimRight(strings.TrimSpace(req.Endpoint), "/")
+	if poll := strings.TrimSpace(req.Poll); poll != "" {
+		if base == "" {
+			return poll, nil
+		}
+		return base + "/" + strings.TrimLeft(poll, "/"), nil
+	}
 	if base == "" {
 		return "", fmt.Errorf("missing status url")
+	}
+	if req.Deployment == "" {
+		return "", fmt.Errorf("missing deployment")
 	}
 	return base + statusPath + url.PathEscape(req.Deployment), nil
 }
@@ -105,21 +117,27 @@ func (o *HTTPObserver) get(ctx context.Context, rawURL string) ([]byte, error) {
 
 // statusPayload is the JSON shape a deployment status endpoint may return. The
 // tags are tolerant on purpose: a deployment system that says `status` instead
-// of `state`, or `stage` instead of `phase`, is still readable.
+// of `state`, `stage` instead of `phase`, or `requestId` instead of `id` (the
+// control plane's pipeline job) is still readable.
 type statusPayload struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	State     string   `json:"state"`
-	Status    string   `json:"status"`
-	Phase     string   `json:"phase"`
-	Stage     string   `json:"stage"`
-	Progress  string   `json:"progress"`
-	Healthy   *bool    `json:"healthy"`
-	Health    string   `json:"health"`
-	Error     string   `json:"error"`
-	UpdatedAt string   `json:"updated_at"`
-	Logs      []string `json:"logs"`
-	Lines     []string `json:"lines"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	RequestID  string   `json:"requestId"`
+	ServiceID  string   `json:"serviceId"`
+	State      string   `json:"state"`
+	Status     string   `json:"status"`
+	Phase      string   `json:"phase"`
+	Stage      string   `json:"stage"`
+	Progress   string   `json:"progress"`
+	Healthy    *bool    `json:"healthy"`
+	Health     string   `json:"health"`
+	Error      string   `json:"error"`
+	Message    string   `json:"message"`
+	Version    string   `json:"version"`
+	Deployment string   `json:"deployment"`
+	UpdatedAt  string   `json:"updated_at"`
+	Logs       []string `json:"logs"`
+	Lines      []string `json:"lines"`
 }
 
 func decodeStatus(body []byte) (statusPayload, error) {
@@ -130,7 +148,10 @@ func decodeStatus(body []byte) (statusPayload, error) {
 	return p, nil
 }
 
-// decodeLogs accepts either a JSON object with a lines/logs array or plain text.
+// decodeLogs accepts either a JSON object with a lines/logs array (or a bare
+// JSON array of lines) or plain text. A body that is valid JSON in some other
+// shape is not log text, so it yields nothing instead of a JSON blob as one
+// "log line".
 func decodeLogs(body []byte) []string {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
@@ -150,6 +171,9 @@ func decodeLogs(body []byte) []string {
 		if err := json.Unmarshal(body, &lines); err == nil {
 			return lines
 		}
+		if json.Valid(body) {
+			return nil
+		}
 	}
 	return trailingNewline(trimmed)
 }
@@ -168,14 +192,18 @@ func (p statusPayload) toSnapshot(req Request, logs []string) Snapshot {
 		logs = logs[len(logs)-tail:]
 	}
 	return Snapshot{
-		ID:        firstNonEmpty(p.ID, p.Name, req.Deployment),
-		State:     normalizeState(firstNonEmpty(p.State, p.Status)),
-		Phase:     firstNonEmpty(p.Phase, p.Stage),
-		Progress:  strings.TrimSpace(p.Progress),
-		Healthy:   p.healthy(),
-		Error:     strings.TrimSpace(p.Error),
-		UpdatedAt: parseTime(p.UpdatedAt),
-		Logs:      logs,
+		ID:             firstNonEmpty(p.ID, p.RequestID, p.Name, req.Deployment),
+		State:          normalizeState(firstNonEmpty(p.State, p.Status)),
+		Phase:          firstNonEmpty(p.Phase, p.Stage),
+		Progress:       strings.TrimSpace(p.Progress),
+		Healthy:        p.healthy(),
+		Error:          strings.TrimSpace(p.Error),
+		Message:        strings.TrimSpace(p.Message),
+		Service:        strings.TrimSpace(p.ServiceID),
+		Version:        strings.TrimSpace(p.Version),
+		DeploymentName: strings.TrimSpace(p.Deployment),
+		UpdatedAt:      parseTime(p.UpdatedAt),
+		Logs:           logs,
 	}
 }
 
@@ -212,7 +240,8 @@ func normalizeState(v string) State {
 		return StateSucceeded
 	case "failure", "failed", "fail", "error", "errored", "unhealthy", "crash", "crashed", "aborted", "cancelled", "canceled", "rollback", "rolled_back", "timed_out", "timeout":
 		return StateFailed
-	case "running", "in_progress", "progress", "deploying", "rolling_out", "updating", "started", "start", "deploy":
+	case "running", "in_progress", "progress", "deploying", "deploy", "rolling_out", "updating", "started", "start",
+		"packaging", "packaging_in_progress", "building", "building_in_progress", "pushing", "publishing", "releasing":
 		return StateRunning
 	case "pending", "queued", "created", "waiting", "requested", "accepted", "preparing", "not_started":
 		return StatePending

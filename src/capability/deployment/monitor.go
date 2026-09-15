@@ -27,9 +27,13 @@ const (
 	// Provider is who implements it.
 	Provider = "autonomy"
 
-	// EnvEndpoint is the default deployment service base URL, used when the
-	// input does not name an endpoint or a full status URL.
-	EnvEndpoint = "AUTONOMY_DEPLOYMENT_ENDPOINT"
+	// EnvAPIURL is where the deployment service listens. It is the same
+	// variable service.deploy and the gateway use, so one setting points both
+	// the trigger and the monitor at the same deployment control plane.
+	EnvAPIURL = "DEPLOYMENT_API_URL"
+	// DefaultAPIURL is the local deployment control plane, mirroring
+	// service.deploy: monitoring works out of the box against the same host.
+	DefaultAPIURL = "http://127.0.0.1:4220"
 
 	defaultTail     = 40
 	maxTail         = 500
@@ -74,12 +78,17 @@ func (s State) terminal() bool { return s == StateSucceeded || s == StateFailed 
 
 // Request is one monitoring request, parsed from the capability input.
 type Request struct {
-	// Deployment identifies the deployment/run to follow (required).
+	// Deployment identifies the deployment/pipeline run to follow (required).
 	Deployment string
 	// Endpoint is the deployment service base URL; StatusURL takes precedence.
 	Endpoint string
-	// StatusURL is the full status URL; when empty it is derived from Endpoint.
+	// StatusURL is the full status URL; when empty it is derived from
+	// Endpoint + the deployment id, or from Poll.
 	StatusURL string
+	// Poll is the relative status path a trigger capability handed back (e.g.
+	// service.deploy's `poll`: /api/pipelines/<id>); it is resolved against
+	// Endpoint.
+	Poll string
 	// LogsURL is an optional separate logs URL; when empty it is derived from
 	// the status URL.
 	LogsURL string
@@ -98,14 +107,18 @@ type Request struct {
 // Snapshot is one observation of a deployment: what the source says its state
 // is right now, plus the log lines that came with it.
 type Snapshot struct {
-	ID        string
-	State     State
-	Phase     string
-	Progress  string
-	Healthy   *bool
-	Error     string
-	UpdatedAt time.Time
-	Logs      []string
+	ID             string
+	State          State
+	Phase          string
+	Progress       string
+	Healthy        *bool
+	Error          string
+	Message        string
+	Service        string
+	Version        string
+	DeploymentName string
+	UpdatedAt      time.Time
+	Logs           []string
 }
 
 // Observer reads deployment state. HTTPObserver is the default; a host may
@@ -132,7 +145,7 @@ func (Monitor) Domain() string { return Domain }
 func (Monitor) Provider() string { return Provider }
 
 func (Monitor) Description() string {
-	return `observe an in-flight deployment and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} (required), optional "status_url" or "endpoint" (default $AUTONOMY_DEPLOYMENT_ENDPOINT), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions`
+	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://127.0.0.1:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions`
 }
 
 // Run observes the deployment and turns that observation into a report: the
@@ -221,14 +234,21 @@ func defaultSleep(ctx context.Context, d time.Duration) error {
 // ParseRequest reads a monitoring request from capability input. Only the
 // deployment is required; everything else has a documented default or bound.
 func ParseRequest(in map[string]string) (Request, error) {
-	deployment := firstNonEmpty(in["deployment"], in["target"], in["run"], in["id"])
-	if deployment == "" {
+	// service.deploy hands back a pipeline id (and a poll path); both name the
+	// same thing the monitor follows, so all of them are accepted.
+	deployment := firstNonEmpty(
+		in["deployment"], in["pipeline_id"], in["pipeline"],
+		in["request_id"], in["target"], in["run"], in["id"],
+	)
+	poll := strings.TrimSpace(in["poll"])
+	if deployment == "" && poll == "" {
 		return Request{}, fmt.Errorf("%s: missing deployment", Name)
 	}
 	req := Request{
 		Deployment: deployment,
 		Endpoint:   strings.TrimSpace(in["endpoint"]),
 		StatusURL:  strings.TrimSpace(in["status_url"]),
+		Poll:       poll,
 		LogsURL:    strings.TrimSpace(in["logs_url"]),
 		Tail:       defaultTail,
 		Watch:      boolInput(in["watch"]),
@@ -236,10 +256,7 @@ func ParseRequest(in map[string]string) (Request, error) {
 		Timeout:    defaultTimeout,
 	}
 	if req.Endpoint == "" && req.StatusURL == "" {
-		req.Endpoint = strings.TrimSpace(os.Getenv(EnvEndpoint))
-	}
-	if req.Endpoint == "" && req.StatusURL == "" {
-		return Request{}, fmt.Errorf("%s: missing deployment endpoint (set %s, or input.status_url/endpoint)", Name, EnvEndpoint)
+		req.Endpoint = firstNonEmpty(os.Getenv(EnvAPIURL), DefaultAPIURL)
 	}
 	if v := strings.TrimSpace(in["tail"]); v != "" {
 		n, err := strconv.Atoi(v)
@@ -332,6 +349,18 @@ func report(snap Snapshot, req Request, polls int, now time.Time) map[string]str
 	if snap.Error != "" {
 		out["error"] = snap.Error
 	}
+	if snap.Message != "" {
+		out["message"] = snap.Message
+	}
+	if snap.Service != "" {
+		out["service"] = snap.Service
+	}
+	if snap.Version != "" {
+		out["version"] = snap.Version
+	}
+	if snap.DeploymentName != "" {
+		out["deployment_name"] = snap.DeploymentName
+	}
 	if len(d.Signals) > 0 {
 		out["signals"] = strings.Join(d.Signals, ",")
 	}
@@ -402,20 +431,25 @@ func Diagnose(snap Snapshot, now time.Time, tail int) Diagnosis {
 	}
 
 	// The logs are the deployment's own output; the error field is part of it too.
+	// A deployment that already finished successfully is not blamed for lines
+	// about retries it recovered from, so fingerprints only speak while the
+	// outcome is still open.
 	matchAt := -1
-	for i, line := range snap.Logs {
-		if ok, rules := matchRules(line); ok {
+	if snap.state() != StateSucceeded {
+		for i, line := range snap.Logs {
+			if ok, rules := matchRules(line); ok {
+				for _, r := range rules {
+					add(r.name, r.suggestion)
+				}
+				if matchAt == -1 {
+					matchAt = i
+				}
+			}
+		}
+		if ok, rules := matchRules(snap.Error); ok {
 			for _, r := range rules {
 				add(r.name, r.suggestion)
 			}
-			if matchAt == -1 {
-				matchAt = i
-			}
-		}
-	}
-	if ok, rules := matchRules(snap.Error); ok {
-		for _, r := range rules {
-			add(r.name, r.suggestion)
 		}
 	}
 
@@ -505,13 +539,13 @@ func summarize(snap Snapshot, d Diagnosis) string {
 	return strings.Join(parts, "; ")
 }
 
-// firstSignalLine is the first log line (or the reported error) that looks like
-// the reason, used to make the summary concrete.
+// firstSignalLine is the first log line (or the reported error/message) that
+// looks like the reason, used to make the summary concrete.
 func firstSignalLine(snap Snapshot) string {
 	for _, line := range snap.Logs {
 		if ok, _ := matchRules(line); ok {
 			return strings.TrimSpace(line)
 		}
 	}
-	return strings.TrimSpace(snap.Error)
+	return firstNonEmpty(snap.Error, snap.Message)
 }

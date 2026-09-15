@@ -29,9 +29,10 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 
 | 输入 | 必填 | 默认 | 说明 |
 |------|------|------|------|
-| `deployment` | 是 | — | 部署 / 流水线 run 标识（也可写 `target` / `run` / `id`） |
-| `status_url` | 否 | — | 完整状态 URL（优先于 `endpoint`） |
-| `endpoint` | 否 | `$AUTONOMY_DEPLOYMENT_ENDPOINT` | 部署服务 base URL，状态地址 = `<endpoint>/deployments/<deployment>` |
+| `deployment` | 是 | — | 部署 / 流水线标识（也接受 `pipeline_id` / `pipeline` / `request_id` / `target` / `run` / `id`） |
+| `poll` | 否 | — | 触发能力返回的相对状态路径（如 service.deploy 的 `poll`：`/api/pipelines/<id>`），会拼到 `endpoint` 上 |
+| `status_url` | 否 | — | 完整状态 URL（优先级最高） |
+| `endpoint` | 否 | `$DEPLOYMENT_API_URL` → `http://127.0.0.1:4220` | 部署服务 base URL；状态地址 = `<endpoint>/api/pipelines/<deployment>` |
 | `logs_url` | 否 | `<status_url>/logs` | 单独的日志地址（状态里已带 `logs` 时不会去取） |
 | `watch` | 否 | `false` | `true` 时轮询到终态或超时为止 |
 | `interval` | 否 | `5`（秒） | 轮询间隔，最小 1s |
@@ -42,6 +43,21 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 下一轮 decide 可以再调一次 `deployment.monitor`（见 [execution-loop.md](execution-loop.md)）。
 `watch=true` 是「在一次调用内跟一段」，窗口有界，不会把决策循环挂死。
 
+## 与 `service.deploy` 组合
+
+`service.deploy`（同一个 control plane，见 [capability.md](capability.md)）负责**触发**流水线并立即返回
+`pipeline_id` / `poll`；`deployment.monitor` 负责**跟随**它：
+
+```
+service.deploy {service, branch} → {pipeline_id, state:"queued", poll:"/api/pipelines/<id>"}
+   ↓ （下一轮 decide）
+deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + evidence
+```
+
+两者指向同一个 `DEPLOYMENT_API_URL`，无需额外配置；默认 `status_url` 规则与 control plane 的
+`GET /api/pipelines/<id>` 对齐。
+
+
 ## 输出
 
 | 输出 | 说明 |
@@ -50,9 +66,11 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 | `terminal` | 是否终态 |
 | `phase` / `progress` | 部署系统报的阶段与进度 |
 | `healthy` | 部署自报的健康状态（没报则不出现该字段） |
+| `service` / `version` / `deployment_name` | 部署系统自报的服务、版本、部署对象名（有则出现） |
+| `message` | 部署系统自报的消息（control plane 的失败原因常在这里） |
 | `problem` | 是否发现需要处理的问题 |
 | `signals` | 命中的信号，逗号分隔 |
-| `diagnosis` | 一句话结论（状态 + 阶段 + 信号 + 首个可疑错误行） |
+| `diagnosis` | 一句话结论（状态 + 阶段 + 信号 + 首个可疑错误行 / message） |
 | `evidence` | 日志窗口：有命中行时取其上下文，否则取最近 `tail` 行；总长有上限 |
 | `suggestions` | 每个信号对应的下一步（去查什么 / 改什么） |
 | `polls` / `observed_at` / `provider` | 轮询次数、观察时间、实现方 |
@@ -71,16 +89,19 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 `oom`、`image_pull`、`crash_loop`、`timeout`、`connection`、`permission`、`config`、`crash`。
 每个信号都自带一条 `suggestion`（例如 `oom` → 提高内存上限或修泄漏）。
 
+指纹只在**结果未定**时生效：已经 `succeeded` 的部署不会因为日志里出现 `connection refused`（重试后成功）被判成 problem。
+
 ## Provider
 
 能力语义固定，观察来源可换（见 [Provider](provider.md)）：
 
-- 默认 `HTTPObserver`：`GET <status_url>` 读 JSON（宽容字段：`state`/`status`、`phase`/`stage`、`healthy`/`health`、`logs`/`lines`、`updated_at`），
+- 默认 `HTTPObserver`：`GET <status_url>` 读 JSON（宽容字段：`state`/`status`、`phase`/`stage`、`healthy`/`health`、
+  `logs`/`lines`、`updated_at`、以及 control plane 的 `requestId`/`serviceId`/`message`/`version`/`deployment`），
   状态里没有日志时再 `GET <logs_url>`（JSON `lines`/`logs` 或纯文本）。
 - 宿主可在注册时注入自定义 Observer（CI API、编排器、本地部署记录）：
   `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`。
 
-部署系统状态词汇通过 `normalizeState` 归一到上面五个状态。
+部署系统状态词汇通过 `normalizeState` 归一到上面五个状态（`queued` → pending，`packaging`/`deploying` → running，…）。
 
 ## 代码位置
 
