@@ -51,9 +51,9 @@ func main() {
 
 	// init context entity
 	projectExternalEntity := ExternalEntity{
-		ID:           "project-1",
-		Name:         "Project 1",
-		Description:  "Project 1 description",
+		ID:           "project-2",
+		Name:         "Project 2",
+		Description:  "Project 2 description",
 		EntityType:   "project",
 		EntityDomain: "software_development",
 		CreatedAt:    time.Now(),
@@ -76,12 +76,12 @@ func main() {
 		Meta: autonomy.Entity{
 			ID:          "src-1",
 			Name:        "source code",
-			Description: "a agent autonomy project",
+			Description: "deployment project",
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		},
 		Repository: autonomy.Repository{
-			URL:        "https://github.com/kaulie/autonomy",
+			URL:        "https://github.com/kaulie/agent-control-plane-deployment",
 			MainBranch: "main",
 		},
 	}
@@ -99,8 +99,8 @@ func main() {
 	}
 
 	task := &autonomy.Task{
-		ID:          "task-1",
-		Description: "Develop a new feature",
+		ID:          "task-8",
+		Description: "把部署流水线中的事件名称标准化，只提交commit，改完提PR",
 		Status:      "pending",
 		GoalType:    autonomy.GoalType_FEATURE,
 		CreatedAt:   time.Now(),
