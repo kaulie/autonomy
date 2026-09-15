@@ -20,6 +20,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 10. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流）与多 provider 扩展
 11. [llm-message.md](llm-message.md) — 输入与返回拆成两条独立记录（llm_messages），返回溯源到具体输入
 12. [store.md](store.md) — 存储统一接口与可插拔 engine（sqlite 为默认实现）
+13. [deployment-monitor.md](deployment-monitor.md) — `deployment.monitor` 能力参考（跟随部署、定位问题；概念边界见 [capability.md](capability.md)）
 
 ## 终局四对象
 

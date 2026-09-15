@@ -2,6 +2,7 @@ package capability
 
 import (
 	"github.com/kaulie/autonomy/src/capability/broker"
+	"github.com/kaulie/autonomy/src/capability/deployment"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
@@ -10,6 +11,10 @@ type Deps struct {
 	Assets AssetMutator
 	// Agents is Runtime (or a test double): capabilities acquire agents through it.
 	Agents broker.AgentBroker
+	// Deployments is the deployment state source deployment.monitor follows.
+	// Optional: when nil the capability builds its own HTTP observer from the
+	// request (or $AUTONOMY_DEPLOYMENT_ENDPOINT).
+	Deployments deployment.Observer
 }
 
 // RegisterDefaults registers all built-in capabilities.
@@ -20,4 +25,5 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	}
 	f.Register(AssetChange{Assets: deps.Assets})
 	f.Register(sd.CodeEdit{Agents: deps.Agents})
+	f.Register(deployment.Monitor{Observer: deps.Deployments})
 }
