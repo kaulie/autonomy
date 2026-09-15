@@ -127,6 +127,34 @@ type Agent struct {
 	clineAgents map[string]*clinesdk.Agent
 	// LLMAgentID is retained for persistent agents after Close (Resume later).
 	LLMAgentID string
+	// llmFrameSent records that the AGENT_V2 frame (the instructions that do not
+	// change per cycle) has already been delivered on the current LLM session, so
+	// later decision cycles send only the per-cycle delta. It is reset when a
+	// session is created (or replaced) — see AttachCursor / attachClineSession —
+	// and set only after a run actually succeeded, so a failed first cycle
+	// resends the frame instead of leaving the session without instructions.
+	llmFrameSent bool
+}
+
+// needsLLMFrame reports whether this cycle's message must carry the AGENT_V2
+// frame: true until the frame has been delivered on the current LLM session.
+func (a *Agent) needsLLMFrame() bool {
+	return a == nil || !a.llmFrameSent
+}
+
+// markLLMFrameSent records that the frame reached the session.
+func (a *Agent) markLLMFrameSent() {
+	if a != nil {
+		a.llmFrameSent = true
+	}
+}
+
+// resetLLMFrame marks the current session as having no frame yet: the next
+// decision cycle sends it again.
+func (a *Agent) resetLLMFrame() {
+	if a != nil {
+		a.llmFrameSent = false
+	}
 }
 
 func (a *Agent) IsEphemeral() bool {
