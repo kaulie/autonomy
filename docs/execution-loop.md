@@ -38,6 +38,16 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 | Verify | [Verification](verification.md) |
 | Done / Continue | Contract 求值结果 |
 
+## 实现：一轮 = 一个决定 = 整份 plan
+
+代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtStep` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
+
+- 每轮：`DecideAtStep(step)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Autonomy.MaxSteps`，默认 `1`）。
+- 模型按 AGENT_V2 §Output Schema 回答；`parseDecision` **保留整份 plan**：`plan.steps[]` 每个 step 一个 action，按序放进 `Decision.Actions`，`evidence` / `need` / `deliverable` / `presentation` 一并带回（不再是"只留第一个 action，其余丢掉"）。
+- `Runtime.Execute` **在同一轮里按序执行所有 action**；第一个失败就结束该轮（`Result.Message` 会写第几个/共几个），把新世界状态交给下一轮 decide 重规划。
+- step 的 `capability` 未注册 → 该位置变成 `NothingAction{Reason}`：**只跳过这一步，后面的 action 照常执行**（旧实现会让整份 plan 消失）。
+- `type` 不是 `plan`（`done` / `blocked` / `need_input`）时 `Actions` 为空，`Execute` 不执行任何动作，且不是错误。
+
 ## 不变式
 
 1. 计划是动态产物；固定 Workflow 只是特例。

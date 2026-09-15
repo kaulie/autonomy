@@ -118,20 +118,16 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
 	stage("parse", "begin")
-	reason, action, parseErr := parseDecision(text)
+	decision, parseErr := parseDecision(text)
 	runRes.RawOutput = text
 	trace.Finish(runRes)
 	if parseErr != nil {
 		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", parseErr, text)
 	}
-	stage("parse", "ok reason=%q total=%s", reason, time.Since(t0).Round(time.Millisecond))
-	return ReasoningResult{
-		Decision: Decision{
-			Reason: reason,
-			Action: action,
-			Ctx:    ctx,
-		},
-	}, nil
+	decision.Ctx = ctx
+	stage("parse", "ok type=%s reason=%q actions=%d total=%s",
+		decision.Type, decision.Reason, len(decision.Actions), time.Since(t0).Round(time.Millisecond))
+	return ReasoningResult{Decision: decision}, nil
 }
 
 // reasonTaskID returns the task id carried by a decision context, if any.
@@ -177,9 +173,10 @@ func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reaso
 	recordReasonIO(ctx, in, out)
 	return ReasoningResult{
 		Decision: Decision{
-			Reason: "local reason",
-			Action: CapabilityAction{Name: "asset.change", Input: map[string]string{}},
-			Ctx:    ctx,
+			Type:    "plan",
+			Reason:  "local reason",
+			Actions: []Action{CapabilityAction{Name: "asset.change", Input: map[string]string{}}},
+			Ctx:     ctx,
 		},
 	}, nil
 }

@@ -34,15 +34,23 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 	r.caps = m
 }
 
+// Execute runs a decision: every action of its plan, in order. A plan is one
+// cycle's worth of work, so all of its steps run here; the first failing step
+// ends the cycle (the next decision sees the world it left behind). done /
+// blocked / need_input carry no actions and execute nothing.
 func (r *Runtime) Execute(decision Decision) (Result, error) {
-	action := decision.Action
-	err := action.Execute(decision.Ctx)
-	if err != nil {
-		return Result{}, err
+	if len(decision.Actions) == 0 {
+		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
-	return Result{
-		Message: "Action executed",
-	}, nil
+	for i, action := range decision.Actions {
+		if action == nil {
+			continue
+		}
+		if err := action.Execute(decision.Ctx); err != nil {
+			return Result{Message: fmt.Sprintf("action %d/%d failed: %v", i+1, len(decision.Actions), err)}, err
+		}
+	}
+	return Result{Message: fmt.Sprintf("executed %d action(s)", len(decision.Actions))}, nil
 }
 
 // AcquireAgent registers an agent via AgentFactory and attaches the requested backend.

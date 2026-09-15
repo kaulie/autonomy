@@ -28,6 +28,16 @@ Action 是某次 [Capability](capability.md) 的**实际执行实例**：从意�
 - Action 完成后通常产生 [Event](event.md)
 - [Verification](verification.md) 消费 Action 的证据与后续世界观察，而不是只信 Effect Claims
 
+## 实现（Go）
+
+| 形态 | 说明 |
+|---|---|
+| `Action` 接口 | `Execute(ctx DecisionContext) error`；`Runtime.Execute` 按 `Decision.Actions` 的顺序调用 |
+| `CapabilityAction{Name, Input, ExpectedEffect, EvidenceRefs}` | 已注册能力的一次执行；后两个字段来自 plan step（`expected_effect` / `evidence_refs`），用于留痕"这一步想改变什么、依据哪条 evidence" |
+| `NothingAction{Reason}` | 空动作：step 写了 `noop`/`none`，或写了一个未注册的能力（`Reason` 会打印出来，而不是静默什么都不做） |
+
+一个 plan 里的多个 action 属于**同一轮**执行（见 [execution-loop.md](execution-loop.md)）；执行完（或中途失败）后由下一轮 Decide 重新规划。
+
 ## 不变式
 
 1. Action 成功 ≠ Task 完成。

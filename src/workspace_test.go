@@ -40,16 +40,19 @@ func TestParseDecisionRegisteredCapability(t *testing.T) {
 	_autonomy = &Autonomy{CapabilityFactory: capF}
 	t.Cleanup(func() { _autonomy = prev })
 
-	reason, action, err := parseDecision(`{"type":"plan","reason":"edit","plan":[{"capability":"code_edit","input":{"instruction":"add feature"}}],"need":{}}`)
+	decision, err := parseDecision(`{"type":"plan","reason":"edit","plan":[{"capability":"code_edit","input":{"instruction":"add feature"}}],"need":{}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reason != "edit" {
-		t.Fatalf("reason=%q", reason)
+	if decision.Type != "plan" || decision.Reason != "edit" {
+		t.Fatalf("decision=%+v", decision)
 	}
-	ca, ok := action.(CapabilityAction)
+	if len(decision.Actions) != 1 {
+		t.Fatalf("actions=%d, want 1: %+v", len(decision.Actions), decision.Actions)
+	}
+	ca, ok := decision.Actions[0].(CapabilityAction)
 	if !ok {
-		t.Fatalf("action type %T", action)
+		t.Fatalf("action type %T", decision.Actions[0])
 	}
 	if ca.Name != "code_edit" || ca.Input["instruction"] != "add feature" {
 		t.Fatalf("action=%+v", ca)

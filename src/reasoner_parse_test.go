@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -402,47 +403,69 @@ func TestParseDecisionJSON(t *testing.T) {
 	t.Cleanup(func() { _autonomy = prevAuto })
 
 	cases := []struct {
-		name   string
-		text   string
-		noop   bool
-		reason string
-		err    bool
+		name    string
+		text    string
+		wantTyp string
+		reason  string
+		// actions are the capability names in execution order; nothingAction marks
+		// a step the runtime cannot run (unknown capability).
+		actions []string
+		err     bool
 	}{
 		{
-			name:   "plan change",
-			text:   `{"type":"plan","reason":"mutate target","plan":{"steps":[{"capability":"asset.change","input":{"target":"1"}}]},"need":{}}`,
-			noop:   false,
-			reason: "mutate target",
+			name:    "plan change",
+			text:    `{"type":"plan","reason":"mutate target","plan":{"steps":[{"capability":"asset.change","input":{"target":"1"}}]},"need":{}}`,
+			wantTyp: "plan",
+			reason:  "mutate target",
+			actions: []string{"asset.change"},
 		},
 		{
-			name:   "plan fenced",
-			text:   "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":{\"steps\":[{\"capability\":\"asset.change\",\"input\":{}}]},\"need\":{}}\n```",
-			noop:   false,
-			reason: "go",
+			name:    "plan fenced",
+			text:    "```json\n{\"type\":\"plan\",\"reason\":\"go\",\"plan\":{\"steps\":[{\"capability\":\"asset.change\",\"input\":{}}]},\"need\":{}}\n```",
+			wantTyp: "plan",
+			reason:  "go",
+			actions: []string{"asset.change"},
 		},
 		{
-			name:   "plan legacy array",
-			text:   `{"type":"plan","reason":"legacy","plan":[{"capability":"asset.change","input":{}}],"need":{}}`,
-			noop:   false,
-			reason: "legacy",
+			name:    "plan legacy array",
+			text:    `{"type":"plan","reason":"legacy","plan":[{"capability":"asset.change","input":{}}],"need":{}}`,
+			wantTyp: "plan",
+			reason:  "legacy",
+			actions: []string{"asset.change"},
 		},
 		{
-			name:   "plan unknown capability",
-			text:   `{"type":"plan","reason":"unknown","plan":{"steps":[{"capability":"change","input":{}}]},"need":{}}`,
-			noop:   true,
-			reason: "unknown",
+			// A step the runtime does not have stays in the plan as a no-op: it must
+			// not delete the steps around it.
+			name:    "plan unknown capability keeps its place",
+			text:    `{"type":"plan","reason":"unknown","plan":{"steps":[{"capability":"change","input":{}}]},"need":{}}`,
+			wantTyp: "plan",
+			reason:  "unknown",
+			actions: []string{"nothing"},
 		},
 		{
-			name:   "done",
-			text:   `{"type":"done","reason":"verified","plan":[],"need":{}}`,
-			noop:   true,
-			reason: "verified",
+			// The point of the whole change: a multi-step plan yields every action, in
+			// order, instead of collapsing to the first one.
+			name: "plan keeps every step",
+			text: `{"type":"plan","reason":"chain","plan":{"steps":[` +
+				`{"capability":"asset.change","input":{"target":"1"}},` +
+				`{"capability":"code_edit","input":{"instruction":"x"}},` +
+				`{"capability":"noop","input":{}},` +
+				`{"capability":"missing","input":{}}]},"need":{}}`,
+			wantTyp: "plan",
+			reason:  "chain",
+			actions: []string{"asset.change", "code_edit", "nothing"},
 		},
 		{
-			name:   "blocked",
-			text:   `{"type":"blocked","reason":"missing key","plan":[],"need":{"missing":"api_key"}}`,
-			noop:   true,
-			reason: "missing key",
+			name:    "done",
+			text:    `{"type":"done","reason":"verified","plan":[],"need":{}}`,
+			wantTyp: "done",
+			reason:  "verified",
+		},
+		{
+			name:    "blocked",
+			text:    `{"type":"blocked","reason":"missing key","plan":[],"need":{"type":"permission","description":"api key"}}`,
+			wantTyp: "blocked",
+			reason:  "missing key",
 		},
 		{
 			name: "invalid",
@@ -451,9 +474,8 @@ func TestParseDecisionJSON(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			reason, action, err := parseDecision(tc.text)
+			decision, err := parseDecision(tc.text)
 			if tc.err {
 				if err == nil {
 					t.Fatal("expected error")
@@ -463,13 +485,100 @@ func TestParseDecisionJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reason != tc.reason {
-				t.Fatalf("reason=%q want %q", reason, tc.reason)
+			if decision.Type != tc.wantTyp || decision.Reason != tc.reason {
+				t.Fatalf("type=%q reason=%q, want %q/%q", decision.Type, decision.Reason, tc.wantTyp, tc.reason)
 			}
-			_, isNoop := action.(NothingAction)
-			if isNoop != tc.noop {
-				t.Fatalf("noop=%v want %v", isNoop, tc.noop)
+			got := make([]string, 0, len(decision.Actions))
+			for _, action := range decision.Actions {
+				switch a := action.(type) {
+				case CapabilityAction:
+					got = append(got, a.Name)
+				case NothingAction:
+					got = append(got, "nothing")
+				default:
+					got = append(got, fmt.Sprintf("%T", action))
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tc.actions, ",") {
+				t.Fatalf("actions=%v, want %v", got, tc.actions)
 			}
 		})
+	}
+}
+
+// TestParseDecisionRealPlannerPayload parses an answer in the shape the planner
+// actually returns (reason_turns.raw_output, e.g. id=105): evidence items with
+// ids, one plan step whose expected_effect is a string, a deliverable and a
+// presentation. Those fields used to be dropped, and only the first plan step
+// survived as an action.
+func TestParseDecisionRealPlannerPayload(t *testing.T) {
+	prevAuto := _autonomy
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f}
+	t.Cleanup(func() { _autonomy = prevAuto })
+
+	text := `{
+  "goal_type": "dev_feature",
+  "completion_contracts": {"steps": ["locate the pipeline event names", "standardise them"]},
+  "type": "plan",
+  "reason": "delegate the code change to a worker",
+  "evidence": [
+    {"id": "E1", "source": "goal", "reference": "task-8 description", "fact": "tasks must be committed and pushed"},
+    {"id": "E2", "source": "world", "reference": "src-1", "fact": "repository kaulie/agent-control-plane-deployment"}
+  ],
+  "plan": {
+    "steps": [
+      {
+        "capability": "code_edit",
+        "input": {"instruction": "standardise the pipeline event names"},
+        "expected_effect": "the worker renames the events and opens a PR",
+        "evidence_refs": ["E1", "E2"]
+      }
+    ]
+  },
+  "need": {},
+  "deliverable": [
+    {"type": "asset", "concrete_type": "Repository", "detail": {"main_branch": "main"}}
+  ],
+  "presentation": [
+    {"type": "summary", "content": "delegated the rename to a worker"}
+  ]
+}`
+	decision, err := parseDecision(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Type != "plan" || decision.Reason != "delegate the code change to a worker" {
+		t.Fatalf("type=%q reason=%q", decision.Type, decision.Reason)
+	}
+	if len(decision.Actions) != 1 {
+		t.Fatalf("actions=%d, want 1: %+v", len(decision.Actions), decision.Actions)
+	}
+	action, ok := decision.Actions[0].(CapabilityAction)
+	if !ok {
+		t.Fatalf("action type %T", decision.Actions[0])
+	}
+	if action.Name != "code_edit" || action.Input["instruction"] != "standardise the pipeline event names" {
+		t.Fatalf("action=%+v", action)
+	}
+	if action.ExpectedEffect != "the worker renames the events and opens a PR" {
+		t.Fatalf("expected_effect=%q", action.ExpectedEffect)
+	}
+	if strings.Join(action.EvidenceRefs, ",") != "E1,E2" {
+		t.Fatalf("evidence_refs=%v", action.EvidenceRefs)
+	}
+	if len(decision.Evidence) != 2 || decision.Evidence[0].ID != "E1" || decision.Evidence[0].Source != "goal" {
+		t.Fatalf("evidence=%+v", decision.Evidence)
+	}
+	if decision.Need != (Need{}) {
+		t.Fatalf("need=%+v, want empty", decision.Need)
+	}
+	if len(decision.Deliverables) != 1 || decision.Deliverables[0].Type != "asset" ||
+		decision.Deliverables[0].ConcreteType != "Repository" || decision.Deliverables[0].Detail["main_branch"] != "main" {
+		t.Fatalf("deliverables=%+v", decision.Deliverables)
+	}
+	if len(decision.Presentation) != 1 || decision.Presentation[0].Type != "summary" || decision.Presentation[0].Content == "" {
+		t.Fatalf("presentation=%+v", decision.Presentation)
 	}
 }

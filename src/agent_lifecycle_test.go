@@ -95,5 +95,5 @@ func (captureAgentReasoner) Reason(ctx DecisionContext, _ ReasoningInput) (Reaso
 	if ctx.Agent == nil {
 		return ReasoningResult{}, fmt.Errorf("missing agent")
 	}
-	return ReasoningResult{Decision: Decision{Reason: "ok", Action: NothingAction{}, Ctx: ctx}}, nil
+	return ReasoningResult{Decision: Decision{Type: "plan", Reason: "ok", Actions: []Action{NothingAction{}}, Ctx: ctx}}, nil
 }

@@ -14,9 +14,18 @@ type Action interface {
 	Execute(ctx DecisionContext) error
 }
 
-type NothingAction struct{}
+// NothingAction is a plan step that executes nothing: a noop/none step, or one
+// naming a capability this runtime does not have (Reason says which, so a plan
+// that lost a step is visible instead of silent).
+type NothingAction struct {
+	Reason string
+}
 
 func (a NothingAction) Execute(ctx DecisionContext) error {
+	if reason := strings.TrimSpace(a.Reason); reason != "" {
+		fmt.Printf("NothingAction: %s\n", reason)
+		return nil
+	}
 	fmt.Println("NothingAction: Execute")
 	return nil
 }
@@ -25,6 +34,10 @@ func (a NothingAction) Execute(ctx DecisionContext) error {
 type CapabilityAction struct {
 	Name  string
 	Input map[string]string
+	// ExpectedEffect and EvidenceRefs come from the plan step (AGENT_V2): what the
+	// step is meant to change, and which evidence items justified it.
+	ExpectedEffect string
+	EvidenceRefs   []string
 }
 
 func (a CapabilityAction) Execute(ctx DecisionContext) error {
