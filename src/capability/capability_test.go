@@ -29,17 +29,19 @@ type errNotFound string
 
 func (e errNotFound) Error() string { return "asset " + string(e) + " not found" }
 
-func TestRegisterDefaultsIncludesAssetChange(t *testing.T) {
+func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	t.Parallel()
 	f := capability.NewFactory()
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 2 {
-		t.Fatalf("GetAll len=%d want 2", len(all))
+	if len(all) != 3 {
+		t.Fatalf("GetAll len=%d want 3", len(all))
 	}
-	if f.Get("asset.change") == nil || f.Get("code_edit") == nil {
-		t.Fatalf("GetAll=%v", all)
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy"} {
+		if f.Get(name) == nil {
+			t.Fatalf("%s not registered: %v", name, all)
+		}
 	}
 	got := f.FormatConstructs()
 	if !strings.Contains(got, `"name": "asset.change"`) {
@@ -47,6 +49,11 @@ func TestRegisterDefaultsIncludesAssetChange(t *testing.T) {
 	}
 	if !strings.Contains(got, `"name": "code_edit"`) {
 		t.Fatalf("expected code_edit in constructs: %q", got)
+	}
+	// service.deploy is planner-visible like any other construct: the planner
+	// learns it can trigger a deployment pipeline from the same list.
+	if !strings.Contains(got, `"name": "service.deploy"`) {
+		t.Fatalf("expected service.deploy in constructs: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})
 	if err != nil {
