@@ -149,7 +149,34 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 		m["additional_input"] = map[string]string{"text": text}
 	}
 	m["context"] = json.RawMessage(formatRuntimeContextContainersJSON(ctx))
+	// previous_actions is what this task already did: the planner's own plan from
+	// an earlier cycle and how it went, so re-planning is not blind (AGENT_V2
+	// names previous_action as an evidence source).
+	if len(ctx.History) > 0 {
+		m["previous_actions"] = formatPreviousActionsJSON(ctx.History)
+	}
 	return mustJSON(m)
+}
+
+// formatPreviousActionsJSON lists the task's earlier cycles, oldest first.
+func formatPreviousActionsJSON(history []Result) []map[string]any {
+	out := make([]map[string]any, 0, len(history))
+	for i, result := range history {
+		entry := map[string]any{
+			"step":    i + 1,
+			"message": result.Message,
+			"status":  "ok",
+		}
+		if result.Err != nil {
+			entry["status"] = "failed"
+			entry["error"] = result.Err.Error()
+		}
+		if len(result.Output) > 0 {
+			entry["output"] = result.Output
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func formatWorldJSON(ctx DecisionContext) []byte {
@@ -279,16 +306,39 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 	return mustJSON(entries)
 }
 
+// agentDecisionJSON is the AGENT_V2 output schema field for field (see
+// src/agent_policy/AGENT_V2.md §Output Schema; a real answer is what
+// reason_turns.raw_output holds):
+//
+//	{"goal_type": …, "completion_contracts": {"steps": […]},
+//	 "type": "plan|done|blocked|need_input", "reason": …,
+//	 "evidence": [{"id","source","reference","fact"}],
+//	 "plan": {"steps": [{"capability","input","expected_effect","evidence_refs"}]},
+//	 "need": {"type","description"},
+//	 "deliverable": [{"type","concrete_type","detail"}],
+//	 "presentation": [{"type","content"}]}
+//
+// goal_type / completion_contracts are the planner echoing the contract back;
+// they are modelled so the shape is complete, but the decision itself does not
+// depend on them.
 type agentDecisionJSON struct {
-	Type   string          `json:"type"`
-	Reason string          `json:"reason"`
-	Plan   json.RawMessage `json:"plan"`
-	Need   json.RawMessage `json:"need"`
+	GoalType           string          `json:"goal_type"`
+	CompletionContract json.RawMessage `json:"completion_contracts"`
+	Type               string          `json:"type"`
+	Reason             string          `json:"reason"`
+	Evidence           []Evidence      `json:"evidence"`
+	Plan               json.RawMessage `json:"plan"`
+	Need               Need            `json:"need"`
+	Deliverables       []Deliverable   `json:"deliverable"`
+	Presentation       []Presentation  `json:"presentation"`
 }
 
+// planStepJSON is one entry of plan.steps (AGENT_V2 §Plan Actions).
 type planStepJSON struct {
-	Capability string          `json:"capability"`
-	Input      json.RawMessage `json:"input"`
+	Capability     string          `json:"capability"`
+	Input          json.RawMessage `json:"input"`
+	ExpectedEffect json.RawMessage `json:"expected_effect"`
+	EvidenceRefs   []string        `json:"evidence_refs"`
 }
 
 // parsePlanSteps accepts both legacy "plan": [...] and the AGENT_V2
@@ -310,41 +360,83 @@ func parsePlanSteps(raw json.RawMessage) []planStepJSON {
 	return nil
 }
 
-// parseDecision maps AGENT_V2 JSON into a Decision reason + Action.
-// Registered capabilities become CapabilityAction; unknown plan steps become NothingAction.
-func parseDecision(text string) (string, Action, error) {
+// parseDecision maps the model's AGENT_V2 answer onto a Decision — the WHOLE
+// plan, not just its first step: every step becomes an action in order, so the
+// runtime can execute the plan instead of dropping everything after the first
+// capability. Registered capabilities become CapabilityAction; a step naming an
+// unknown capability becomes NothingAction so one bad step cannot delete the
+// rest of the plan (the runtime skips it and runs on).
+func parseDecision(text string) (Decision, error) {
 	raw := extractJSONObject(text)
 	if raw == "" {
-		return "", nil, fmt.Errorf("no JSON object in model response")
+		return Decision{}, fmt.Errorf("no JSON object in model response")
 	}
 	var d agentDecisionJSON
 	if err := json.Unmarshal([]byte(raw), &d); err != nil {
-		return "", nil, fmt.Errorf("parse agent decision JSON: %w", err)
+		return Decision{}, fmt.Errorf("parse agent decision JSON: %w", err)
 	}
 	typ := strings.ToLower(strings.TrimSpace(d.Type))
-	reason := strings.TrimSpace(d.Reason)
-	if reason == "" {
-		reason = typ
+	decision := Decision{
+		Type:         typ,
+		Reason:       firstNonEmptyString(strings.TrimSpace(d.Reason), typ),
+		Evidence:     d.Evidence,
+		Need:         d.Need,
+		Deliverables: d.Deliverables,
+		Presentation: d.Presentation,
 	}
 	switch typ {
 	case "plan":
-		for _, step := range parsePlanSteps(d.Plan) {
-			capName := strings.ToLower(strings.TrimSpace(step.Capability))
-			switch capName {
-			case "noop", "nothing", "none", "":
-				continue
-			}
-			if f := activeCapabilityFactory(); f != nil && f.Has(capName) {
-				return reason, CapabilityAction{Name: capName, Input: planInputMap(step.Input)}, nil
-			}
-			return reason, NothingAction{}, nil
-		}
-		return reason, NothingAction{}, nil
+		decision.Actions = planActions(parsePlanSteps(d.Plan))
 	case "done", "blocked", "need_input":
-		return reason, NothingAction{}, nil
+		// Nothing to execute: the decision's own outcome is the plan.
 	default:
-		return "", nil, fmt.Errorf("unknown decision type %q", d.Type)
+		return Decision{}, fmt.Errorf("unknown decision type %q", d.Type)
 	}
+	return decision, nil
+}
+
+// planActions turns every plan step into an action, preserving order.
+func planActions(steps []planStepJSON) []Action {
+	actions := make([]Action, 0, len(steps))
+	for _, step := range steps {
+		capName := strings.ToLower(strings.TrimSpace(step.Capability))
+		switch capName {
+		case "noop", "nothing", "none", "":
+			continue
+		}
+		if f := activeCapabilityFactory(); f != nil && f.Has(capName) {
+			actions = append(actions, CapabilityAction{
+				Name:           capName,
+				Input:          planInputMap(step.Input),
+				ExpectedEffect: stepText(step.ExpectedEffect),
+				EvidenceRefs:   step.EvidenceRefs,
+			})
+			continue
+		}
+		actions = append(actions, NothingAction{Reason: fmt.Sprintf("unknown capability %q", capName)})
+	}
+	return actions
+}
+
+// stepText renders a plan-step field the models fill with either a string or an
+// object (expected_effect appears as both in practice) as one line of text.
+func stepText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return ""
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func planInputMap(raw json.RawMessage) map[string]string {
