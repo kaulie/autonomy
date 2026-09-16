@@ -20,4 +20,7 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	}
 	f.Register(AssetChange{Assets: deps.Assets})
 	f.Register(sd.CodeEdit{Agents: deps.Agents})
+	// service.deploy talks to the deployment control plane over HTTP, so it needs
+	// no host hook: DEPLOYMENT_API_URL (or the local default) is its wiring.
+	f.Register(sd.DeployService{})
 }

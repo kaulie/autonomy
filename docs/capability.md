@@ -34,7 +34,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 ## 代码位置与提示词
 
-- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`），注册在 `capability.RegisterDefaults`。
+- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`），注册在 `capability.RegisterDefaults`。
 - **提示词不进代码**：委托给 worker 的提示词放在仓库文件里，运行时按次读取 —— 与 agent policy 同一套路（见 `src/prompt.go`）：
 
 | 文件 | 占位符 | 说明 |
@@ -43,6 +43,15 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 | `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
+
+## `service.deploy`（触发指定服务、指定分支的流水线部署）
+
+- 语义：把「某个服务的某个分支」交给部署控制面（agent-control-plane），由它打包该 git ref、再部署。
+- 输入：`{"service":"<service id>","branch":"<branch/tag>"}`（`service_id` / `ref` 亦可；`branch` 留空 = 用服务契约里的默认分支）。
+- 输出：`{"pipeline_id","state","service","branch","poll"}`；流水线已经有的 `deployment` / `version` 一并带上。
+- **触发 ≠ 等待**：打包→部署要跑几分钟，所以 Run 在控制面**受理**（HTTP 202）后立刻返回 pipeline id，不占住 decision cycle；最终结果由后续观察决定（`poll` 就是 `GET /api/pipelines/<id>`）—— 触发成功不等于世界状态已达成（见[不变式](#不变式) 第 3 条）。
+- 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`。
+- 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 
 ## 不变式
 
