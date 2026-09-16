@@ -38,10 +38,10 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 4 {
-		t.Fatalf("GetAll len=%d want 4", len(all))
+	if len(all) != 5 {
+		t.Fatalf("GetAll len=%d want 5", len(all))
 	}
-	for _, name := range []string{"asset.change", "code_edit", "service.deploy", deployment.Name} {
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", deployment.Name} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
 		}
@@ -56,6 +56,11 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	// learns it can trigger a deployment pipeline from the same list.
 	if !strings.Contains(got, `"name": "service.deploy"`) {
 		t.Fatalf("expected service.deploy in constructs: %q", got)
+	}
+	// Same for landing a pull request: the planner sees the capability that
+	// merges a branch pair, so it does not have to invent a git command for it.
+	if !strings.Contains(got, `"name": "pull_request.review"`) {
+		t.Fatalf("expected pull_request.review in constructs: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})
 	if err != nil {

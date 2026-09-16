@@ -28,6 +28,11 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// service.deploy talks to the deployment control plane over HTTP, so it needs
 	// no host hook: DEPLOYMENT_API_URL (or the local default) is its wiring.
 	f.Register(sd.DeployService{})
+	// pull_request.review lands a pull request by its branches. Like
+	// service.deploy it is code over someone else's API (GitHub's REST API)
+	// rather than a delegation, so GITHUB_TOKEN (+ GITHUB_API_URL) is its wiring
+	// and no host hook is needed either.
+	f.Register(sd.PullRequestReview{})
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})
