@@ -72,7 +72,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 
 - 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
 - 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的五个都声明**，这条被 `capability_test.go` 钉住。
-- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 的 `summary` 带着它自己开的 PR URL，而 `pull_request.review` 的 `pr` 直接吃那个 URL。
+- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空），而 `pull_request.review` 的 `pr`（别名 `pr_url`）直接吃那个 URL。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，`provider` 那一列写的是**谁为它干活**（确定性 provider，或 runtime 为它 acquire 的 agent），不是 planner 可以选择的调度轴 —— planner 既不知道、也不需要知道哪个 capability 背后是 agent（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 
 ### `{{CONSTRAINTS}}` 从哪来

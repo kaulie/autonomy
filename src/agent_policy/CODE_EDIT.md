@@ -32,8 +32,9 @@ permission and do not have to be named in the Goal.
 
 - Commit only the changes belonging to the task.
 - Push that task branch.
-- Open a pull request for it (`gh pr create`, or the equivalent API) and report
-  its URL.
+- Open a pull request for it (`gh pr create`, or the equivalent API) and report its
+  URL in your summary — the runtime reads that URL out of your report and hands it
+  on to whoever lands the change, so give the URL itself and not just a number.
 - Merge that pull request once it is green.
 
 The authorization is about your own work and stops at its edge:

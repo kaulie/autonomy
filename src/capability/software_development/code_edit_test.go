@@ -155,6 +155,81 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 	}
 }
 
+// TestCodeEditReportsThePullRequestItsWorkerNames: the URL the worker is asked to
+// report becomes the step's own output, so the next step can be handed a pull
+// request instead of re-reading prose for it (pull_request.review takes it as
+// "pr", and also answers to "pr_url" — see its own test).
+func TestCodeEditReportsThePullRequestItsWorkerNames(t *testing.T) {
+	useRepoPrompt(t)
+	cases := []struct {
+		name    string
+		summary string
+		want    string
+	}{
+		{
+			name:    "plain url in prose",
+			summary: "Opened https://github.com/kaulie/autonomy/pull/87 for review; tests pass.",
+			want:    "https://github.com/kaulie/autonomy/pull/87",
+		},
+		{
+			name:    "markdown link with an anchor",
+			summary: "PR: [the change](https://github.com/kaulie/autonomy/pull/88#discussion_r1) — ready.",
+			want:    "https://github.com/kaulie/autonomy/pull/88",
+		},
+		{
+			name:    "another host and /pulls",
+			summary: "landed as https://git.example.com/team/repo/pulls/12",
+			want:    "https://git.example.com/team/repo/pulls/12",
+		},
+		{
+			name:    "no pull request in the report",
+			summary: "Edited src/a.go and ran the tests; no pull request was opened.",
+			want:    "",
+		},
+		{
+			// Only the URL form counts: a number in prose would have to be guessed
+			// against whichever repository the worker happened to be in.
+			name:    "a reference without a url is not a pull request",
+			summary: "See kaulie/autonomy#87 on the branch fix/thing.",
+			want:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &mockSession{id: "agent-code_edit-1", workspace: "/sandbox/w/", summary: tc.summary}
+			out, err := sd.CodeEdit{Agents: &mockBroker{sess: sess}}.Run(map[string]string{"instruction": "do the thing"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out["pr_url"] != tc.want {
+				t.Fatalf("pr_url=%q, want %q", out["pr_url"], tc.want)
+			}
+			if out["summary"] != tc.summary {
+				t.Fatalf("summary=%q, want the worker's report untouched", out["summary"])
+			}
+		})
+	}
+}
+
+// TestCodeEditDeclaresThePullRequestItReports: the URL is in the declaration too,
+// because that declaration is where a planner decides what it can take from this
+// step — a value only a reader of prose would find is not an output.
+func TestCodeEditDeclaresThePullRequestItReports(t *testing.T) {
+	var found bool
+	for _, f := range (sd.CodeEdit{}).Outputs() {
+		if f.Name != "pr_url" {
+			continue
+		}
+		found = true
+		if f.Description == "" {
+			t.Error("the pr_url output carries no description")
+		}
+	}
+	if !found {
+		t.Fatal("code_edit does not declare a pr_url output")
+	}
+}
+
 // TestCodeEditNeedsNoWorkspaceInput: the delegating agent does not have to supply
 // a workspace at all — the worker's own is the one that counts.
 func TestCodeEditNeedsNoWorkspaceInput(t *testing.T) {
