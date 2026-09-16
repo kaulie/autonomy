@@ -90,6 +90,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	for _, placeholder := range []string{
 		"{{TASK}}", "{{GOAL_TYPE}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}",
 		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}", "{{CONTEXT_ENTITY}}",
+		"{{CONSTRAINTS}}",
 	} {
 		if strings.Contains(prompt, placeholder) {
 			t.Fatalf("%s was not replaced", placeholder)
@@ -110,6 +111,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		"## Goal",
 		"## World",
 		"## Runtime Context",
+		"## Constraints",
 		"## Constructs",
 		"## Decision Cycle 2",
 		`"id": "t1"`,
@@ -118,6 +120,8 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		`"dev_feature"`,
 		`"additional_input"`,
 		`"text": "extra"`,
+		`"constraints"`,
+		`"deploy"`,
 		`"name": "asset.change"`,
 		`"name": "code_edit"`,
 		`"completion_contracts"`,

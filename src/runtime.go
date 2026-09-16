@@ -15,6 +15,11 @@ type Runtime struct {
 	caps   map[string]capability.Capability
 	world  *World
 	agents *AgentFactory
+	// cycle is the decision cycle Execute is running, so a capability can ask
+	// what cycle it is delegating from (see WorkerPlaceholders). Execution is
+	// synchronous — one cycle at a time on the calling goroutine — so this is
+	// that cycle while its actions run, and nil outside one.
+	cycle *DecisionContext
 }
 
 func NewRuntime(agents *AgentFactory, caps ...capability.Capability) *Runtime {
@@ -43,6 +48,11 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 // per action and in order, so the next decision sees what actually happened
 // (previous_actions) and can decide for itself which entry matters.
 func (r *Runtime) Execute(decision Decision) (Result, error) {
+	// The cycle's context is what a capability delegating out of this cycle hands
+	// to its worker (see WorkerPlaceholders). It lives only for this call.
+	r.cycle = &decision.Ctx
+	defer func() { r.cycle = nil }()
+
 	if len(decision.Actions) == 0 {
 		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
@@ -144,6 +154,16 @@ func (s *runtimeAgentSession) Workspace() string {
 		return ""
 	}
 	return s.agent.Workspace
+}
+
+// WorkerPlaceholders lets a capability ask this session's host for the runtime
+// context of the delegation it was acquired for (see
+// broker.WorkerPromptContext): the session speaks for this worker agent.
+func (s *runtimeAgentSession) WorkerPlaceholders() map[string]string {
+	if s == nil || s.rt == nil {
+		return nil
+	}
+	return s.rt.WorkerPlaceholders(s.agent)
 }
 
 // beginDelegatedTrace opens the run header for a prompt this agent received from
