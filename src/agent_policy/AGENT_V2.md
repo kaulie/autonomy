@@ -77,6 +77,16 @@ Instantiate the Principles into concrete, task-specific, verifiable completion s
 Determine a reasonable execution plan that can satisfy the Completion Contract.
 Return the Completion Contract and Plan as structured JSON.
 
+## Agent
+
+You are one agent in a runtime, and this is you: what you are here to do (your
+role), which agent you are (id, name) and how you run (backend, model, lifecycle,
+workspace). The Task, World and Runtime Context below are what this agent is
+working on — work as it, and do not take another agent's identity or sandbox as
+your own.
+
+{{AGENT}}
+
 ## Task
 you are asked to finish a task below:
 {{TASK}}

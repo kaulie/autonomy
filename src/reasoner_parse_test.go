@@ -40,7 +40,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		Status:   "pending",
 	}
 	agent := &Agent{
-		ID: 10001, Name: "agent-10001", Lifecycle: AgentLifecycleEphemeral,
+		ID: 10001, Name: "agent-10001", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral,
 		Backend: AgentBackendCursor, Workspace: "/tmp/ws/",
 	}
 	ctx := DecisionContext{Task: task, Agent: agent, Step: 2}
@@ -69,16 +69,31 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		t.Fatalf("prompt must be frame + delta verbatim")
 	}
 
-	// Per-cycle values (task / context entity / world / runtime context) moved
-	// out of the frame: the frame stays byte-identical for the session, so its
-	// placeholders become a marker and the values travel in the delta.
-	for _, perCycle := range []string{`"id": "t1"`, `"agent-10001"`, `"assets"`, `"additional_input"`} {
+	// Per-cycle values (task / world / runtime context) moved out of the frame:
+	// the frame stays byte-identical for the session, so its placeholders become a
+	// marker and the values travel in the delta.
+	for _, perCycle := range []string{`"id": "t1"`, `"assets"`, `"additional_input"`} {
 		if strings.Contains(frame, perCycle) {
 			t.Fatalf("frame must not carry per-cycle value %s", perCycle)
 		}
 		if !strings.Contains(delta, perCycle) {
 			t.Fatalf("delta missing per-cycle value %s\n%s", perCycle, delta)
 		}
+	}
+	// The agent's own identity is the opposite: it does not change between cycles,
+	// so it belongs to the frame — and the frame is where the agent is told who it
+	// is (role, id, name, how it runs), not only where it is in the task.
+	for _, perSession := range []string{`"agent-10001"`, `"role": "planner"`} {
+		if !strings.Contains(frame, perSession) {
+			t.Fatalf("frame missing the agent's own identity %s\n%s", perSession, frame)
+		}
+		if strings.Contains(delta, perSession) {
+			t.Fatalf("delta repeats the agent's identity %s\n%s", perSession, delta)
+		}
+	}
+	// What does change per cycle — which cycle this is — stays in the delta.
+	if !strings.Contains(delta, `"step": 2`) {
+		t.Fatalf("delta missing this cycle's step\n%s", delta)
 	}
 	if !strings.Contains(frame, reasoningDeltaMarker) {
 		t.Fatalf("frame must mark where the per-cycle values come from")
@@ -88,6 +103,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 
 	for _, placeholder := range []string{
+		"{{AGENT}}",
 		"{{TASK}}", "{{GOAL_TYPE}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}",
 		"{{COMPLETION_PRINCIPLES}}", "{{CONSTRUCTS}}", "{{CONTEXT_ENTITY}}",
 		"{{CONSTRAINTS}}",
@@ -106,6 +122,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		"## Agent",
 		"## Task",
 		"## Context Entity",
 		"## Goal",
