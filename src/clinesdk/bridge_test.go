@@ -139,7 +139,7 @@ func TestWaitAbortsOnContextCancel(t *testing.T) {
 	ctx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	// The fake bridge holds this run open (no events, no result).
-	run, err := agent.Send(ctx, "hang")
+	run, err := agent.Send(ctx, "never answer")
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}

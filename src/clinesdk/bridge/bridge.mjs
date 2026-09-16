@@ -34,7 +34,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
-import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, interactiveSession, messageOf, resolveClineDefaults } from "./config.mjs";
+import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, errorReason, interactiveSession, messageOf, resolveClineDefaults, runResultErrorEvent, withErrorReason } from "./config.mjs";
 import { eventLabel, signalLine, traceLevel, traceWidth } from "./trace.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
@@ -115,12 +115,20 @@ function onCoreEvent(event) {
 	const sessionId = event?.payload?.sessionId ?? null;
 	const agentId = sessionId ? sessionOwners.get(sessionId) ?? null : null;
 	const agent = agentId ? agents.get(agentId) : null;
-	if (agent) noteRunActivity(agent, event?.payload?.event ?? event);
-	traceEvent(event, sessionId, agent);
+	// An error event whose reason the SDK put somewhere else (or nowhere this event
+	// shows) is repaired before it travels: the client stores this event as the
+	// record of the failure, and reads its reason out of `error`.
+	const forwarded = withErrorReason(event);
+	const inner = forwarded?.payload?.event ?? forwarded;
+	// Correlated means the client still has a stream open for this request, which
+	// is what decides whether a reason reaches the stream at all (see send()).
+	const correlated = agent != null && agent.currentRequest != null;
+	if (agent) noteRunActivity(agent, inner, correlated);
+	traceEvent(forwarded, sessionId, agent);
 	write({
 		type: "event",
 		requestId: agent?.currentRequest ?? null,
-		event,
+		event: forwarded,
 		sessionId,
 		agentId,
 	});
@@ -130,8 +138,12 @@ function onCoreEvent(event) {
  * Accumulate what the SDK does not hand back on resume: the assistant text of
  * the turn and the last error. `start()` returns text on the result, `send()`
  * on a resident session does not, so the stream is the source of truth.
+ *
+ * correlated says whether the client still had a stream open for this event: a
+ * reason that arrived outside that window never reached the client, and send()
+ * has to put it into the stream itself (see runResultErrorEvent).
  */
-function noteRunActivity(agent, inner) {
+function noteRunActivity(agent, inner, correlated = false) {
 	if (!agent || !inner) return;
 	if (agent.firstEventAt == null) {
 		agent.firstEventAt = Date.now();
@@ -152,8 +164,11 @@ function noteRunActivity(agent, inner) {
 	}
 	if (type === "error") {
 		// The SDK may report a structured error; the Go client decodes this field as
-		// text, so flatten it here.
-		agent.lastError = messageOf(inner.error ?? inner.message, "agent run failed");
+		// text, so flatten it here. The reason may sit in an empty `error` object
+		// with the message beside it, which `??` would prefer — errorReason knows.
+		const reason = errorReason(inner, "agent run failed");
+		agent.lastError = reason;
+		if (correlated && reason !== "") agent.streamedError = reason;
 	}
 }
 
@@ -310,6 +325,7 @@ async function send(params, requestId) {
 	const mode = normalizeMode(params.mode ?? agent.mode);
 	agent.text = "";
 	agent.lastError = null;
+	agent.streamedError = "";
 
 	let res;
 	try {
@@ -366,6 +382,21 @@ async function send(params, requestId) {
 	agent.lastUsage = accumulated ?? agent.lastUsage;
 	agent.cumulativeUsage = normalizeUsage(accumulated ?? undefined);
 	const summary = summarize(agent, res, usageSource || undefined);
+	// A reason that only the run result knows has to reach the stream here, inside
+	// this request's window: the failure is often the run's very last event, and an
+	// event that arrives after this window closes is dropped by the client — which
+	// would leave the stream saying nothing ever went wrong.
+	const failed = summary.status !== "finished" || summary.lastError != null;
+	const tail = failed ? runResultErrorEvent(summary.lastError, agent.streamedError) : null;
+	if (tail) {
+		write({
+			type: "event",
+			requestId,
+			agentId: agent.agentId,
+			sessionId: agent.sessionId,
+			event: { type: "agent_event", payload: { sessionId: agent.sessionId, event: tail } },
+		});
+	}
 	agent.text = "";
 	return summary;
 }

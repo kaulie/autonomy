@@ -57,6 +57,55 @@ export function resolveClineDefaults({ env = process.env, home = os.homedir(), r
 }
 
 /**
+ * errorReason reads the reason out of a provider error event, where the SDK does
+ * not always put it: an out-of-credit account can end a run with
+ * `{ type: "error", error: {} }` while the message travels beside it, and a
+ * present-but-empty `error` object must not shadow that message (`??` would).
+ *
+ * Returns `fallback` when the event says nothing, so a caller can tell "no reason
+ * was reported" from a reason of its own.
+ */
+export function errorReason(inner, fallback = "") {
+	const structured = messageOf(inner?.error, "");
+	if (structured !== "") return structured;
+	const beside = messageOf(inner?.message, "");
+	if (beside !== "") return beside;
+	return fallback;
+}
+
+/**
+ * withErrorReason returns an error event with its reason put back where a reader
+ * looks for it (`error.message`). The client stores this event as the record of
+ * the failure, so an error event whose reason the SDK left elsewhere is worth
+ * repairing before it travels. A non-error event, or one that already carries its
+ * reason, is returned unchanged (the same object, so a caller can compare).
+ */
+export function withErrorReason(event) {
+	const inner = event?.payload?.event ?? event;
+	if (!inner || inner.type !== "error") return event;
+	const reason = errorReason(inner, "");
+	if (reason === "" || messageOf(inner.error, "") === reason) return event;
+	const carried = typeof inner.error === "object" && inner.error !== null ? inner.error : {};
+	const repaired = { ...inner, error: { ...carried, message: reason } };
+	return event?.payload?.event ? { ...event, payload: { ...event.payload, event: repaired } } : repaired;
+}
+
+/**
+ * runResultErrorEvent builds the error event for a run whose reason only reached
+ * the run result: the SDK reports the failure as the run's last event, which can
+ * land after send() resolved — and the client's stream is keyed to the request, so
+ * an event that arrives outside that window is dropped. The result is the record
+ * that survives, and this event makes the stream agree with it.
+ *
+ * Returns null when the stream already carries that reason, or when there is none.
+ */
+export function runResultErrorEvent(reason, streamedReason, fallback = "agent run failed") {
+	const text = messageOf(reason, "") || fallback;
+	if (messageOf(streamedReason, "") === text) return null;
+	return { type: "error", error: { message: text }, source: "run_result", recoverable: false };
+}
+
+/**
  * coerceText renders a provider value as text: strings pass through, numbers and
  * booleans become their literal form, objects/arrays become compact JSON, and
  * null/undefined become "". The SDK occasionally hands back a non-string where a
