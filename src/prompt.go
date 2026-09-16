@@ -337,7 +337,11 @@ func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any
 // The worker's own identity — its agent, workspace and backend, never the
 // delegating agent's — is its own section ({{AGENT}}), not this one.
 func workerRuntimeContextJSON(ctx DecisionContext) []byte {
-	// A worker has no decision cycle of its own, so it is rendered without a step.
+	// The worker's prompt describes the task's situation, not its own: the cycle it
+	// is rendered without is the *delegating task's* decision cycle (this worker is
+	// not a step of that sequence — it was hired for one job). The worker's own
+	// interaction round is recorded on its run header, where cycle counts rounds
+	// with its own LLM (see beginDelegatedTrace).
 	workerCtx := ctx
 	workerCtx.Cycle = 0
 	m := runtimeContextMap(workerCtx, ReasoningInput{})

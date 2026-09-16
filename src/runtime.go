@@ -142,6 +142,11 @@ type runtimeAgentSession struct {
 	rt     *Runtime
 	agent  *Agent
 	taskID string
+	// round counts the prompts this session has sent: cycle is the interaction
+	// round with this agent's LLM (1, 2, …), which is what the run header records
+	// for a worker as well as for a planner. A session is prompted sequentially —
+	// a capability asks and waits — so a plain counter is enough.
+	round int
 }
 
 func (s *runtimeAgentSession) ID() string {
@@ -174,8 +179,13 @@ func (s *runtimeAgentSession) WorkerPlaceholders() map[string]string {
 // another agent (a capability delegating a sub-task to it), so the recorded input
 // row is attributed to the agent that delegated rather than to the user: the user
 // only authors the top-level task.
+//
+// Its cycle is this session's interaction round (1 for the first prompt), not the
+// delegating task's decision cycle: cycle counts rounds with an LLM, and this
+// worker is having its own conversation with its own LLM.
 func (s *runtimeAgentSession) beginDelegatedTrace(prompt string) *LLMTrace {
-	return BeginLLMTraceFrom(s.agent, LLMMessageRoleAgent, s.taskID, 0, ReasonModeAgent, prompt)
+	s.round++
+	return BeginLLMTraceFrom(s.agent, LLMMessageRoleAgent, s.taskID, s.round, ReasonModeAgent, prompt)
 }
 
 func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string, error) {
@@ -205,11 +215,14 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 // recordAgentPrompt persists a complete agent-mode interaction in one shot. It
 // is retained for callers that already hold the final output; live provider
 // runs record through BeginLLMTrace so the stream is captured as it happens.
+//
+// cycle is 1: cycle counts interaction rounds with an LLM, and this is the first
+// (and, for a one-shot recording, only) round of that agent's conversation.
 func recordAgentPrompt(agent *Agent, taskID, input, output string) {
 	if agent == nil {
 		return
 	}
-	recordReasonTurn(agent, taskID, 0, ReasonModeAgent, input, output)
+	recordReasonTurn(agent, taskID, 1, ReasonModeAgent, input, output)
 }
 
 func (s *runtimeAgentSession) Release(ctx context.Context) error {

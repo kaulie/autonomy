@@ -28,11 +28,16 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 ## 术语：cycle 与 step
 
-- **cycle**：一次**决策轮**（第几个 decide）。LLM 侧记录的就是它，所以 `reason_turns` / `llm_messages` 的列叫
-  `cycle`（历史名 `step` 已重命名 —— 一个词不能指两件事）。`Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的
-  也是 cycle（名字是历史包袱，语义以本文为准）。
-- **step**：一个**执行步** —— 一份 plan 里的一次能力调用；运行时的执行记录（计划 `execution_step_plan` /
-  实际执行 `execution_step`）用的才是这个词。凡是指「第几轮」的地方一律说 cycle，不说 step。
+- **cycle**：**和某个 LLM 的交互轮次** —— 一次 prompt → reply 算一轮，同一个 session 内递增（1、2、…）。
+  planner 的 cycle 就是它的决策轮（每个 task 尝试一个新 session）；被委托的 worker 的 cycle 是**它自己那个 session**
+  的交互轮次（第一个 prompt 就是 1），不是委托方 task 的决策轮，也不是 0 —— 它确实和它的 LLM 交互了。
+  落库就是 `reason_turns.cycle` / `llm_messages.cycle`（历史名 `step` 已重命名，一个词不能指两件事）。
+  `Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的是 planner 的 cycle（名字是历史包袱，语义以本文为准）。
+- **step**：**一次 plan 生成的具体行动步骤** —— planner 返回的 plan 里，每个 step 就是一次能力调用
+  （`plan.steps[]`）。运行时的执行记录用的才是这个词：计划 `execution_step_plan`（执行前一次性写全）与实际执行
+  `execution_step`（跑一步写一行）。
+
+凡指「和 LLM 的第几轮」说 **cycle**，凡指「这份 plan 里的第几个动作」说 **step**。
 
 ## 职责边界
 

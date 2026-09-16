@@ -43,7 +43,72 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	}
 }
 
-// TestRuntimeAcquireAgentKnowsWhatItIsFor: an acquired agent is a worker, and the
+// TestADelegatedWorkerCycleCountsItsOwnInteractionRounds: cycle is the round with
+// an LLM, and a worker is having its own conversation — its first prompt is cycle
+// 1, its second cycle 2. It is not the delegating task's decision cycle, and it is
+// not 0 either: the worker did interact.
+func TestADelegatedWorkerCycleCountsItsOwnInteractionRounds(t *testing.T) {
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	t.Cleanup(func() { _store = prev })
+	_store = store
+
+	rt := NewRuntime(NewAgentFactory())
+	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
+		Purpose: "code_edit",
+		TaskID:  "task-9",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sess.Release(context.Background()) }()
+
+	for i := 1; i <= 2; i++ {
+		if _, err := sess.Prompt(context.Background(), "hello"); err != nil {
+			t.Fatalf("prompt %d: %v", i, err)
+		}
+	}
+
+	rows, err := store.db.Query(`SELECT id, cycle, mode FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var cycles []int
+	var turnIDs []int64
+	for rows.Next() {
+		var id int64
+		var cycle int
+		var mode string
+		if err := rows.Scan(&id, &cycle, &mode); err != nil {
+			t.Fatal(err)
+		}
+		if mode != string(ReasonModeAgent) {
+			t.Errorf("mode=%q, want %q", mode, ReasonModeAgent)
+		}
+		cycles = append(cycles, cycle)
+		turnIDs = append(turnIDs, id)
+	}
+	if len(cycles) != 2 || cycles[0] != 1 || cycles[1] != 2 {
+		t.Fatalf("cycles=%v, want the worker's own interaction rounds [1 2]", cycles)
+	}
+	// The messages of a run carry the same cycle, so the round is readable per row.
+	messages, err := store.ListLLMMessages(turnIDs[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 || messages[0].Cycle != 2 {
+		t.Fatalf("messages=%+v, want cycle 2 on the second round's rows", messages)
+	}
+}
+
 // purpose the capability named is what the agent's own prompt says it is (## Agent
 // — "role", "purpose"). The agent the runtime creates for a task is the other
 // kind: its planner.
