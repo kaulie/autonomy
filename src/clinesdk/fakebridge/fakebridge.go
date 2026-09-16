@@ -127,6 +127,22 @@ func Main() {
 					"text": "slow but alive", "finishReason": "completed", "usageSource": "run",
 					"usage": map[string]any{"inputTokens": 7, "outputTokens": 3, "totalTokens": 10, "costUsd": 0.00001},
 				})
+			case strings.Contains(prompt, "out of balance"):
+				// A provider that ends the run as "finished" while having answered
+				// nothing at all: an exhausted account does exactly this, after a long
+				// think. The client must not call that a finished run.
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_start", "contentType": "reasoning", "reasoning": "thinking", "redacted": false,
+				})
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "error", "error": map[string]any{}, "errorClass": "unknown",
+					"iteration": 2, "recoverable": false,
+				})
+				result(req.ID, map[string]any{
+					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "finished",
+					"text": "", "finishReason": "completed",
+					"lastError": map[string]any{"code": "", "message": "Insufficient Balance"},
+				})
 			case strings.Contains(prompt, "fail me"):
 				// The real bridge forwarded a structured error here, which broke the client;
 				// keep that shape so the tolerant decoder stays covered end to end.

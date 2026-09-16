@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -513,5 +514,66 @@ func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
 	}
 	if len(events) != 2 || events[1].Kind != LLMKindToolCallCompleted {
 		t.Fatalf("events=%+v want the kind to round-trip", events)
+	}
+}
+
+// TestSQLiteStoreMigratesTaskError: a database whose tasks table predates the
+// error column is migrated in place. The rows it already has say nothing about
+// why they failed — they never had anywhere to say it — and a new failure
+// round-trips its reason.
+func TestSQLiteStoreMigratesTaskError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pre-error schema: every column except error.
+	_, err = db.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY,
+		description TEXT NOT NULL DEFAULT '',
+		domain TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
+		agent_id INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO tasks (id, description, domain, status, agent_id, created_at, updated_at)
+		VALUES ('task-old', 'a failed task', '', 'error', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer store.Close()
+
+	var status, reason string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = 'task-old'`).Scan(&status, &reason); err != nil {
+		t.Fatalf("read migrated row: %v", err)
+	}
+	if status != "error" || reason != "" {
+		t.Fatalf("migrated row status/error=%q/%q, want the old row with no reason", status, reason)
+	}
+
+	const failing = "decide: empty model response (status=finished msg=Insufficient Balance)"
+	if err := store.UpsertTask(&Task{ID: "task-new", Description: "d", Status: "error", Error: failing}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.UpsertTask(&Task{ID: "task-new", Description: "d", Status: "error", Error: failing + " again"}); err != nil {
+		t.Fatalf("upsert again: %v", err)
+	}
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = 'task-new'`).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reason, "Insufficient Balance") || !strings.HasSuffix(reason, "again") {
+		t.Fatalf("tasks.error=%q, want the latest failure to round-trip", reason)
 	}
 }

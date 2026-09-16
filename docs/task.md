@@ -26,6 +26,11 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 
 其中 **Goal** 与 **Completion Contract** 构成 Task 的核心。
 
+**运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点（`running` / `completed` /
+`error`），`error` 是**为什么**——这一轮 decide 失败（`decide: ...`），或最后一个 cycle 里失败的 action 及其
+原因。两者都只在「记下结果」时写，不在起跑时写：一行只在真的有结果时才改口。这样一次失败不会随进程退出而
+消失（此前只有终端上那行，库里只留一个 `status=error`）。
+
 ## 关系
 
 - Task → [Context](context.md)：获得世界信息

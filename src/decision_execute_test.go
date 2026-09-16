@@ -179,4 +179,62 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	if turns != 2 {
 		t.Fatalf("reason_turns=%d, want 2 (the loop must decide again after a failed cycle)", turns)
 	}
+
+	// The row says why, not only that: the terminal that printed the failure is
+	// not a record anyone can look at later.
+	var status, reason string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "error" {
+		t.Fatalf("status=%q want error", status)
+	}
+	if !strings.Contains(reason, "asset.change: missing target") {
+		t.Fatalf("tasks.error=%q, want the failing cycle's own reason", reason)
+	}
+}
+
+// TestRunRecordsWhyItCouldNotDecide: when a task cannot even be planned there is
+// nothing else to explain the failure — the reason the decide could not happen is
+// the whole of it, and it has to reach the row.
+func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {
+	// The session attaches (so the run gets as far as deciding); the prompt cannot
+	// be built, which is what a deployment missing its agent policy looks like.
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "llm")
+	t.Setenv("PROJECT_ROOT", "")
+
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prevStore, prevAuto, prevFlag := _store, _autonomy, bootstrapFlag
+	t.Cleanup(func() { _store, _autonomy, bootstrapFlag = prevStore, prevAuto, prevFlag })
+	_store = store
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f, Store: store}
+	bootstrapFlag = true
+
+	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
+	task := &Task{ID: "t-no-decide", Description: "d", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	err = rt.Run(task)
+	if err == nil || !strings.Contains(err.Error(), "decide:") {
+		t.Fatalf("Run=%v, want the decide to have failed", err)
+	}
+
+	var status, reason string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "error" {
+		t.Fatalf("status=%q want error", status)
+	}
+	for _, want := range []string{"decide:", "PROJECT_ROOT"} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("tasks.error=%q, want it to name %q", reason, want)
+		}
+	}
 }

@@ -13,10 +13,15 @@ type Task struct {
 	Domain      TaskDomain
 	GoalType    GoalType
 	Status      string
-	AgentID     int64 // current agent responsible for executing this task
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ContextRef  map[ContextContainerType]string // context references
+	// Error is why this task ended in status "error": the runtime's own reason —
+	// a decide that failed, or the last cycle's failing action. It is recorded so
+	// the failure outlives the process that printed it (`tasks.error`): a row that
+	// says "error" and nothing else cannot be diagnosed later.
+	Error      string
+	AgentID    int64 // current agent responsible for executing this task
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	ContextRef map[ContextContainerType]string // context references
 }
 
 type TaskDomain string

@@ -134,9 +134,11 @@ func (r *Autonomy) Run(task *Task) error {
 		}
 		decision, err = agent.DecideAtStep(steps, history)
 		if err != nil {
-			task.Status = "error"
-			persistTask(task)
-			return fmt.Errorf("decide: %w", err)
+			// Nothing was planned, so nothing else can explain it: the reason it
+			// could not decide is the whole failure.
+			err = fmt.Errorf("decide: %w", err)
+			failTask(task, err)
+			return err
 		}
 		// A failed action stops this cycle, not the task: the failure is observed
 		// and handed to the next decision (see executeDecision).
@@ -149,13 +151,32 @@ func (r *Autonomy) Run(task *Task) error {
 	// fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 	if task.Status == "running" || task.Status == "pending" {
 		if err != nil {
-			task.Status = "error"
+			failTask(task, err)
 		} else {
 			task.Status = "completed" //completed not means success, it means the task is completed
+			persistTask(task)
 		}
-		persistTask(task)
 	}
 	return err
+}
+
+// failTask ends the task in error, with the reason the runtime gave up on it —
+// the decide that failed, or the last cycle's failing action. Both used to be
+// printed and thrown away: a task row said "error" and nothing said why, so the
+// only account of the failure was the terminal it happened in.
+//
+// The row describes the attempt that recorded an outcome: it is written here and
+// where a task completes, not when a run starts, so an unrecorded run cannot
+// leave a row claiming an outcome it never had.
+func failTask(task *Task, err error) {
+	if task == nil {
+		return
+	}
+	task.Status = "error"
+	if err != nil {
+		task.Error = err.Error()
+	}
+	persistTask(task)
 }
 
 // finishAgent stops the agent and tears down the Cursor SDK session.

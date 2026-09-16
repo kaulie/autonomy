@@ -151,6 +151,32 @@ func TestPromptLLMStreamSwitchesSessionMode(t *testing.T) {
 	}
 }
 
+// TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure: a provider can end a run as
+// "finished" while having answered nothing at all — an exhausted account does,
+// after a long think. That run is a failure, and the row has to say so, or the
+// only account of it is the message it carried.
+func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
+	installFakeClineClient(t)
+	agent := newClineTestAgent(t)
+
+	text, meta, err := agent.PromptLLMStream(context.Background(), "out of balance", ReasonModeAgent, nil)
+	if err == nil {
+		t.Fatalf("an empty answer was reported as a run: text=%q meta=%+v", text, meta)
+	}
+	for _, want := range []string{"empty model response", "status=finished", "Insufficient Balance"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err.Error(), want)
+		}
+	}
+	if meta.Status != LLMStatusError {
+		t.Errorf("status=%q want error: an empty answer is not a finished run", meta.Status)
+	}
+	// What the provider said is kept: it is the only reason there is.
+	if !strings.Contains(meta.ErrorMessage, "Insufficient Balance") {
+		t.Errorf("error message=%q, want the provider's own", meta.ErrorMessage)
+	}
+}
+
 func TestPromptLLMStreamReportsProviderErrors(t *testing.T) {
 	installFakeClineClient(t)
 	agent := newClineTestAgent(t)
