@@ -54,7 +54,7 @@ func TestParseDecisionRegisteredCapability(t *testing.T) {
 	if !ok {
 		t.Fatalf("action type %T", decision.Actions[0])
 	}
-	if ca.Name != "code_edit" || ca.Input["instruction"] != "add feature" {
+	if ca.Name != "code_edit" || ca.Inputs["instruction"].Literal != "add feature" {
 		t.Fatalf("action=%+v", ca)
 	}
 }

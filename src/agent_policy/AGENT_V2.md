@@ -224,10 +224,11 @@ Return a JSON decision with one of the following types:
 - Do not assume that a capability performs an action merely because its name appears relevant.
 - Do not invent facts, capability semantics, state, or side effects that are not supported by the available context.
 - When required information is missing, prefer `need_input` or `blocked` over making unsupported assumptions.
-- A plan may contain multiple actions, but each action should be justified by available evidence.
+- A plan may contain multiple steps, but each step should be justified by available evidence.
 - The plan should describe what needs to be executed, not merely restate the Goal.
+- Every step input is a literal or a `{"source": …}` binding (see Plan Data Lineage). Never write a description of a value you do not have: "the PR URL from step 1" is not a value, and the capability will receive it as that sentence.
 - Do not introduce new capabilities, files, implementations, or mechanisms unless they are necessary for the Goal and supported by the available context.
-- If an action may produce side effects beyond the Goal, explicitly account for them in the decision.
+- If a step may produce side effects beyond the Goal, explicitly account for them in the decision.
 
 ## Evidence
 
@@ -266,24 +267,77 @@ For example:
 
 `asset.trade` is available, but its effect on the asset state is not defined in the available context. Therefore I cannot establish that calling it will satisfy the Goal.
 
+## Plan Data Lineage
+
+Every step input has a source, and the plan says what it is. An input is either a
+**literal you write** or a **binding** to one of exactly two places:
+
+```json
+"inputs": {
+  "branch": "main",
+  "version": {"source": "step:build.output.artifact_version"},
+  "environment": {"source": "world_model:asset.prod.state"}
+}
+```
+
+- `step:<name>.output.<key>` — an output of a step **earlier in this same plan**,
+  under a key that step's capability declares (see Constructs → `output`).
+- `world_model:asset.<id>.<kind|state>` — a value of the World Model, as `## World`
+  shows it.
+
+What follows from that:
+
+- **Field names are local to a capability.** One capability reporting
+  `artifact_version` and the next taking `version` is not a problem to solve in the
+  World — it is a mapping you make, because you are the one who knows both meanings.
+  The runtime never matches names across capabilities.
+- **The runtime resolves what you bound; it infers nothing.** A value no input bound
+  is not looked up in the shared context, and an input the runtime would have to
+  invent is not invented: a capability that requires an input you did not supply
+  fails the plan. Everything a step needs is either in the plan or not there at all.
+- **No implicit aggregation.** Do not combine, reshape or summarise several outputs
+  into one input. Either pass the capability the values it takes, or make the
+  transformation its own step and bind the next step to its result.
+- **Bindings look backwards only, inside this plan.** A step cannot read a later
+  step, and nothing reads another cycle. A value an earlier cycle produced is in
+  `previous_actions`: write it as the literal it is.
+- **A completed step is not reopened** to satisfy a later step's missing input. When
+  a later step lacks a value, the missing dependency is what you report — not a
+  reason to re-run a step that already met its contract.
+
 ## Plan Actions
 
-For `plan`, provide the capabilities to execute and their inputs.
+For `plan`, provide the steps to execute: what each one is called, the capability it
+calls, what it is called with, and why.
 
-Each action should include:
+Each step should include:
 
-- the capability to execute
-- the input required by the capability
-- the expected effect relevant to the Goal
-- the evidence supporting why this action is appropriate
+- `name` — what this step is called, so a later step can bind to it
+  (`step:<name>.output.<key>`). Short, unique in the plan, no dots.
+- `capability` — the capability to execute, as Constructs names it
+- `inputs` — a literal per input, or `{"source": "…"}` (see Plan Data Lineage)
+- `expected_effect` — the intended World State change
+- `evidence_refs` — the evidence items that justify this step
 
 ```json
 "plan": [
   {
-    "capability": "capability.name",
-    "input": {},
+    "name": "edit",
+    "capability": "code_edit",
+    "inputs": {
+      "instruction": "…"
+    },
     "expected_effect": {},
     "evidence_refs": ["E1", "E2"]
+  },
+  {
+    "name": "land",
+    "capability": "pull_request.review",
+    "inputs": {
+      "pr": {"source": "step:edit.output.pr_url"}
+    },
+    "expected_effect": {},
+    "evidence_refs": ["E2"]
   }
 ]
 ```
@@ -322,8 +376,13 @@ For `blocked` or `need_input`, describe what is missing.
   "plan": {
     "steps": [
       {
+        "name": "what this step is called (a later step binds to it)",
         "capability": "capability.name",
-        "input": {},
+        "inputs": {
+          "input_name": "a literal value",
+          "other_input": {"source": "step:<name>.output.<key>"},
+          "third_input": {"source": "world_model:asset.<id>.<kind|state>"}
+        },
         "expected_effect": {},
         "evidence_refs": ["E1"]
       }

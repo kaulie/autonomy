@@ -50,6 +50,41 @@ func TestThePlannerPolicyDispatchesOnCapabilities(t *testing.T) {
 	}
 }
 
+// The planner dispatches on capabilities, and binds every step input to a source:
+// the two rules that replaced "an agent will figure it out". They are pinned here
+// because the policy is what the planner reads, so its wording is the contract.
+func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
+	policy := readShippedPolicy(t, "AGENT_V2.md")
+
+	for _, want := range []string{
+		"## Plan Data Lineage",
+		"step:<name>.output.<key>",
+		"world_model:asset.<id>.<kind|state>",
+		"No implicit aggregation",
+		"Never write a description of a value you do not have",
+	} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("the planner policy no longer says %q", want)
+		}
+	}
+	// The shape it must not fall back into: a step whose input is a bare object with
+	// no source, or a plan that hands work to a step without saying what it reads.
+	for _, unwanted := range []string{
+		`"capability": "capability.name",\n        "input": {}`,
+		"the input required by the capability",
+	} {
+		if strings.Contains(policy, unwanted) {
+			t.Errorf("the planner policy still describes the old step shape: %q", unwanted)
+		}
+	}
+	// And the schema it shows must be the one the runtime reads.
+	for _, want := range []string{`"name":`, `"inputs":`, `{"source": "step:<name>.output.<key>"}`} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("the planner policy's schema no longer shows %q", want)
+		}
+	}
+}
+
 // The worker prompt is the other side of the same line: it belongs to a
 // capability the runtime acquired an agent for, and it must still be the agent's
 // own identity and sandbox — not a plan that names agents.

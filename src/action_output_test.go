@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kaulie/autonomy/src/capability"
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 // fakeCapability stands in for a real one (code_edit, asset.change, …) and reports
@@ -28,20 +29,40 @@ func (c *fakeCapability) Run(in map[string]string) (map[string]string, error) {
 	return c.out, c.err
 }
 
-func withFakeCapability(t *testing.T, c *fakeCapability) {
+// withFakeCapability points the package at a factory holding these capabilities, so
+// a test can drive Runtime.Execute with its own.
+func withFakeCapability(t *testing.T, caps ...capability.Capability) {
 	t.Helper()
 	prev := _autonomy
 	f := capability.NewFactory()
-	f.Register(c)
+	for _, c := range caps {
+		f.Register(c)
+	}
 	_autonomy = &Autonomy{CapabilityFactory: f}
 	t.Cleanup(func() { _autonomy = prev })
 }
 
+// declaredCapability is a fake that also declares its call shape, so the runtime's
+// declared-input rules apply to it: the task id it declares is filled, and the
+// instruction it does not declare is not invented (src/action.go).
+type declaredCapability struct {
+	fakeCapability
+	inputs  []spec.Field
+	outputs []spec.Field
+}
+
+func (c *declaredCapability) Inputs() []spec.Field  { return c.inputs }
+func (c *declaredCapability) Outputs() []spec.Field { return c.outputs }
+
 // TestCapabilityOutputReachesTheCycleResult: an action hands its capability's
 // output to the cycle result, which is what the next decision reads as
-// previous_actions -> output.
+// previous_actions -> output. The input it records is what the plan bound plus the
+// runtime metadata the capability declares — nothing is invented for it.
 func TestCapabilityOutputReachesTheCycleResult(t *testing.T) {
-	fake := &fakeCapability{name: "fake", out: map[string]string{"status": "ok", "summary": "renamed the events"}}
+	fake := &declaredCapability{
+		fakeCapability: fakeCapability{name: "fake", out: map[string]string{"status": "ok", "summary": "renamed the events"}},
+		inputs:         []spec.Field{{Name: "task_id", Description: "the task this work belongs to"}},
+	}
 	withFakeCapability(t, fake)
 
 	rt := NewRuntime(NewAgentFactory())
@@ -49,7 +70,7 @@ func TestCapabilityOutputReachesTheCycleResult(t *testing.T) {
 	result, err := rt.Execute(Decision{
 		Type:    "plan",
 		Ctx:     DecisionContext{Task: task},
-		Actions: []Action{CapabilityAction{Name: "fake", Input: map[string]string{}}},
+		Actions: []Action{CapabilityAction{Name: "fake", Inputs: map[string]StepInput{}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,10 +82,14 @@ func TestCapabilityOutputReachesTheCycleResult(t *testing.T) {
 	if record.Capability != "fake" {
 		t.Fatalf("record.Capability=%q", record.Capability)
 	}
-	// The record keeps the input the capability was actually called with (task
-	// defaults included) and its output verbatim.
-	if record.Input["task_id"] != "task-1" || record.Input["instruction"] != "standardise events" {
-		t.Fatalf("record.Input=%v, want the effective input", record.Input)
+	// The record keeps the input the capability was actually called with: the task
+	// id it declares, and nothing else — an input no step bound is not invented, so
+	// the task description does not become an instruction here anymore.
+	if record.Input["task_id"] != "task-1" {
+		t.Fatalf("record.Input=%v, want the declared task id", record.Input)
+	}
+	if _, ok := record.Input["instruction"]; ok {
+		t.Fatalf("record.Input=%v, want no instruction invented for a capability that did not bind one", record.Input)
 	}
 	if record.Output["summary"] != "renamed the events" || record.Output["status"] != "ok" {
 		t.Fatalf("record.Output=%v, want the capability's own output", record.Output)

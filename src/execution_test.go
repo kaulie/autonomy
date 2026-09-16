@@ -321,7 +321,7 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 	result, err := rtu.Execute(Decision{
 		Type:    "plan",
 		Reason:  "hand the work to a coding agent",
-		Actions: []Action{CapabilityAction{Name: "code_edit", Input: map[string]string{"instruction": "do the thing"}}},
+		Actions: []Action{CapabilityAction{Name: "code_edit", Inputs: literalInputs(map[string]string{"instruction": "do the thing"})}},
 		Ctx:     executionContext(),
 	})
 	if err != nil {

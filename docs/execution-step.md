@@ -33,6 +33,41 @@ execution_step_interaction(id, step_id, seq, kind, provider, reason_turn_id, cre
                            UNIQUE(step_id, seq))
 ```
 
+## 计划的数据来源（Plan Data Lineage）
+
+step 的每个入参都有**来源**，而且写在计划里：要么是 planner 写的**字面量**，要么是一个**绑定**，只认两种：
+
+```
+step:<name>.output.<key>          同一计划里更早那个 step 的输出（key 必须是它声明过的 output）
+world_model:asset.<id>.<kind|state>  World Model 的一个值（就是 ## World 里看到的那个资产）
+```
+
+- **能力之间的字段名各自为政、不做全局统一**：`code_edit` 报 `pr_url`、`pull_request.review` 收 `pr`（别名 `pr_url`），
+  "A 的 `artifact_version` 就是 B 的 `version`" 这种**语义映射是 planner 的判断**，runtime 从不跨能力猜名字。
+- **runtime 只做搬运**：绑定解析成值、值传给能力、缺的来源报出来。它**不**去共享 Context 里找键、不覆盖、不取"最新值"、
+  也不替 planner 编一个入参——能力声明为 `Required` 的入参没给，**计划直接不成立**（见《五条规矩》第 1 条）。
+- **不做隐式聚合/变换**：计划不得把多个输出揉成一个入参。要组合就（a）把需要的那几个值都传给能力，或（b）把变换做成**一个显式 step**，下一步绑定它的输出。
+- **绑定只能往前看、只在本计划内看**：不能引用后面的 step，也不跨 cycle。上一轮产出的值在 `previous_actions` 里，planner 把它**作为字面量**写进来。
+- **不因为后续步骤缺输入而重开已完成的 step**：缺依赖就报缺依赖（`previous_actions` 里能看到原因），而不是把已经满足 contract 的步骤再跑一遍。
+- **runtime 自己只补一个入参：`task_id`**，而且只补给它**声明过** `task_id` 的能力（`code_edit` 用它把 worker 的 run 归属到这条 Task）。
+  其余一切——包括 `instruction`——都必须来自计划：以前 runtime 会拿任务描述兜底，现在不兜了（那正是"隐式来源"）。
+
+**两类行各存一半**（这正是 plan 行与 step 行分工的用处）：
+
+| 行 | `input` 存什么 |
+|---|---|
+| `execution_step_plan`（计划，执行前写） | **planner 原始入参**：字面量按原样，绑定按 `{"source":"…"}` 原样 |
+| `execution_step`（执行记录） | **实际调用入参**：绑定已解析成真值 |
+
+**校验在计划写之前**（`src/plan_lineage.go`，`Runtime.Execute` 第一件事）：
+
+- 绑定的语法、目标 step 是否存在且在**更前**、`key` 是否是那个 step 能力的**已声明 output**；
+- step 名唯一、可寻址（无点号）；
+- 每个 step 的入参键都是该能力**声明过**的（含别名）——打错的名字是拼写错误，不是值；
+- 能力 `Required` 的入参都被供给。
+
+任一条不成立 → **这一轮的计划不写、不执行**，错误里带 step 名与入参名（planner 下一轮据此改）。
+
 ## 五条规矩
 
 1. **计划是权威，写失败就不执行**：`Runtime.Execute` 先写计划头 + **全部**计划 step（一个事务），成功之后才允许跑第一个 action。计划写不下去（如存储故障）→ 该轮直接失败，**任何 step 都不跑**。
@@ -118,4 +153,5 @@ select i.seq, i.kind, i.provider, i.reason_turn_id, r.status
 | Store 契约 | `src/store.go`（`CreateExecutionPlan` / `AppendExecutionStepPlans` / `AppendExecutionStep` / `AppendExecutionStepInteraction` / `ExecutionPlanOutcome` …） |
 | sqlite 实现 | `src/sqlite_execution.go`（DDL 在 `src/sqlite_store.go`） |
 | 写序（先计划、后执行） | `src/runtime.go`（`Execute` / `recordPlan` / `recordStep`） |
+| 入参来源（值与绑定） | `src/plan_input.go`（`StepInput` / 绑定语法）、`src/plan_lineage.go`（校验与解析）、`src/action.go`（解析后调用能力） |
 | 追溯来源 | `src/llm_trace.go`（`Origin`）、`src/reasoner.go`、`src/decision.go`（`DecisionOrigin`） |

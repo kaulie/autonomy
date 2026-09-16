@@ -629,7 +629,7 @@ func TestParseDecisionRealPlannerPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("action type %T", decision.Actions[0])
 	}
-	if action.Name != "code_edit" || action.Input["instruction"] != "standardise the pipeline event names" {
+	if action.Name != "code_edit" || action.Inputs["instruction"].Literal != "standardise the pipeline event names" {
 		t.Fatalf("action=%+v", action)
 	}
 	if action.ExpectedEffect != "the worker renames the events and opens a PR" {
@@ -650,5 +650,69 @@ func TestParseDecisionRealPlannerPayload(t *testing.T) {
 	}
 	if len(decision.Presentation) != 1 || decision.Presentation[0].Type != "summary" || decision.Presentation[0].Content == "" {
 		t.Fatalf("presentation=%+v", decision.Presentation)
+	}
+}
+
+// TestParseDecisionReadsStepNamesAndBindings: a plan step says what it is called and
+// where each input comes from (AGENT_V2 §Plan Data Lineage), and a binding the
+// runtime cannot read fails the plan instead of arriving as text.
+func TestParseDecisionReadsStepNamesAndBindings(t *testing.T) {
+	// The plan's capabilities have to be registered, or the steps become
+	// NothingActions and there is nothing to assert about their inputs.
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	prev := _autonomy
+	_autonomy = &Autonomy{CapabilityFactory: f}
+	t.Cleanup(func() { _autonomy = prev })
+
+	text := "```json\n" + `{
+  "goal_type": "dev_feature",
+  "type": "plan",
+  "reason": "land what the edit produced",
+  "plan": {
+    "steps": [
+      {
+        "name": "edit",
+        "capability": "code_edit",
+        "inputs": {"instruction": "rename the events", "task_id": {"source": "world_model:asset.repo.kind"}},
+        "evidence_refs": ["E1"]
+      },
+      {
+        "name": "land",
+        "capability": "pull_request.review",
+        "inputs": {"pr": {"source": "step:edit.output.pr_url"}, "method": "squash"}
+      }
+    ]
+  }
+}` + "\n```"
+	decision, err := parseDecision(text)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(decision.Actions) != 2 {
+		t.Fatalf("actions=%d, want 2", len(decision.Actions))
+	}
+	edit, _ := decision.Actions[0].(CapabilityAction)
+	land, _ := decision.Actions[1].(CapabilityAction)
+	if edit.StepName != "edit" || land.StepName != "land" {
+		t.Fatalf("step names=%q/%q, want edit/land", edit.StepName, land.StepName)
+	}
+	if edit.Inputs["instruction"].Literal != "rename the events" || edit.Inputs["instruction"].IsBinding() {
+		t.Fatalf("instruction=%+v, want a literal", edit.Inputs["instruction"])
+	}
+	if got := edit.Inputs["task_id"].Source; got != "world_model:asset.repo.kind" {
+		t.Fatalf("task_id source=%q, want the binding", got)
+	}
+	if got := land.Inputs["pr"].Source; got != "step:edit.output.pr_url" {
+		t.Fatalf("pr source=%q, want the binding", got)
+	}
+	if land.Inputs["method"].Literal != "squash" {
+		t.Fatalf("method=%+v, want the literal", land.Inputs["method"])
+	}
+
+	// A binding that is neither form is a plan the runtime refuses to read.
+	broken := "```json\n" + `{"type":"plan","plan":{"steps":[{"capability":"code_edit","inputs":{"instruction":{"value":"rename"}}}]}}` + "\n```"
+	if _, err := parseDecision(broken); err == nil || !strings.Contains(err.Error(), "names no source") {
+		t.Fatalf("err=%v, want the malformed input refused", err)
 	}
 }
