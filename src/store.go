@@ -47,6 +47,35 @@ type Store interface {
 	// ListLLMMessages reads a run's messages in Seq order: the user input, the
 	// aggregated thinking/tool intermediates, then the assistant output.
 	ListLLMMessages(turnID int64) ([]LLMMessage, error)
+	// AssistantMessageID is the row a run's reply was recorded in, so a decision can
+	// be traced to the exact message it came from (llm_messages.id).
+	AssistantMessageID(turnID int64) (int64, bool, error)
+	// CreateExecutionPlan writes one plan (the steps are written next, before any
+	// of them runs). A plan is immutable: there is no update, and a re-plan is a
+	// new row.
+	CreateExecutionPlan(plan ExecutionPlan) (int64, error)
+	// AppendExecutionStepPlans writes a plan's steps in one call. They are written
+	// in full before the first step runs, which is what makes "planned but never
+	// executed" answerable afterwards.
+	AppendExecutionStepPlans(steps []ExecutionStepPlan) error
+	// AppendExecutionStep records one step that ran, linked to its planned step.
+	AppendExecutionStep(step ExecutionStep) (int64, error)
+	// AppendExecutionStepInteraction records one provider interaction of one step.
+	AppendExecutionStepInteraction(interaction ExecutionStepInteraction) (int64, error)
+	// TaskInputMessageID is the task's own first user input (llm_messages), which
+	// every plan of that task points at so a plan is traceable to what asked for it.
+	TaskInputMessageID(taskID string) (int64, bool, error)
+	// ListExecutionPlans reads a task's plans in creation order, oldest first.
+	ListExecutionPlans(taskID string) ([]ExecutionPlan, error)
+	// ListExecutionStepPlan reads a plan's planned steps in plan order.
+	ListExecutionStepPlan(planID int64) ([]ExecutionStepPlan, error)
+	// ListExecutionSteps reads a plan's executed steps in execution order.
+	ListExecutionSteps(planID int64) ([]ExecutionStep, error)
+	// ListExecutionStepInteractions reads one step's interactions in Seq order.
+	ListExecutionStepInteractions(stepID int64) ([]ExecutionStepInteraction, error)
+	// ExecutionPlanOutcome derives a plan's result from its steps: the last one's
+	// status. Nothing stores it, so none of it can drift.
+	ExecutionPlanOutcome(planID int64) (ExecutionPlanOutcome, bool, error)
 	Close() error
 }
 
@@ -161,6 +190,75 @@ func activeStore() Store {
 		return _autonomy.Store
 	}
 	return nil
+}
+
+// saveExecutionPlan writes one plan and its steps before any of them runs, and
+// returns the steps as stored — with their row ids, because plan_step_id is the row
+// an execution step belongs to and only the database knows that id. The error is
+// returned rather than logged because a plan is authoritative: nothing executes
+// without one (see Runtime.Execute). Without a store there is nothing to write and
+// nothing to block on.
+func saveExecutionPlan(plan ExecutionPlan, steps []ExecutionStepPlan) (int64, []ExecutionStepPlan, error) {
+	s := activeStore()
+	if s == nil {
+		return 0, steps, nil
+	}
+	planID, err := s.CreateExecutionPlan(plan)
+	if err != nil {
+		return 0, nil, err
+	}
+	for i := range steps {
+		steps[i].PlanID = planID
+	}
+	if err := s.AppendExecutionStepPlans(steps); err != nil {
+		return planID, nil, err
+	}
+	saved, err := s.ListExecutionStepPlan(planID)
+	if err != nil {
+		return planID, nil, err
+	}
+	return planID, saved, nil
+}
+
+// saveExecutionStep records one step that ran, and saveExecutionStepInteraction one
+// provider interaction of it. Both are best effort: the step already happened, and
+// losing the record must not fail the action it describes.
+func saveExecutionStep(step ExecutionStep) int64 {
+	s := activeStore()
+	if s == nil {
+		return 0
+	}
+	id, err := s.AppendExecutionStep(step)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] append execution step: %v\n", err)
+		return 0
+	}
+	return id
+}
+
+func saveExecutionStepInteraction(in ExecutionStepInteraction) {
+	s := activeStore()
+	if s == nil {
+		return
+	}
+	if _, err := s.AppendExecutionStepInteraction(in); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] append execution step interaction: %v\n", err)
+	}
+}
+
+// taskInputMessageID is the task's own first user input as already recorded on its
+// plans, so every plan of the task points at the same message.
+func taskInputMessageID(taskID string) (int64, bool) {
+	s := activeStore()
+	if s == nil {
+		return 0, false
+	}
+	id, found, err := s.TaskInputMessageID(taskID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] read task input message: %v\n", err)
+		return 0, false
+	}
+	return id, found
 }
 
 func persistTask(task *Task) {

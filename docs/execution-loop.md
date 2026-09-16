@@ -61,7 +61,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtCycle` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
 
-- 每轮：`DecideAtCycle(cycle)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Autonomy.MaxSteps`，默认 `1`）。
+- 每轮：`DecideAtCycle(cycle)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)）（`Autonomy.MaxSteps`，默认 `1`）。
 - 模型按 AGENT_V2 §Output Schema 回答；`parseDecision` **保留整份 plan**：`plan.steps[]` 每个 step 一个 action，按序放进 `Decision.Actions`，`evidence` / `need` / `deliverable` / `presentation` 一并带回（不再是"只留第一个 action，其余丢掉"）。
 - `Runtime.Execute` **在同一轮里按序执行所有 action**；第一个失败就结束该轮（`Result.Message` 会写第几个/共几个）。
 - **失败不结束 Task**：`Autonomy.executeDecision` 把失败记进该轮 `Result`（`Err` + `Message`），循环继续、进入下一轮 decide 重规划；只有当**最后一轮**失败时 task 才收成 `error`（`src/autonomy.go:Run`）。

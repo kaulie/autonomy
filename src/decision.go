@@ -41,7 +41,31 @@ func (d *DecisionMaker) Decide(ctx DecisionContext) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	return reasonningResult.Decision, nil
+	decision := reasonningResult.Decision
+	// Where the decision came from is the reasoner's to report: a reasoner that
+	// recorded nothing leaves it empty, and the plan is then written without
+	// traceability rather than with an invented id.
+	if decision.Origin.empty() {
+		decision.Origin = reasonningResult.Origin
+	}
+	return decision, nil
+}
+
+// DecisionOrigin is where a decision came from in the LLM record: the run that
+// produced it, the reply it consists of, and the input that reply answered. It is
+// what makes a plan traceable to one recorded reply instead of to "cycle 3" — a
+// cycle number is an ordering label, a message id is that message.
+//
+// The ids are 0 when the run was not recorded (no store, a local reasoner).
+type DecisionOrigin struct {
+	ReasonTurnID   int64 // reason_turns.id: the run
+	InputMessageID int64 // llm_messages.id: the input the reply answered
+	ReplyMessageID int64 // llm_messages.id: the reply itself
+}
+
+// empty reports whether nothing about this decision was recorded.
+func (o DecisionOrigin) empty() bool {
+	return o.ReasonTurnID == 0 && o.InputMessageID == 0 && o.ReplyMessageID == 0
 }
 
 // Decision is the outcome of one decision cycle: the AGENT_V2 answer the planner
@@ -55,6 +79,9 @@ type Decision struct {
 	// Type is plan | done | blocked | need_input.
 	Type   string
 	Reason string
+	// Origin is which recorded LLM interaction this decision came from, so the plan
+	// the runtime writes is traceable to the reply (and the input) it was.
+	Origin DecisionOrigin
 	// Evidence are the facts the decision rests on; plan steps reference them by
 	// ID via the step's evidence_refs.
 	Evidence []Evidence
@@ -121,6 +148,13 @@ type ActionResult struct {
 	// (AGENT_V2: what the step was meant to change, and on which evidence).
 	ExpectedEffect string
 	EvidenceRefs   []string
+	// PlanStepID and ExecutionStepID are the rows this action *is* in the execution
+	// tables: which planned step it carries out, and the step that records it. They
+	// are 0 when nothing was recorded (no store), and they are ids — never the plan's
+	// position — so a re-plan that plans the same thing cannot be confused with this
+	// one.
+	PlanStepID      int64
+	ExecutionStepID int64
 }
 
 // Result is what happened after executing a decision.
