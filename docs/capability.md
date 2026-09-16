@@ -34,7 +34,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 ## 代码位置与提示词
 
-- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`deployment/monitor.go`），注册在 `capability.RegisterDefaults`。
+- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`deployment/monitor.go`），注册在 `capability.RegisterDefaults`。
 - `deployment.monitor`：跟随一次部署、发现并解释问题（见 [deployment-monitor.md](deployment-monitor.md)）。
 - **提示词不进代码**：委托给 worker 的提示词放在仓库文件里，运行时按次读取 —— 与 agent policy 同一套路（见 `src/prompt.go`）：
 
@@ -54,6 +54,17 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 - **触发 ≠ 等待**：打包→部署要跑几分钟，所以 Run 在控制面**受理**（HTTP 202）后立刻返回 pipeline id，不占住 decision cycle；最终结果由后续观察决定（`poll` 就是 `GET /api/pipelines/<id>`）—— 触发成功不等于世界状态已达成（见[不变式](#不变式) 第 3 条）。
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
+
+## `pull_request.review`（按分支对合入 PR）
+
+- 语义：把「`from` 分支开向 `to` 分支的那个 PR」**合入**。合入 ≠ 写代码：`code_edit` 负责产出 PR（也可以合自己开的那条，见 `src/agent_policy/CODE_EDIT.md`），而这个能力是通用的那一个 —— 谁来开的 PR 都合。
+- 输入：`{"from":"<head/topic 分支>","to":"<base 分支>"}`（`from_branch`/`head`、`to_branch`/`base` 亦可；`to` 留空 = 主干：`PR_BASE_BRANCH` → 仓库自己的 `default_branch` → `main`）。可选 `method`：`merge`（默认）/ `squash` / `rebase`。
+- 输出：`{"from","to","number","pr","merged":"true","method","sha","checks"}`；`sha` 是主干上那个合并提交，`checks` 是 `passed` / `none`。
+- **是代码，不是 agent**：合入是确定性动作（触发已知、结果可验证），所以直接走 GitHub REST API，不拿 worker（对比 `code_edit` / `deployment.monitor` 的委托）。
+- **拒绝也是契约**（绝不硬合，原因原样返回）：`not_found`（该分支对没有开着的 PR）、`draft`、`conflict`（`mergeable_state=dirty`）、`checks_failed`（点名失败的 check）、`checks_pending`（还没跑完，下一轮再问）、`blocked`（branch protection 不满足）。
+- 合入时把**刚检查过的那个 head commit** 一并交给 GitHub（`sha`）：期间分支被人推了新提交，GitHub 会拒（409），而不是把没人看过的提交合进去。
+- 没配 CI 的仓库视为通过（报 `checks: none`）—— 不是失败，只是没有东西要等。
+- 配置：`GITHUB_TOKEN`（或 `GH_TOKEN`）必需；仓库取 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
 
 ## 不变式
 
