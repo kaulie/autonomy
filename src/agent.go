@@ -34,6 +34,20 @@ const (
 	LLMProviderDeepseekHarness LLMProvider = "deepseek_harness"
 )
 
+// AgentRole is what an agent is in the runtime's division of labour — the first
+// thing an agent's own prompt says about it (see the ## Agent section of
+// src/agent_policy/AGENT_V2.md, CODE_EDIT.md, DEPLOYMENT_MONITOR.md).
+type AgentRole string
+
+const (
+	// AgentRolePlanner is the agent a task's decision cycles belong to: it
+	// understands the task, defines the completion contract and plans.
+	AgentRolePlanner AgentRole = "planner"
+	// AgentRoleWorker is an agent a capability acquired for one delegated job
+	// through the broker (Runtime.AcquireAgent). What the job is, is its Purpose.
+	AgentRoleWorker AgentRole = "worker"
+)
+
 // AgentFactory creates and caches agents by name. All agents (including Cursor-backed) register here.
 type AgentFactory struct {
 	agents map[string]*Agent
@@ -52,8 +66,14 @@ func NewAgentFactory() *AgentFactory {
 
 // Create registers a new agent and optionally binds it to a task.
 // Agent ID is independent of Task ID (agents can exist without tasks).
+//
+// The agent a task is created for is the one that decides that task's cycles, so
+// it is a planner: the role its own prompt states (## Agent). An agent a
+// capability acquires through the broker is the other kind — a worker for one job
+// (Runtime.AcquireAgent).
 func (f *AgentFactory) Create(task *Task) *Agent {
 	agent := f.NewAgent()
+	agent.Role = AgentRolePlanner
 	if task != nil {
 		agent.CurrentTask = task
 		task.AgentID = agent.ID
@@ -115,6 +135,12 @@ type Agent struct {
 	LLMProvider LLMProvider
 	Model       string // LLM model in use (e.g. composer-2)
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
+	// Role and Purpose are what this agent is here to do: role is planner or
+	// worker, purpose is the label the acquiring capability gave it
+	// (broker.AcquireAgentOpts.Purpose). They are runtime state — what the
+	// agent's own prompt is rendered from — and are not persisted.
+	Role        AgentRole
+	Purpose     string
 	CurrentTask *Task
 	Context     string
 	DecideMaker *DecisionMaker

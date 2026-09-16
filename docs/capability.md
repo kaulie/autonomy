@@ -40,13 +40,13 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 | 文件 | 占位符 | 说明 |
 |---|---|---|
-| `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
-| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + 整套 frame：`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
-| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
+| `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{AGENT}}` / `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
+| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + 整套 frame：`{{AGENT}}` / `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + `{{AGENT}}` / `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
 
-**凡是「需要 agent」的能力，交给这个 agent 的提示词都注入委托方 runtime 的 frame**：`{{WORLD}}` /
+**凡是「需要 agent」的能力，交给这个 agent 的提示词都注入委托方 runtime 的 frame，并且身份那一节写的是它自己**：`{{AGENT}}`（role / id / name / backend / model / lifecycle / workspace，见 [agent.md](agent.md)）、`{{WORLD}}` /
 `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}`
 （以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）—— `code_edit` 与 `deployment.monitor`
 都一样。词表、取值与渲染规则只有一份，在 `src/capability/broker`（`WorkerFramePlaceholders` /

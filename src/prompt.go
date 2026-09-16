@@ -23,6 +23,7 @@ func promptPlaceholders(ctx DecisionContext, input ReasoningInput) map[string]st
 	}
 	goalType := goalTypeOf(ctx.Task)
 	return map[string]string{
+		"{{AGENT}}":                 fencedJSON(formatAgentIdentityJSON(ctx.Agent)),
 		"{{TASK}}":                  fencedJSON(formatTaskJSON(ctx.Task)),
 		"{{CONTEXT_ENTITY}}":        fencedJSON(formatContextEntitiesJSON(ctx)),
 		"{{GOAL_TYPE}}":             string(goalType),
@@ -35,15 +36,16 @@ func promptPlaceholders(ctx DecisionContext, input ReasoningInput) map[string]st
 }
 
 // WorkerPlaceholders renders the placeholder vocabulary of a delegated worker's
-// prompt (src/agent_policy/CODE_EDIT.md) as of the cycle that is delegating: the
-// same World / Runtime Context / Constructs / Completion Principles the planner's
-// policy gets, plus the Constraints the Runtime holds the agent to.
+// prompt (src/agent_policy/CODE_EDIT.md, DEPLOYMENT_MONITOR.md) as of the cycle
+// that is delegating: the same Agent / World / Runtime Context / Constructs /
+// Completion Principles the planner's policy gets, plus the Constraints the
+// Runtime holds the agent to.
 //
-// The context is rendered as the *worker's own* — its agent identity, workspace
-// and backend, over the delegating task's World and history — because a delegated
-// worker is a different agent from the one delegating, and the delegating agent's
-// sandbox must never be presented as the worker's own. The delegating agent is
-// named as `delegated_by` instead.
+// The agent's own sections are rendered as the *worker's* — its identity, its
+// workspace, its sandbox constraints — because a delegated worker is a different
+// agent from the one delegating, and the delegating agent's sandbox must never be
+// presented as the worker's own. The delegating agent is named as `delegated_by`
+// instead.
 //
 // It is what runtimeAgentSession implements for broker.WorkerPromptContext.
 // Outside a decision cycle only the parts that do not depend on one are rendered.
@@ -55,12 +57,17 @@ func (r *Runtime) WorkerPlaceholders(worker *Agent) map[string]string {
 }
 
 // workerPromptPlaceholders renders promptPlaceholders for the worker agent a
-// delegated prompt is addressed to.
+// delegated prompt is addressed to: the frame is the delegating runtime's (World,
+// Constructs, Completion Principles), while the two sections that speak about this
+// agent itself — its identity ({{AGENT}}), its situation ({{RUNTIME_CONTEXT}}) and
+// the constraints it works under ({{CONSTRAINTS}}) — speak for the worker, never
+// for the agent that delegated.
 func workerPromptPlaceholders(ctx DecisionContext, worker *Agent) map[string]string {
 	values := promptPlaceholders(ctx, ReasoningInput{})
+	values["{{AGENT}}"] = fencedJSON(formatAgentIdentityJSON(worker))
+	values["{{RUNTIME_CONTEXT}}"] = fencedJSON(workerRuntimeContextJSON(ctx))
 	workerCtx := ctx
 	workerCtx.Agent = worker
-	values["{{RUNTIME_CONTEXT}}"] = fencedJSON(workerRuntimeContextJSON(ctx, worker))
 	values["{{CONSTRAINTS}}"] = fencedJSON(constraintsJSON(workerCtx))
 	return values
 }
@@ -142,7 +149,7 @@ const reasoningDeltaMarker = "→ supplied with each decision message (see the D
 var reasoningDeltaPlaceholders = []string{"{{TASK}}", "{{CONTEXT_ENTITY}}", "{{WORLD}}", "{{RUNTIME_CONTEXT}}", "{{CONSTRAINTS}}"}
 
 // buildReasoningFrame is the stable half of the reasoning prompt: AGENT_V2.md
-// with the per-session placeholders (Goal Type / Completion Principles /
+// with the per-session placeholders (Agent, Goal Type, Completion Principles,
 // Constructs) filled in, and the per-cycle placeholders replaced by a marker.
 // It is sent once per session — on the first decision cycle after the session
 // was created; later cycles send only buildReasoningDelta.
@@ -163,9 +170,10 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 }
 
 // buildReasoningDelta is the per-cycle half: the current Task / Context Entity /
-// World / Runtime Context values (Runtime Context already carries the agent, the
-// step and previous_actions) as one JSON block. It is what every decision cycle
-// sends, frame or no frame.
+// World / Runtime Context values (Runtime Context carries the step and
+// previous_actions) as one JSON block. It is what every decision cycle sends,
+// frame or no frame. The agent's own identity is not here: it does not change
+// between cycles, so it is part of the frame.
 func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, error) {
 	payload := struct {
 		Task          json.RawMessage `json:"task"`
@@ -222,15 +230,16 @@ func mustJSON(v any) []byte {
 	return raw
 }
 
-func formatAgentContextJSON(ctx DecisionContext) []byte {
-	return mustJSON(agentContextMap(ctx.Agent, ctx.Step))
-}
-
-// agentContextMap is one agent's identity as the Runtime Context reports it. It
-// is shared by the planner's context (its own agent, at its current step) and a
-// delegated worker's (the worker agent, at no step: the step is the delegating
-// cycle's, and is reported under delegated_by there).
-func agentContextMap(agent *Agent, step int) map[string]any {
+// agentIdentityMap is one agent's identity as its own prompt states it, in its own
+// ## Agent section: what it is (role, and for a worker what it was acquired for),
+// which agent it is (id, name), and how it runs (backend, model, lifecycle,
+// workspace).
+//
+// It is the agent's identity, not its situation: the task it works on, the cycle
+// it is in, who delegated to it and what that task already did are the Runtime
+// Context (see runtimeContextMap) — the identity is what stays true for the whole
+// session, which is why it travels in the frame rather than in the per-cycle delta.
+func agentIdentityMap(agent *Agent) map[string]any {
 	if agent == nil {
 		return nil
 	}
@@ -249,10 +258,26 @@ func agentContextMap(agent *Agent, step int) map[string]any {
 		"backend":   backend,
 		"workspace": agent.Workspace,
 	}
-	if step > 0 {
-		m["step"] = step
+	// An agent whose role was never set is not given one here: the prompt says
+	// what the runtime knows, and inventing "worker" for an agent nothing
+	// acquired would be a fact nobody stated.
+	if role := strings.TrimSpace(string(agent.Role)); role != "" {
+		m["role"] = role
+	}
+	if purpose := strings.TrimSpace(agent.Purpose); purpose != "" {
+		m["purpose"] = purpose
+	}
+	if provider := strings.TrimSpace(string(agent.LLMProvider)); provider != "" {
+		m["llm_provider"] = provider
+	}
+	if model := strings.TrimSpace(agent.Model); model != "" {
+		m["model"] = model
 	}
 	return m
+}
+
+func formatAgentIdentityJSON(agent *Agent) []byte {
+	return mustJSON(agentIdentityMap(agent))
 }
 
 func formatTaskJSON(task *Task) []byte {
@@ -284,12 +309,14 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 	return mustJSON(runtimeContextMap(ctx, input))
 }
 
-// runtimeContextMap is the Runtime Context of one decision cycle: the agent, the
-// runtime's context containers and what the task already did.
+// runtimeContextMap is the Runtime Context of one decision cycle: the runtime's
+// context containers, what the task already did, and which cycle this is — the
+// situation of the agent, not the agent itself, which has its own section
+// (agentIdentityMap).
 func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any {
 	m := map[string]any{}
-	if ctx.Agent != nil {
-		m["agent"] = json.RawMessage(formatAgentContextJSON(ctx))
+	if ctx.Step > 0 {
+		m["step"] = ctx.Step
 	}
 	if text := strings.TrimSpace(input.Text); text != "" {
 		m["additional_input"] = map[string]string{"text": text}
@@ -305,14 +332,13 @@ func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any
 }
 
 // workerRuntimeContextJSON is the Runtime Context a delegated worker is given: the
-// same context rendered as the worker's own — the worker's agent identity,
-// workspace and backend, not the delegating agent's, which must never be
-// presented as the worker's — plus the task the work belongs to and who
-// delegated it.
-func workerRuntimeContextJSON(ctx DecisionContext, worker *Agent) []byte {
-	workerCtx := ctx
-	workerCtx.Agent = worker
+// context of the task it was delegated (the task, who delegated it and at which
+// cycle, what that task already did) over the World the delegating runtime holds.
+// The worker's own identity — its agent, workspace and backend, never the
+// delegating agent's — is its own section ({{AGENT}}), not this one.
+func workerRuntimeContextJSON(ctx DecisionContext) []byte {
 	// A worker has no decision cycle of its own, so it is rendered without a step.
+	workerCtx := ctx
 	workerCtx.Step = 0
 	m := runtimeContextMap(workerCtx, ReasoningInput{})
 	if ctx.Task != nil {

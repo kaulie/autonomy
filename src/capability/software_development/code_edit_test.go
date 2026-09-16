@@ -249,6 +249,7 @@ func TestCodeEditPromptRendersWithoutAHostContext(t *testing.T) {
 		t.Fatalf("prompt still has an unrendered placeholder:\n%s", sess.prompt)
 	}
 	for _, want := range []string{
+		"## Agent",
 		"## World",
 		"## Runtime Context",
 		"## Completion",
@@ -260,8 +261,8 @@ func TestCodeEditPromptRendersWithoutAHostContext(t *testing.T) {
 			t.Fatalf("shipped template missing %q:\n%s", want, sess.prompt)
 		}
 	}
-	if n := strings.Count(sess.prompt, "(not provided by this runtime)"); n != 5 {
-		t.Fatalf("prompt marks %d frame placeholders as not provided, want 5:\n%s", n, sess.prompt)
+	if n := strings.Count(sess.prompt, "(not provided by this runtime)"); n != 6 {
+		t.Fatalf("prompt marks %d frame placeholders as not provided, want 6:\n%s", n, sess.prompt)
 	}
 }
 
