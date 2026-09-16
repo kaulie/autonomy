@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/capability/broker"
 )
 
 const (
@@ -26,6 +28,13 @@ const (
 	Domain = "deployment"
 	// Provider is who implements it.
 	Provider = "autonomy"
+
+	// sourceAgent / sourceHTTP / sourceCustom name the monitoring provider that
+	// produced a report, so the agent knows whether a monitoring agent looked or
+	// the deployment API was read directly.
+	sourceAgent  = "agent"
+	sourceHTTP   = "http"
+	sourceCustom = "custom"
 
 	// EnvAPIURL is where the deployment service listens. It is the same
 	// variable service.deploy and the gateway use, so one setting points both
@@ -102,6 +111,9 @@ type Request struct {
 	Interval time.Duration
 	// Timeout bounds the whole watch window (ignored when Watch is false).
 	Timeout time.Duration
+	// TaskID is the task this observation belongs to; it is recorded on the
+	// monitoring agent's run when the observer is agent-backed.
+	TaskID string
 }
 
 // Snapshot is one observation of a deployment: what the source says its state
@@ -119,6 +131,15 @@ type Snapshot struct {
 	DeploymentName string
 	UpdatedAt      time.Time
 	Logs           []string
+
+	// The Agent* fields carry the monitoring agent's own judgement when the
+	// observer is agent-backed (see AgentObserver). They take precedence over
+	// the built-in rules, which remain the fallback.
+	AgentProblem     *bool
+	AgentSignals     []string
+	AgentDiagnosis   string
+	AgentSuggestions []string
+	AgentNote        string
 }
 
 // Observer reads deployment state. HTTPObserver is the default; a host may
@@ -131,9 +152,14 @@ type Observer interface {
 // Monitor follows one deployment and reports whether it is healthy, what went
 // wrong when it failed, and which evidence to look at next.
 type Monitor struct {
-	// Observer is optional: when nil, the HTTP observer built from the request
-	// (or $AUTONOMY_DEPLOYMENT_ENDPOINT) is used.
+	// Observer is the monitoring provider. When nil, the monitor picks one:
+	// an agent-backed observer if Agents is set (the monitoring agent observes
+	// and judges), otherwise the deterministic HTTP one.
 	Observer Observer
+	// Agents is the agent broker (Runtime.AcquireAgent) used by the agent-backed
+	// observer. When Agents is nil and Observer is nil, the monitor falls back
+	// to reading the deployment API directly.
+	Agents broker.AgentBroker
 	// Sleep is optional: the wait between polls, replaced in tests.
 	Sleep func(ctx context.Context, d time.Duration) error
 }
@@ -145,7 +171,31 @@ func (Monitor) Domain() string { return Domain }
 func (Monitor) Provider() string { return Provider }
 
 func (Monitor) Description() string {
-	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://127.0.0.1:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions`
+	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://127.0.0.1:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions, source`
+}
+
+// observer picks the monitoring provider: an explicit one wins, then the
+// agent-backed observer when an agent broker is available, then the
+// deterministic HTTP reader.
+func (m Monitor) observer() (Observer, string) {
+	if m.Observer != nil {
+		return m.Observer, sourceOf(m.Observer)
+	}
+	if m.Agents != nil {
+		return &AgentObserver{Agents: m.Agents}, sourceAgent
+	}
+	return NewHTTPObserver(), sourceHTTP
+}
+
+// sourceOf names an injected observer, so a report says who monitored.
+func sourceOf(o Observer) string {
+	switch o.(type) {
+	case *AgentObserver:
+		return sourceAgent
+	case *HTTPObserver:
+		return sourceHTTP
+	}
+	return sourceCustom
 }
 
 // Run observes the deployment and turns that observation into a report: the
@@ -157,15 +207,12 @@ func (m Monitor) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	obs := m.Observer
-	if obs == nil {
-		obs = NewHTTPObserver()
-	}
+	obs, source := m.observer()
 	snap, polls, err := observe(obs, req, m.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
-	return report(snap, req, polls, time.Now()), nil
+	return report(snap, req, polls, time.Now(), source), nil
 }
 
 // observe takes one snapshot, or — with Watch — polls until the deployment
@@ -254,6 +301,7 @@ func ParseRequest(in map[string]string) (Request, error) {
 		Watch:      boolInput(in["watch"]),
 		Interval:   defaultInterval,
 		Timeout:    defaultTimeout,
+		TaskID:     strings.TrimSpace(in["task_id"]),
 	}
 	if req.Endpoint == "" && req.StatusURL == "" {
 		req.Endpoint = firstNonEmpty(os.Getenv(EnvAPIURL), DefaultAPIURL)
@@ -323,8 +371,9 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // report renders the observation for the agent: what is happening, whether it
-// is a problem, the evidence, and the next steps.
-func report(snap Snapshot, req Request, polls int, now time.Time) map[string]string {
+// is a problem, the evidence, and the next steps. source names the monitoring
+// provider that produced the observation.
+func report(snap Snapshot, req Request, polls int, now time.Time, source string) map[string]string {
 	d := Diagnose(snap, now, req.Tail)
 	out := map[string]string{
 		"deployment":  firstNonEmpty(snap.ID, req.Deployment),
@@ -336,6 +385,10 @@ func report(snap Snapshot, req Request, polls int, now time.Time) map[string]str
 		"observed_at": now.Format(time.RFC3339),
 		"polls":       strconv.Itoa(polls),
 		"provider":    Provider,
+		"source":      source,
+	}
+	if snap.AgentNote != "" {
+		out["note"] = snap.AgentNote
 	}
 	if snap.Phase != "" {
 		out["phase"] = snap.Phase
@@ -403,43 +456,60 @@ var logRules = []logRule{
 }
 
 // Diagnose turns one snapshot into a diagnosis. Structural facts (a failed
-// state, an unhealthy target, a stalled rollout) and log fingerprints both
-// contribute signals; every signal contributes evidence and a next step. tail
-// is the evidence window size (<=0 means the default).
+// state, an unhealthy target, a stalled rollout) always contribute signals.
+// Judgement comes from the monitoring agent when the snapshot carries one
+// (agent-backed observer); otherwise the built-in log fingerprints do, and they
+// only speak while the outcome is still open. tail is the evidence window size
+// (<=0 means the default).
 func Diagnose(snap Snapshot, now time.Time, tail int) Diagnosis {
 	d := Diagnosis{}
-	add := func(signal, suggestion string) {
-		if contains(d.Signals, signal) {
-			return
-		}
-		d.Signals = append(d.Signals, signal)
-		if suggestion != "" && !contains(d.Suggestions, suggestion) {
-			d.Suggestions = append(d.Suggestions, suggestion)
+	addSignal := func(name string) {
+		if !contains(d.Signals, name) {
+			d.Signals = append(d.Signals, name)
 		}
 	}
+	addSuggestion := func(s string) {
+		if s != "" && !contains(d.Suggestions, s) {
+			d.Suggestions = append(d.Suggestions, s)
+		}
+	}
+	addRule := func(r logRule) {
+		addSignal(r.name)
+		addSuggestion(r.suggestion)
+	}
 
+	// Structural facts about the observed state.
 	switch snap.state() {
 	case StateFailed:
-		add("deployment_failed", "the deployment failed: fix the cause named above, then redeploy the same artifact")
+		addSignal("deployment_failed")
+		addSuggestion("the deployment failed: fix the cause named above, then redeploy the same artifact")
 	case StateRunning, StatePending:
 		if !snap.UpdatedAt.IsZero() && now.Sub(snap.UpdatedAt) > stallAfter {
-			add("stalled", "the deployment has not reported progress recently: check whether the pipeline step or the target environment is stuck, then decide whether to retry or roll back")
+			addSignal("stalled")
+			addSuggestion("the deployment has not reported progress recently: check whether the pipeline step or the target environment is stuck, then decide whether to retry or roll back")
 		}
 	}
 	if snap.Healthy != nil && !*snap.Healthy {
-		add("unhealthy", "the deployment reported itself unhealthy: verify the service's health endpoint and its dependencies")
+		addSignal("unhealthy")
+		addSuggestion("the deployment reported itself unhealthy: verify the service's health endpoint and its dependencies")
 	}
 
-	// The logs are the deployment's own output; the error field is part of it too.
-	// A deployment that already finished successfully is not blamed for lines
-	// about retries it recovered from, so fingerprints only speak while the
-	// outcome is still open.
+	// Judgement: the monitoring agent's own signals replace the built-in log
+	// fingerprints; the fingerprints remain the fallback for the deterministic
+	// provider, and for an agent that returned none.
+	agentJudged := snap.AgentProblem != nil || len(snap.AgentSignals) > 0
 	matchAt := -1
-	if snap.state() != StateSucceeded {
+	if agentJudged {
+		for _, s := range snap.AgentSignals {
+			if v := strings.TrimSpace(s); v != "" {
+				addSignal(v)
+			}
+		}
+	} else if snap.state() != StateSucceeded {
 		for i, line := range snap.Logs {
 			if ok, rules := matchRules(line); ok {
 				for _, r := range rules {
-					add(r.name, r.suggestion)
+					addRule(r)
 				}
 				if matchAt == -1 {
 					matchAt = i
@@ -448,19 +518,30 @@ func Diagnose(snap Snapshot, now time.Time, tail int) Diagnosis {
 		}
 		if ok, rules := matchRules(snap.Error); ok {
 			for _, r := range rules {
-				add(r.name, r.suggestion)
+				addRule(r)
 			}
 		}
 	}
 
 	d.Problem = len(d.Signals) > 0
+	if snap.AgentProblem != nil {
+		d.Problem = *snap.AgentProblem
+	}
+	for _, s := range snap.AgentSuggestions {
+		addSuggestion(strings.TrimSpace(s))
+	}
+
 	d.Evidence = evidence(snap.Logs, matchAt, tail)
-	d.Summary = summarize(snap, d)
+	d.Summary = snap.AgentDiagnosis
+	if d.Summary == "" {
+		d.Summary = summarize(snap, d)
+	}
+
 	if !d.Problem {
 		if snap.state().terminal() {
-			d.Suggestions = append(d.Suggestions, "the deployment finished with no failure signal in the observed output")
+			addSuggestion("the deployment finished with no failure signal in the observed output")
 		} else {
-			d.Suggestions = append(d.Suggestions, "the deployment is still in progress: observe it again on the next cycle to keep following it")
+			addSuggestion("the deployment is still in progress: observe it again on the next cycle to keep following it")
 		}
 	}
 	return d

@@ -42,6 +42,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 |---|---|---|
 | `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
 | `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
 

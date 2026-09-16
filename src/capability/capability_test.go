@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kaulie/autonomy/src/capability"
+	"github.com/kaulie/autonomy/src/capability/broker"
 	"github.com/kaulie/autonomy/src/capability/deployment"
 )
 
@@ -60,14 +61,15 @@ func TestRegisterDefaultsIncludesAssetChange(t *testing.T) {
 	}
 }
 
-// TestRegisterDefaultsWiresTheInjectedDeploymentObserver: a host can hand the
-// deployment monitor its own state source (a CI API, an orchestrator), and the
-// capability uses it instead of the built-in HTTP one.
-func TestRegisterDefaultsWiresTheInjectedDeploymentObserver(t *testing.T) {
+// TestRegisterDefaultsWiresTheDeploymentMonitor: the host's hooks reach the
+// monitor — the agent broker (which makes the observation agent-backed) and a
+// pinned deployment source (a deterministic one, or a test double).
+func TestRegisterDefaultsWiresTheDeploymentMonitor(t *testing.T) {
 	t.Parallel()
 	obs := &stubObserver{}
+	broker := &stubBroker{}
 	f := capability.NewFactory()
-	capability.RegisterDefaults(f, capability.Deps{Deployments: obs})
+	capability.RegisterDefaults(f, capability.Deps{Deployments: obs, Agents: broker})
 	mon, ok := f.Get(deployment.Name).(deployment.Monitor)
 	if !ok {
 		t.Fatalf("registered %s with type %T", deployment.Name, f.Get(deployment.Name))
@@ -75,10 +77,19 @@ func TestRegisterDefaultsWiresTheInjectedDeploymentObserver(t *testing.T) {
 	if mon.Observer != obs {
 		t.Fatalf("monitor observer = %#v, want the injected one", mon.Observer)
 	}
+	if mon.Agents != broker {
+		t.Fatalf("monitor agents = %#v, want the injected broker", mon.Agents)
+	}
 }
 
 type stubObserver struct{}
 
 func (stubObserver) Observe(context.Context, deployment.Request) (deployment.Snapshot, error) {
 	return deployment.Snapshot{State: deployment.StateSucceeded}, nil
+}
+
+type stubBroker struct{}
+
+func (stubBroker) AcquireAgent(context.Context, broker.AcquireAgentOpts) (broker.AgentSession, error) {
+	return nil, nil
 }

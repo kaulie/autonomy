@@ -30,6 +30,7 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 | 输入 | 必填 | 默认 | 说明 |
 |------|------|------|------|
 | `deployment` | 是 | — | 部署 / 流水线标识（也接受 `pipeline_id` / `pipeline` / `request_id` / `target` / `run` / `id`） |
+| `task_id` | 否 | — | 本次观察所属 Task（runtime 会自动带上）；agent 监控时记在它的 run 上 |
 | `poll` | 否 | — | 触发能力返回的相对状态路径（如 service.deploy 的 `poll`：`/api/pipelines/<id>`），会拼到 `endpoint` 上 |
 | `status_url` | 否 | — | 完整状态 URL（优先级最高） |
 | `endpoint` | 否 | `$DEPLOYMENT_API_URL` → `http://127.0.0.1:4220` | 部署服务 base URL；状态地址 = `<endpoint>/api/pipelines/<deployment>` |
@@ -73,6 +74,8 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 | `diagnosis` | 一句话结论（状态 + 阶段 + 信号 + 首个可疑错误行 / message） |
 | `evidence` | 日志窗口：有命中行时取其上下文，否则取最近 `tail` 行；总长有上限 |
 | `suggestions` | 每个信号对应的下一步（去查什么 / 改什么） |
+| `source` | 这次观察是谁做的：`agent`（监控 agent 看的）/ `http`（直接读 API）/ `custom`（注入的 Observer） |
+| `note` | 需要说明的例外情况（例如 agent 的答复不合格式、已回退到原始观察） |
 | `polls` / `observed_at` / `provider` | 轮询次数、观察时间、实现方 |
 
 ## 信号
@@ -91,28 +94,44 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 
 指纹只在**结果未定**时生效：已经 `succeeded` 的部署不会因为日志里出现 `connection refused`（重试后成功）被判成 problem。
 
-## Provider
+## 谁来监控（Provider）
 
-能力语义固定，观察来源可换（见 [Provider](provider.md)）：
+能力语义固定，监控来源可换（见 [Provider](provider.md)）：
 
-- 默认 `HTTPObserver`：`GET <status_url>` 读 JSON（宽容字段：`state`/`status`、`phase`/`stage`、`healthy`/`health`、
-  `logs`/`lines`、`updated_at`、以及 control plane 的 `requestId`/`serviceId`/`message`/`version`/`deployment`），
-  状态里没有日志时再 `GET <logs_url>`（JSON `lines`/`logs` 或纯文本）。
-- 宿主可在注册时注入自定义 Observer（CI API、编排器、本地部署记录）：
-  `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`。
+- **默认：agent 监控**（agent-backed）。注册时宿主注入了 agent broker，`deployment.monitor` 就通过
+  `Runtime.AcquireAgent` 拿一个 worker（它有自己的 workspace 和工具），把**部署坐标**（`status_url` / `logs_url`）
+  和**原始观察**一起交给它，让它自己去看、自己判断，并按要求返回结构化 JSON
+  （`state` / `problem` / `signals` / `diagnosis` / `suggestions` / `logs`）。
+  agent 的判断优先于内置规则；`source=agent` 出现在输出里。提示词在仓库文件里，运行时按次读取：
+  `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md`（缺失时该次观察直接失败，不会先建 agent）。
+- **确定性读取**：没有 agent broker（或显式注入 `Observer`）时，`HTTPObserver` 直接读部署 API
+  （`GET <status_url>`，必要时再取 `logs_url`；宽容字段 `state`/`status`、`phase`/`stage`、`healthy`/`health`、
+  `logs`/`lines`、`updated_at`，以及 control plane 的 `requestId`/`serviceId`/`message`/`version`/`deployment`），
+  由内置规则给信号。`source=http`。
+- **自定义**：宿主可以注入自己的 Observer（CI API、编排器、本地部署记录）：
+  `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`；`source=custom`。
+
+agent 返回的 JSON 读不出来时，**原始观察仍然有效**，并在 `note` 里说明这次 agent 的答复不合格式 ——
+不会因此编造一个状态；两者都没有（读取失败且 agent 也没答）才是 error。
+
+代价：agent 监控每次观察都要跑一次 LLM；`watch=true` 会在一次调用里最多轮询 61 次。
+要控制成本时，用 `Deps.Deployments` 注入确定性 Observer，或保持默认的一次观察、由决策循环决定何时再看。
 
 部署系统状态词汇通过 `normalizeState` 归一到上面五个状态（`queued` → pending，`packaging`/`deploying` → running，…）。
 
 ## 代码位置
 
-- 能力：`src/capability/deployment/monitor.go`
-- 默认 Provider：`src/capability/deployment/http_observer.go`
-- 注册：`src/capability/register.go`（`RegisterDefaults`）
+- 能力（语义 + 诊断合成）：`src/capability/deployment/monitor.go`
+- 默认 Provider（agent 监控）：`src/capability/deployment/agent_observer.go` + 提示词文件
+  `src/agent_policy/DEPLOYMENT_MONITOR.md`（每次观察现读现渲染，见 `prompt.go`）
+- 确定性 Provider：`src/capability/deployment/http_observer.go`
+- 注册：`src/capability/register.go`（`RegisterDefaults`，注入 `deps.Agents` / `deps.Deployments`）
 - 测试：`src/capability/deployment/*_test.go`
 
 ## 不变式
 
-1. 只观察，不改变世界（不重试、不回滚、不改配置）。
-2. 未被告知的状态就是 `unknown`，不推断。
+1. 只观察，不改变世界（不重试、不回滚、不改配置）；监控 agent 也被这样约束（提示词明写，见 `DEPLOYMENT_MONITOR.md`）。
+2. 未被告知的状态就是 `unknown`，不推断 —— agent 也不例外（答复读不出来时回退到原始观察，而不是编一个状态）。
 3. 观察不到 → error；观察到失败 → `state=failed` + `problem=true`（不是 error）。
 4. `problem=false` 不等于 [Completion Contract](completion-contract.md) 满足。
+5. 事实与判断分开：`state` 是观察到的事实（结构性信号由它推出），`problem`/`signals`/`diagnosis` 是监控 agent 的判断；agent 的判断优先，内置规则做兜底。

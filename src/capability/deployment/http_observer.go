@@ -188,9 +188,7 @@ func (p statusPayload) toSnapshot(req Request, logs []string) Snapshot {
 	if tail <= 0 {
 		tail = defaultTail
 	}
-	if len(logs) > tail {
-		logs = logs[len(logs)-tail:]
-	}
+	logs = tailLines(logs, tail)
 	return Snapshot{
 		ID:             firstNonEmpty(p.ID, p.RequestID, p.Name, req.Deployment),
 		State:          normalizeState(firstNonEmpty(p.State, p.Status)),
@@ -270,6 +268,17 @@ func firstNonEmptyLines(lists ...[]string) []string {
 		}
 	}
 	return nil
+}
+
+// tailLines keeps the last n lines (n <= 0 means the default tail).
+func tailLines(lines []string, n int) []string {
+	if n <= 0 {
+		n = defaultTail
+	}
+	if len(lines) > n {
+		return lines[len(lines)-n:]
+	}
+	return lines
 }
 
 // trailingNewline splits plain-text logs, dropping one trailing empty line.
