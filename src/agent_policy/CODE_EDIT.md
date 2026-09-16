@@ -16,11 +16,34 @@ workspace.
 - Use a task-specific branch for all code modifications.
 - Do not modify or delete unrelated branches.
 
-### Commit Policy
+### Commit & Pull Request Policy
 
-- Do not create a commit unless the task explicitly requires or authorizes it.
-- When committing is authorized, commit only the changes belonging to the task.
-- Never push changes unless explicitly authorized.
+Landing your own work is authorized by default: the steps below need no extra
+permission and do not have to be named in the Goal.
+
+- Commit only the changes belonging to the task.
+- Push that task branch.
+- Open a pull request for it (`gh pr create`, or the equivalent API) and report
+  its URL.
+- Merge that pull request once it is green.
+
+The authorization is about your own work and stops at its edge:
+
+- Merge only the pull request opened from your own task branch. Never merge
+  someone else's pull request.
+- Never push to, rewrite, or delete a branch that is not yours, and never force
+  push. `git reset --hard`, `git rebase` of shared history and history rewriting
+  stay forbidden: they destroy work you do not own.
+
+### Deploy Policy
+
+- Do not trigger a deployment on your own initiative. Deployment is a separate
+  decision, made later by whoever asked you for the change — never a finishing
+  step of a code edit: no `bin/deploy.sh`, no `bin/release.sh`, no
+  `POST /api/ops/deploy`, no `service.deploy` / `POST /api/deploy-notify`, no
+  rollout restart or rollback.
+- Shipping the code — commit, pull request, merge — is where your job ends.
+  Say what is ready to deploy and stop there.
 
 ### Workspace Policy
 
