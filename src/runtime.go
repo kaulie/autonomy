@@ -85,6 +85,10 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		return nil, fmt.Errorf("runtime agent factory not ready")
 	}
 	agent := r.agents.NewAgent()
+	// Acquired for one delegated job: the capability named what it is for, and
+	// that purpose is what the agent's own prompt says it is (## Agent).
+	agent.Role = AgentRoleWorker
+	agent.Purpose = strings.TrimSpace(opts.Purpose)
 	agent.Lifecycle = AgentLifecycleEphemeral
 	// A capability-acquired agent works on the same task as the agent that
 	// delegated to it, so its row carries that task id too (current_task_id used

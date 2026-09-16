@@ -23,7 +23,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |
 | Model | 记录当前使用的模型（如 `composer-2`；DB 列 `model`） |
-| Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者 |
+| Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者。**V1 只分两种**：`planner`（runtime 为一条 Task 创建的那个 agent，它决定每一轮）与 `worker`（capability 通过 `AcquireAgent` 要来的那个 agent，干一件事）；worker 的 **Purpose** 就是它被要来的原因（`code_edit` / `deployment.monitor`）。两者都是 runtime state，不落库，只用来渲染 agent 自己的提示词 |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |
 | Trust / Performance | 历史表现摘要（可后置） |
@@ -37,6 +37,18 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 - [Event](event.md)：接收状态变化并触发再决策
 - [Runtime](runtime.md)：将决策落实为可靠执行
 - [Verification](verification.md)：对照 Contract 判断 Done / Continue
+
+## 提示词里怎么出现
+
+每个 agent 自己的身份是提示词里**单独一节**（`{{AGENT}}`）：`## Agent` 先把"你是谁"说清楚，再附上结构化的一条记录 ——
+`role`（`planner` / `worker`）、worker 的 `purpose`、`id`、`name`、`backend`、`llm_provider`、`model`、`lifecycle`、`workspace`。
+三个 policy 文件（`AGENT_V2.md` / `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md`）都用这一节，取的值永远是**读到它的那个 agent 自己**的：
+planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方只以 `delegated_by` 出现在 Runtime Context 里
+（见 [delegation.md](delegation.md)）。
+
+- **身份 ≠ 处境**：身份（role / id / …）整个会话不变，所以在 AGENT_V2 的 **frame** 里；它正在做的 Task、第几轮
+  （`step`）、谁委托的、`previous_actions` 是 Runtime Context，属于每轮的 **delta**（见 [execution-loop.md](execution-loop.md)）。
+- **不编造**：runtime 没记录 role 的 agent（比如手搓的测试替身）不会被硬塞一个身份 —— 该字段就不出现。
 
 ## 不变式
 

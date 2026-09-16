@@ -368,8 +368,9 @@ func TestAgentObserverInjectsTheDelegationFrame(t *testing.T) {
 	framed := &frameSession{
 		fakeSession: fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON},
 		frame: map[string]string{
+			"{{AGENT}}":                 `{"role":"worker","purpose":"deployment.monitor","name":"agent-deployment.monitor-1"}`,
 			"{{WORLD}}":                 `{"assets":[{"id":"asset-1","kind":"service","state":"healthy"}]}`,
-			"{{RUNTIME_CONTEXT}}":       `{"agent":{"name":"agent-deployment.monitor-1"},"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
+			"{{RUNTIME_CONTEXT}}":       `{"step":2,"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
 			"{{COMPLETION_PRINCIPLES}}": "- Keep the service available and healthy.",
 			"{{CONSTRAINTS}}":           `{"deploy":"the Runtime's move, not the agent's"}`,
 		},
@@ -379,6 +380,7 @@ func TestAgentObserverInjectsTheDelegationFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"## Agent", `"role":"worker"`,
 		"## World", `"asset-1"`,
 		"## Runtime Context", `"delegated_by"`, `"task-9"`,
 		"## Completion",
@@ -400,8 +402,8 @@ func TestAgentObserverInjectsTheDelegationFrame(t *testing.T) {
 		context.Background(), deployment.Request{Deployment: "req-77", Tail: 10, TaskID: "task-9"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(plain.prompt, broker.WorkerFrameMissingValue); n != 4 {
-		t.Errorf("prompt marks %d frame sections as not provided, want 4:\n%s", n, plain.prompt)
+	if n := strings.Count(plain.prompt, broker.WorkerFrameMissingValue); n != 5 {
+		t.Errorf("prompt marks %d frame sections as not provided, want 5:\n%s", n, plain.prompt)
 	}
 	if strings.Contains(plain.prompt, "{{") {
 		t.Errorf("monitoring prompt still has an unrendered placeholder:\n%s", plain.prompt)

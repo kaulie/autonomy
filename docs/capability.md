@@ -40,13 +40,13 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 | 文件 | 占位符 | 说明 |
 |---|---|---|
-| `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
-| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + 整套 frame：`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
-| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
+| `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{AGENT}}` / `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
+| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + 整套 frame：`{{AGENT}}` / `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + `{{AGENT}}` / `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
 
-**凡是「需要 agent」的能力，交给这个 agent 的提示词都注入委托方 runtime 的 frame**：`{{WORLD}}` /
+**凡是「需要 agent」的能力，交给这个 agent 的提示词都注入委托方 runtime 的 frame，并且身份那一节写的是它自己**：`{{AGENT}}`（role / id / name / backend / model / lifecycle / workspace，见 [agent.md](agent.md)）、`{{WORLD}}` /
 `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}`
 （以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）—— `code_edit` 与 `deployment.monitor`
 都一样。词表、取值与渲染规则只有一份，在 `src/capability/broker`（`WorkerFramePlaceholders` /
@@ -73,6 +73,14 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 - 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
 - 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的五个都声明**，这条被 `capability_test.go` 钉住。
 - 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 的 `summary` 带着它自己开的 PR URL，而 `pull_request.review` 的 `pr` 直接吃那个 URL。
+
+### `{{CONSTRAINTS}}` 从哪来
+
+`## Constraints` 那节渲染两样东西：**runtime 自己的事实**（这条 Task、唯一可改文件的沙箱、scope）+
+**runtime 的 policy**（`$PROJECT_ROOT/src/agent_policy/CONSTRAINTS.json`，见 [policy.md](policy.md)）。
+planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的都是这两样；渲染它的那层
+（`src/prompt.go` / `src/policy.go`）不认识其中任何一条规则属于哪个领域 —— 「deploy 是 runtime 的动作」
+是**部署边界**自己的一句话，不是提示词层的知识。
 
 ## `service.deploy`（触发指定服务、指定分支的流水线部署）
 

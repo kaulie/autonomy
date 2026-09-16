@@ -29,6 +29,24 @@ Capability Gap 时的政策分支示例：寻找现有 Provider / 安装 Skill /
 - 约束 [Agent](agent.md) 的规划与 [Delegation](delegation.md) 选择
 - 与 [Completion Contract](completion-contract.md) 分工：Contract 定义「做成什么样」；Policy 定义「做的时候不能越什么线」
 
+## 代码位置（V1）
+
+- **Policy 是数据，不是代码**：`$PROJECT_ROOT/src/agent_policy/CONSTRAINTS.json` —— 一个扁平的
+  `key → 句子` 对象，runtime 在渲染提示词时读取（`src/policy.go`），合并进 `{{CONSTRAINTS}}`，
+  也就是 `AGENT_V2.md` / `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md` 里 `## Constraints` 那节的内容。
+- **为什么在文件里**：和 agent policy 同一个理由（见 [capability.md](capability.md)）—— 规则是一句话，
+  是有人拥有的东西，改它不该需要重新编译；而渲染提示词的那层（`src/prompt.go`）不认识 deploy / budget /
+  privacy 这些语义，它只把给它的东西渲染出来。谁可以部署是**部署边界**的事，就写在部署边界自己的地方。
+- **不散落在 Capability 里**（见「演化注记」）：Capability 只声明自己能做什么（`{{CONSTRUCTS}}` 里的
+  input/output），不拥有关于自己的权限规则 —— 那是 Policy。
+- **运行时自己的事实优先**：这条 Task、唯一可改文件的沙箱由 runtime 自己带，并覆盖同名规则：
+  policy 不能重新定义 Task 或沙箱。
+- **读不出来要看得见**：文件不存在 = 这个 runtime 没有额外规则（不是错误）；文件存在但读不出来 =
+  在 stderr 报出来且不生效 —— 提示词总得渲染，而读不到的规则必须可见，不能被悄悄执行或悄悄丢掉。
+- 示例：`{"deploy": "the Runtime's move, not the agent's"}`。coding worker 那一侧更具体的禁令
+  （不许 `bin/deploy.sh`、不许 `service.deploy`、不许 rollout restart）写在 `src/agent_policy/CODE_EDIT.md`
+  的 `### Deploy Policy` —— 一句话的边界给所有人，具体动作清单给有手的那个人。
+
 ## 不变式
 
 1. Agent 不可单方面废止约束自身的 Policy。

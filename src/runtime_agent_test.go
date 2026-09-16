@@ -43,6 +43,41 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	}
 }
 
+// TestRuntimeAcquireAgentKnowsWhatItIsFor: an acquired agent is a worker, and the
+// purpose the capability named is what the agent's own prompt says it is (## Agent
+// — "role", "purpose"). The agent the runtime creates for a task is the other
+// kind: its planner.
+func TestRuntimeAcquireAgentKnowsWhatItIsFor(t *testing.T) {
+	t.Parallel()
+	f := NewAgentFactory()
+	if got := f.Create(&Task{ID: "task-9"}).Role; got != AgentRolePlanner {
+		t.Fatalf("the task's own agent role=%q, want %q", got, AgentRolePlanner)
+	}
+
+	rt := NewRuntime(f)
+	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
+		Purpose: "code_edit",
+		Backend: string(AgentBackendLocal),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sess.Release(context.Background()) }()
+
+	acquired, ok := sess.(*runtimeAgentSession)
+	if !ok {
+		t.Fatalf("acquired session is %T, want the runtime's own", sess)
+	}
+	if acquired.agent.Role != AgentRoleWorker || acquired.agent.Purpose != "code_edit" {
+		t.Fatalf("role/purpose=%q/%q, want worker/code_edit", acquired.agent.Role, acquired.agent.Purpose)
+	}
+	for _, want := range []string{`"role": "worker"`, `"purpose": "code_edit"`, `"code_edit"`} {
+		if got := string(formatAgentIdentityJSON(acquired.agent)); !strings.Contains(got, want) {
+			t.Errorf("acquired agent identity missing %s:\n%s", want, got)
+		}
+	}
+}
+
 // TestRuntimeAcquireAgentWithoutWorkspaceUsesItsOwn pins what a delegating
 // capability relies on: acquire without a workspace and the agent runs in its own
 // AGENT_WORKSPACE, which the session reports back.

@@ -104,8 +104,9 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
   （`state` / `problem` / `signals` / `diagnosis` / `suggestions` / `logs`）。
   agent 的判断优先于内置规则；`source=agent` 出现在输出里。提示词在仓库文件里，运行时按次读取：
   `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md`（缺失时该次观察直接失败，不会先建 agent）。
-  它和别的被委托的 worker 一样，拿到的是**委托方那个 runtime 的 frame**：World、Runtime Context、
-  Completion / Completion Principles、Constraints（`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` /
+  它和别的被委托的 worker 一样，拿到的是**委托方那个 runtime 的 frame**：Agent 身份（它自己的 role / id /
+  name / backend / workspace —— 不是委托方的）、World、Runtime Context、Completion /
+  Completion Principles、Constraints（`{{AGENT}}` / `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` /
   `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}`，由 session 带下来，见 [delegation.md](delegation.md)）
   —— 它观察的世界就是 runtime 的 World，而「只观察不修复」这条约束在提示词里写死。
 - **确定性读取**：没有 agent broker（或显式注入 `Observer`）时，`HTTPObserver` 直接读部署 API

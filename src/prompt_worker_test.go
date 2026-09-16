@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -12,6 +13,55 @@ import (
 // but from the worker's own side of the delegation: the World and the runtime are
 // the ones delegating, while the agent identity and sandbox are the worker's.
 // These tests pin that split.
+
+// TestIdentityIsWhatTheAgentIsNotItsSituation: the ## Agent section is what the
+// agent is (role, purpose, id, name, how it runs); the task it works on, the cycle
+// it is in and who delegated are the Runtime Context, not the identity.
+func TestIdentityIsWhatTheAgentIsNotItsSituation(t *testing.T) {
+	worker := &Agent{
+		ID: 10126, Name: "agent-10126", Role: AgentRoleWorker, Purpose: "code_edit",
+		Model: "composer-2", LLMProvider: LLMProviderCline, Backend: AgentBackendCline,
+		Workspace: "/sandbox/10126/",
+	}
+	got := string(formatAgentIdentityJSON(worker))
+	for _, want := range []string{
+		`"role": "worker"`, `"purpose": "code_edit"`, `"id": 10126`, `"agent-10126"`,
+		`"backend": "cline"`, `"llm_provider": "cline"`, `"model": "composer-2"`,
+		`"lifecycle": "ephemeral"`, `"/sandbox/10126/"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("identity missing %s:\n%s", want, got)
+		}
+	}
+	// Nothing of the situation leaked in, and an agent nobody described is given
+	// no role: the prompt states what the runtime knows.
+	for _, unwanted := range []string{"task", "step", "delegated_by", "previous_actions"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("identity carries %s:\n%s", unwanted, got)
+		}
+	}
+	if role := string(formatAgentIdentityJSON(&Agent{ID: 1, Name: "agent-1"})); strings.Contains(role, `"role"`) {
+		t.Errorf("identity invents a role: %s", role)
+	}
+	// A plan the runtime never created an agent for has no identity at all.
+	if got := string(formatAgentIdentityJSON(nil)); got != "null" {
+		t.Errorf("identity of no agent=%s, want null", got)
+	}
+}
+
+// unfenceObject reads a fenced JSON object (```json … ```) as its keys, so a test
+// can say what a rendered section does and does not contain.
+func unfenceObject(t *testing.T, fenced string) map[string]json.RawMessage {
+	t.Helper()
+	body := strings.TrimSpace(fenced)
+	body = strings.TrimPrefix(body, "```json")
+	body = strings.TrimSuffix(strings.TrimSpace(body), "```")
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &out); err != nil {
+		t.Fatalf("section is not the fenced JSON it should be: %v\n%s", err, fenced)
+	}
+	return out
+}
 
 // workerPlaceholderAction asks the runtime for the values it would render into a
 // delegated worker's prompt, while its cycle is running.
@@ -44,8 +94,11 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 	capability.RegisterDefaults(f, capability.Deps{})
 	_autonomy = &Autonomy{CapabilityFactory: f}
 
-	planner := &Agent{ID: 10095, Name: "agent-10095", Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCursor, Workspace: "/sandbox/10095/"}
-	worker := &Agent{ID: 10099, Name: "agent-code_edit-1", Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCline, Workspace: "/sandbox/10099/"}
+	planner := &Agent{ID: 10095, Name: "agent-10095", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCursor, Workspace: "/sandbox/10095/"}
+	worker := &Agent{
+		ID: 10099, Name: "agent-code_edit-1", Role: AgentRoleWorker, Purpose: "code_edit", Model: "composer-2",
+		Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCline, Workspace: "/sandbox/10099/",
+	}
 	task := &Task{ID: "task-9", Description: "add a /healthz endpoint", GoalType: GoalType_FEATURE}
 	ctx := DecisionContext{
 		Task:    task,
@@ -73,21 +126,42 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 		t.Fatalf("completion principles=%q, want the goal type's %q", got, want)
 	}
 
-	// The context is the worker's, over the delegating task: its own identity and
-	// sandbox, the task, who delegated, and what the task already did.
+	// The identity is the worker's own: what it is (a worker, acquired for
+	// code_edit), which agent it is, and how it runs.
+	id := values["{{AGENT}}"]
+	for _, want := range []string{
+		`"role": "worker"`, `"purpose": "code_edit"`,
+		`"agent-code_edit-1"`, `"cline"`, `"composer-2"`, `"/sandbox/10099/"`,
+	} {
+		if !strings.Contains(id, want) {
+			t.Fatalf("identity missing %s:\n%s", want, id)
+		}
+	}
+
+	// The context is the situation, over the delegating task: the task, who
+	// delegated, and what the task already did.
 	rc := values["{{RUNTIME_CONTEXT}}"]
 	for _, want := range []string{
-		`"agent-code_edit-1"`, `"/sandbox/10099/"`, `"cline"`,
 		`"task-9"`, `"delegated_by"`, `"agent-10095"`, `"previous_actions"`,
 	} {
 		if !strings.Contains(rc, want) {
 			t.Fatalf("runtime context missing %s:\n%s", want, rc)
 		}
 	}
+	// The delegating agent's identity is not the worker's: it is named as
+	// delegated_by, and there is no agent of its own in the context.
+	if _, ok := unfenceObject(t, rc)["agent"]; ok {
+		t.Fatalf("runtime context still presents an agent as the worker's own:\n%s", rc)
+	}
+	// A worker has no decision cycle of its own, so it is told no step.
+	if _, ok := unfenceObject(t, rc)["step"]; ok {
+		t.Fatalf("runtime context gives the worker a cycle it does not have:\n%s", rc)
+	}
 
 	// The delegating agent's sandbox is not the worker's, so it must not appear as
 	// the worker's own — neither as its identity nor as its scope.
 	for name, value := range map[string]string{
+		"identity":        id,
 		"runtime context": rc,
 		"constraints":     values["{{CONSTRAINTS}}"],
 	} {
@@ -114,11 +188,15 @@ func TestWorkerPlaceholdersWithoutACycle(t *testing.T) {
 	_autonomy = &Autonomy{CapabilityFactory: f}
 	_world = nil
 
-	worker := &Agent{ID: 10099, Name: "agent-code_edit-1", Workspace: "/sandbox/10099/"}
+	worker := &Agent{ID: 10099, Name: "agent-code_edit-1", Role: AgentRoleWorker, Workspace: "/sandbox/10099/"}
 	values := NewRuntime(NewAgentFactory()).WorkerPlaceholders(worker)
 
 	if values["{{WORLD}}"] == "" || values["{{CONSTRUCTS}}"] == "" {
 		t.Fatalf("values=%v, want the world and constructs rendered anyway", values)
+	}
+	// The agent's own identity does not need a cycle to be rendered.
+	if id := values["{{AGENT}}"]; !strings.Contains(id, `"agent-code_edit-1"`) || !strings.Contains(id, `"role": "worker"`) {
+		t.Fatalf("identity=%s, want the worker's own identity", id)
 	}
 	rc := values["{{RUNTIME_CONTEXT}}"]
 	if strings.Contains(rc, "delegated_by") || strings.Contains(rc, `"task"`) {

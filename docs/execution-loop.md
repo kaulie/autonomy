@@ -50,9 +50,11 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   `previous_actions: [{step, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
   **每个 action 的原始 input/output 都原样保留、不合并**，planner 自己决定看哪条（例如 `code_edit` 的 `summary`/`workspace`）—— 这就是"观察结果再决定"的那一半。
 - **消息是增量的**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），所以 AGENT_V2 的
-  **frame**（Role / Delegation / Output Schema / Completion Principles / Constructs + Goal Type）只在
+  **frame**（Agent / Role / Delegation / Output Schema / Goal Type / Completion Principles / Constructs）只在
   **一个会话的第一轮**发送；之后每轮只发 **delta**（当前 Task / Context Entity / World / Runtime Context /
-  Constraints，Runtime Context 里已经带着 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
+  Constraints，Runtime Context 里已经带着 `step` 与 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
+  **谁是它自己（`{{AGENT}}`：role / id / name / backend / model / lifecycle / workspace）属于 frame**：
+  这些东西整个会话不变，而"这一轮是第几轮"（`step`）每轮都变、留在 delta —— 见 [agent.md](agent.md)。
   frame 里的 per-cycle 占位符渲染成 `reasoningDeltaMarker`，所以 frame 整段字节不变、能吃到 prompt cache。
   是否发 frame 由 `Agent.needsLLMFrame()` 决定：新会话（Cursor `Create` / Cline 新 handle（含 mode|cwd 变化））
   为真，且只有 run **成功之后**才 `markLLMFrameSent()` —— 首轮失败会重发 frame，不会让会话裸着没有指令；

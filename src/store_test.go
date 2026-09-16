@@ -426,6 +426,10 @@ func TestFinishAgentSoftDeletesInStore(t *testing.T) {
 	}
 }
 
+// preparePolicyRoot is a PROJECT_ROOT holding the runtime's agent policy and the
+// runtime's policy file (src/agent_policy/), so a prompt rendered against it is
+// the one a deployment renders. Both are files now: the policy wording is not in
+// the code that renders the prompt.
 func preparePolicyRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -433,13 +437,14 @@ func preparePolicyRoot(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := filepath.Join("agent_policy", "AGENT_V2.md")
-	b, err := os.ReadFile(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "AGENT_V2.md"), b, 0o644); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"AGENT_V2.md", "CONSTRAINTS.json"} {
+		b, err := os.ReadFile(filepath.Join("agent_policy", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return root
 }

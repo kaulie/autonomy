@@ -58,16 +58,17 @@ type WorkerPromptContext interface {
 
 // WorkerFramePlaceholders is the frame vocabulary a delegated worker prompt may
 // use — the same placeholder names the planner's policy is rendered from
-// (src/agent_policy/AGENT_V2.md, see promptPlaceholders): the Task the work
-// belongs to, the Context Entity that anchors it, its Goal Type, the World, the
-// Runtime Context of the delegating cycle, that goal type's Completion
-// Principles, the Constraints the runtime holds the agent to, and the Constructs
-// the runtime can already do the work with.
+// (src/agent_policy/AGENT_V2.md, see promptPlaceholders): the agent's own
+// identity, the Task the work belongs to, the Context Entity that anchors it, its
+// Goal Type, the World, the Runtime Context of the delegating cycle, that goal
+// type's Completion Principles, the Constraints the runtime holds the agent to,
+// and the Constructs the runtime can already do the work with.
 //
 // A capability that needs an agent renders this frame into that agent's prompt
 // (RenderWorkerPrompt), so the agent works against the runtime that delegated to
 // it instead of guessing at the world it is working in.
 var WorkerFramePlaceholders = []string{
+	"{{AGENT}}",
 	"{{TASK}}",
 	"{{CONTEXT_ENTITY}}",
 	"{{GOAL_TYPE}}",
