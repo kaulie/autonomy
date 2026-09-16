@@ -164,6 +164,11 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 	text := strings.TrimSpace(result.Text)
 	meta := clineRunResultToLLMRun(*result, started)
 	if text == "" {
+		// A run that answered nothing is a failed run, whatever the provider calls
+		// it: an exhausted account ends a session as "finished" with a message and
+		// no text at all. Recording that as finished would leave the only account
+		// of the failure in the run's message.
+		meta.Status = LLMStatusError
 		return "", meta, fmt.Errorf("empty model response (status=%s msg=%s)", result.Status, result.ErrorMessage)
 	}
 	return text, meta, nil

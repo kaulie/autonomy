@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT NOT NULL DEFAULT '',
   domain TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
   agent_id INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -168,6 +169,11 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, step);
 	}
 	if err := s.ensureAgentsIDSequence(); err != nil {
 		return fmt.Errorf("migrate agents.id sequence: %w", err)
+	}
+	// tasks.error records why a task ended in error. Databases that predate the
+	// column (every task row until now) get it empty, which is what they know.
+	if err := s.ensureColumn("tasks", "error", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate tasks.error: %w", err)
 	}
 
 	// reason_turns additions for databases that predate these columns. Fresh
@@ -420,16 +426,17 @@ func (s *SQLiteStore) UpsertTask(task *Task) error {
 	}
 	task.UpdatedAt = now
 	_, err := s.db.Exec(`
-INSERT INTO tasks (id, description, domain, status, agent_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (id, description, domain, status, error, agent_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   description=excluded.description,
   domain=excluded.domain,
   status=excluded.status,
+  error=excluded.error,
   agent_id=excluded.agent_id,
   updated_at=excluded.updated_at
 `, task.ID, task.Description, string(task.Domain),
-		task.Status, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
+		task.Status, task.Error, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert task: %w", err)
 	}
