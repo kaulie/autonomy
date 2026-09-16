@@ -136,9 +136,8 @@ If you cannot make progress, report what is missing instead of guessing or expan
 
 You should follow the following constructs provided by the Runtime. They are what the Runtime can
 already do — the only moves a plan has, and each carries its own call shape: `name`, `domain`,
-`provider`, `description`, the `input` it takes and the `output` it returns. `provider` names who
-serves the capability (a deterministic provider, or an agent the Runtime acquires for it); it is
-not a scheduling axis — you call the capability, not the provider.
+`description`, the `input` it takes and the `output` it returns, so a step can be written from
+this list alone.
 
 {{CONSTRUCTS}}
 
