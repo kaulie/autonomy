@@ -32,7 +32,7 @@ func TestThePlannerPolicyDispatchesOnCapabilities(t *testing.T) {
 	for _, want := range []string{
 		"## Capability Dispatch",
 		"Steps: Capability + Input",
-		"not a scheduling axis",
+		"the only moves a plan has",
 		"{{CONSTRUCTS}}",
 	} {
 		if !strings.Contains(policy, want) {
