@@ -67,12 +67,14 @@ func (r *Runtime) Execute(decision Decision) (Result, error) {
 	r.cycle = &decision.Ctx
 	defer func() { r.cycle = nil }()
 
-	// A plan's data dependencies are checked before the plan is written: every input
-	// a step binds has to name an earlier step's declared output or a World Model
-	// value, and every input the capability requires has to be supplied. A plan whose
-	// lineage does not line up does not run at all — nothing is executed against a
-	// value that was never going to arrive, and the planner gets the reason
-	// (src/plan_lineage.go, docs/execution-step.md).
+	// The decision's own contract first (AGENT_V2.md §Type-specific Requirements),
+	// then the plan's data dependencies: a decision that breaks either does not run
+	// at all, so nothing is executed against a plan that was never going to work and
+	// the planner gets the reason to re-plan from (src/decision_rules.go,
+	// src/plan_lineage.go).
+	if err := validateDecision(decision); err != nil {
+		return Result{Err: err, Message: err.Error()}, err
+	}
 	if err := validatePlanLineage(decision.Actions); err != nil {
 		return Result{Err: err, Message: err.Error()}, err
 	}

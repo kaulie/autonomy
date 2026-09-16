@@ -191,14 +191,18 @@ func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reaso
 			in = fmt.Sprintf("local-reasoner task_id=%s", ctx.Task.ID)
 		}
 	}
-	out := `{"type":"plan","reason":"local reason","plan":[{"capability":"asset.change","input":{}}],"need":{}}`
+	out := `{"type":"plan","reason":"local reason","plan":[{"capability":"asset.change","input":{},"expected_effect":"the asset's state changes"}],"need":{}}`
 	recordReasonIO(ctx, in, out)
 	return ReasoningResult{
 		Decision: Decision{
-			Type:    "plan",
-			Reason:  "local reason",
-			Actions: []Action{CapabilityAction{Name: "asset.change", Inputs: map[string]StepInput{}}},
-			Ctx:     ctx,
+			Type:   "plan",
+			Reason: "local reason",
+			Actions: []Action{CapabilityAction{
+				Name:           "asset.change",
+				Inputs:         map[string]StepInput{},
+				ExpectedEffect: "the asset's state changes",
+			}},
+			Ctx: ctx,
 		},
 	}, nil
 }
