@@ -103,6 +103,25 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
   只渲染「对话」（输入、思考、工具、run 的返回文本），不是 run 元数据的记录 —— 因此失败原因不在那里，模型没吐字时
   那一行 assistant 是空的，它只带 `status`。
 
+## 外部读者与 schema 变更
+
+这个库不只是 autonomy 自己在读：**别的服务按只读方式打开同一份文件**（`agent-benchmark-tool`
+的 `benchmarkd` 就是长期挂着的一个，它的 `AUTONOMY_DB` 指向本库），而且往往一开就是好几天。
+
+于是 in-place 改列名/删列有一个必须知道的爆炸半径：**已经打开库、把 schema 缓存下来的读者会当场报错**。
+
+- `reason_turns.step → cycle`（见 `renameColumnIfPresent`，数据与索引一起改）就是这样：常驻的
+  `benchmarkd`（11:04 启动时探测到的是 `step`）在 19:34 重命名之后，每个列表请求都变成
+  `SQL logic error: no such column: r.step` → 页面 500，**直到它重启/重新部署**。
+- 迁移本身照旧（engine 的事，见上），但改列名的人要按这个半径评估：**读者需要重新启动一次**。
+
+对读者那一侧的规矩，写在这里免得下次再踩：
+
+1. **schema 是运行期事实，不是编译期常量**：先 `PRAGMA table_info` 探测列再拼 SQL，
+   不要假设列一定在（改名后的名字要认，旧名字也别急着摘）。
+2. **对 "no such column" 这类错误重新探测并重试一次**，而不是把启动时的 schema 用到进程结束。
+   否则源库的一次正常迁移就会让一个只读的旁观者永久 500。
+
 ## 代码位置
 
 | 关注点 | 文件 |
