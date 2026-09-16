@@ -45,9 +45,10 @@ type ExecutionPlan struct {
 type ExecutionStepPlan struct {
 	ID             int64
 	PlanID         int64
-	Idx            int // position in the plan, 1-based
+	Idx            int    // position in the plan, 1-based
+	Name           string // what the plan called this step: a later step's binding addresses it by name
 	Capability     string
-	Input          string // JSON object: the input the plan asked for, verbatim
+	Input          string // JSON object: the input the plan asked for, verbatim (literals and {"source": …} bindings)
 	ExpectedEffect string
 	EvidenceRefs   string // JSON array
 	CreatedAt      time.Time
@@ -62,7 +63,8 @@ type ExecutionStep struct {
 	TaskID     string
 	AgentID    int64 // the agent that ran the step (the planner of that cycle)
 	Cycle      int
-	Idx        int // execution order within the plan
+	Idx        int    // execution order within the plan
+	Name       string // what the plan called this step (a binding addresses it as step:<name>.output.<key>)
 	Capability string
 	Provider   string // github / agent-control-plane / cursor / cline / autonomy
 	Status     string // ok | failed

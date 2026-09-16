@@ -157,6 +157,7 @@ func (r *Runtime) recordPlan(decision Decision) (int64, []ExecutionStepPlan, err
 		}
 		steps = append(steps, ExecutionStepPlan{
 			Idx:            i + 1,
+			Name:           plannedName(action),
 			Capability:     plannedCapability(action),
 			Input:          plannedInput(action),
 			ExpectedEffect: plannedExpectedEffect(action),
@@ -189,6 +190,7 @@ func (r *Runtime) recordStep(decision Decision, planID int64, planned []Executio
 		AgentID:    agentIDOf(ctx),
 		Cycle:      ctx.Cycle,
 		Idx:        i + 1,
+		Name:       strings.TrimSpace(record.StepName),
 		Capability: record.Capability,
 		Provider:   r.providerOf(record.Capability),
 		Status:     status,
@@ -269,6 +271,16 @@ func planStepID(planned []ExecutionStepPlan, i int) int64 {
 func plannedCapability(action Action) string {
 	if cap, ok := action.(CapabilityAction); ok {
 		return strings.ToLower(strings.TrimSpace(cap.Name))
+	}
+	return ""
+}
+
+// plannedName is what the plan called a step, which is what another step's binding
+// addresses ("step:<name>.output.<key>"). It is recorded so the lineage in a stored
+// plan's input can be resolved against the rows it names.
+func plannedName(action Action) string {
+	if cap, ok := action.(CapabilityAction); ok {
+		return strings.TrimSpace(cap.StepName)
 	}
 	return ""
 }

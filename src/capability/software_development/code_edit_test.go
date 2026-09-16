@@ -147,8 +147,8 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 	if out["workspace"] != workerWorkspace {
 		t.Fatalf("out workspace=%q, want the worker's own %q", out["workspace"], workerWorkspace)
 	}
-	if out["provider"] != sd.Provider || out["status"] != "ok" || out["agent_id"] != sess.id {
-		t.Fatalf("out=%v", out)
+	if out["agent_id"] != sess.id || out["summary"] != "edited files" {
+		t.Fatalf("out=%v, want the worker's own report and identity", out)
 	}
 	if c.Name() != sd.Name || c.Domain() != sd.Domain || c.Provider() != sd.Provider {
 		t.Fatalf("meta name=%s domain=%s provider=%s", c.Name(), c.Domain(), c.Provider())
@@ -208,6 +208,39 @@ func TestCodeEditReportsThePullRequestItsWorkerNames(t *testing.T) {
 				t.Fatalf("summary=%q, want the worker's report untouched", out["summary"])
 			}
 		})
+	}
+}
+
+// TestCodeEditOutputIsTheResultNotTheRun: what a step reports is what it produced.
+// The instruction it was given, the backend that ran it and whether the run
+// succeeded are all on the step's own row (input, provider, status); echoing them
+// into the output makes a value nobody can bind to and hides the ones that can.
+func TestCodeEditOutputIsTheResultNotTheRun(t *testing.T) {
+	useRepoPrompt(t)
+	sess := &mockSession{id: "agent-code_edit-1", workspace: "/sandbox/w/", summary: "Opened https://github.com/kaulie/autonomy/pull/9"}
+	out, err := sd.CodeEdit{Agents: &mockBroker{sess: sess}}.Run(map[string]string{"instruction": "do the thing", "task_id": "task-9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]bool{}
+	for _, f := range (sd.CodeEdit{}).Outputs() {
+		declared[f.Name] = true
+	}
+	for key := range out {
+		if !declared[key] {
+			t.Errorf("output %q is not declared by code_edit", key)
+		}
+	}
+	for _, echoed := range []string{"instruction", "provider", "status"} {
+		if _, ok := out[echoed]; ok {
+			t.Errorf("output=%v echoes %q, which the step row already records", out, echoed)
+		}
+		if declared[echoed] {
+			t.Errorf("code_edit still declares %q as an output", echoed)
+		}
+	}
+	if out["pr_url"] != "https://github.com/kaulie/autonomy/pull/9" {
+		t.Fatalf("out=%v, want the pull request it opened", out)
 	}
 }
 

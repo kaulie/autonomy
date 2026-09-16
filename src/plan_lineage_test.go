@@ -247,7 +247,11 @@ func TestAPlanStepReadsWhatAnEarlierStepProduced(t *testing.T) {
 	if err != nil || len(planned) != 2 {
 		t.Fatalf("planned=%+v err=%v", planned, err)
 	}
-	// The plan row keeps what the planner wrote: the binding itself.
+	// The plan row keeps what the planner wrote: the binding itself, and the name a
+	// binding addresses (otherwise the lineage in a stored plan points at no row).
+	if planned[1].Name != "deploy" || planned[0].Name != "build" {
+		t.Errorf("plan step names=%q/%q, want build/deploy", planned[0].Name, planned[1].Name)
+	}
 	if !strings.Contains(planned[1].Input, `"source":"step:build.output.artifact_version"`) {
 		t.Errorf("plan step input=%s, want the binding the planner wrote", planned[1].Input)
 	}
@@ -256,8 +260,8 @@ func TestAPlanStepReadsWhatAnEarlierStepProduced(t *testing.T) {
 	if err != nil || len(executed) != 2 {
 		t.Fatalf("executed=%+v err=%v", executed, err)
 	}
-	if executed[1].Input != `{"version":"v1.2.3"}` {
-		t.Errorf("execution step input=%s, want the resolved value", executed[1].Input)
+	if executed[1].Name != "deploy" || executed[1].Input != `{"version":"v1.2.3"}` {
+		t.Errorf("execution step=%+v, want the name and the resolved value", executed[1])
 	}
 	if executed[0].Input != "{}" {
 		t.Errorf("first step input=%s, want {} for a step that bound nothing", executed[0].Input)

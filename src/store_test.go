@@ -451,6 +451,66 @@ func preparePolicyRoot(t *testing.T) string {
 	return root
 }
 
+// TestSQLiteStoreMigratesExecutionStepName: the execution tables gained the step's
+// name when a plan's inputs started binding to it (step:<name>.output.<key>). A
+// database written before that opens, and the rows written after carry the name —
+// without it the lineage a stored plan records points at no row.
+func TestSQLiteStoreMigratesExecutionStepName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	fresh, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The same tables as they were before the column existed.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"execution_step_plan", "execution_step"} {
+		if _, err := db.Exec("ALTER TABLE " + table + " DROP COLUMN name"); err != nil {
+			t.Fatalf("make %s legacy: %v", table, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open a pre-name database: %v", err)
+	}
+	defer store.Close()
+	// saveExecutionPlan writes through the process's active store.
+	prevStore := _store
+	_store = store
+	t.Cleanup(func() { _store = prevStore })
+
+	planID, planned, err := saveExecutionPlan(
+		ExecutionPlan{TaskID: "task-1", DecisionType: "plan", StepCount: 1, CreatedAt: time.Now()},
+		[]ExecutionStepPlan{{Idx: 1, Name: "implement", Capability: "code_edit", Input: `{"instruction":"do it"}`}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := store.ListExecutionStepPlan(planID)
+	if err != nil || len(steps) != 1 || steps[0].Name != "implement" {
+		t.Fatalf("planned=%+v err=%v, want the name read back", steps, err)
+	}
+	if _, err := store.AppendExecutionStep(ExecutionStep{
+		PlanID: planID, PlanStepID: planned[0].ID, Name: "implement", Capability: "code_edit",
+		Status: "ok", Input: `{"instruction":"do it"}`, Output: `{}`, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ran, err := store.ListExecutionSteps(planID)
+	if err != nil || len(ran) != 1 || ran[0].Name != "implement" {
+		t.Fatalf("executed=%+v err=%v, want the name read back", ran, err)
+	}
+}
+
 // TestSQLiteStoreMigratesLLMEventsKind proves an existing database (llm_events
 // without the kind column) is migrated in place and the column round-trips.
 func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
