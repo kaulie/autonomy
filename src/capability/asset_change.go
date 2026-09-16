@@ -25,7 +25,7 @@ func (AssetChange) Domain() string { return "server" }
 func (AssetChange) Provider() string { return "autonomy" }
 
 func (AssetChange) Description() string {
-	return `mutate the task target asset state. input: {"target":"<asset id>"} (optional; defaults to task Target)`
+	return `mutate the task target asset state. input: {"target":"<asset id>"} (required: nothing defaults it)`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
