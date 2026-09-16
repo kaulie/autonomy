@@ -17,6 +17,9 @@ type ReasoningInput struct {
 
 type ReasoningResult struct {
 	Decision Decision
+	// Origin is where this decision came from in the LLM record (the run and the
+	// messages), empty when the reasoner recorded nothing.
+	Origin DecisionOrigin
 }
 
 type Reasoner interface {
@@ -131,7 +134,9 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	decision.Ctx = ctx
 	stage("parse", "ok type=%s reason=%q actions=%d total=%s",
 		decision.Type, decision.Reason, len(decision.Actions), time.Since(t0).Round(time.Millisecond))
-	return ReasoningResult{Decision: decision}, nil
+	// The plan the runtime writes points back at this reply (and the input it
+	// answered) by message id, not by cycle number.
+	return ReasoningResult{Decision: decision, Origin: trace.Origin()}, nil
 }
 
 // reasoningPrompt builds the message for one decision cycle. The AGENT_V2 frame

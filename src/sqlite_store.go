@@ -160,6 +160,93 @@ CREATE INDEX IF NOT EXISTS idx_llm_events_run ON llm_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, event_type);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_messages_turn_seq ON llm_messages(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_messages_parent ON llm_messages(parent_id);
+
+-- execution_plan is one decision's plan: the steps are planned here before they
+-- run, and nothing about it is ever rewritten. A re-plan is a new row (the plan is
+-- one-shot), which is why the identity is this row's id and not the step names: a
+-- reply_message_id can produce one plan, and cycle is only an ordering label.
+--
+-- The plan's outcome is *derived*: the status of its last execution_step (nothing
+-- here maintains one), and a planned step with no execution row simply never ran.
+CREATE TABLE IF NOT EXISTS execution_plan (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id                TEXT NOT NULL DEFAULT '',
+  agent_id               INTEGER NOT NULL DEFAULT 0,
+  cycle                  INTEGER NOT NULL DEFAULT 0, -- this agent's own round (ordering only)
+  decision_type          TEXT NOT NULL DEFAULT '',   -- plan | done | blocked | need_input
+  reason                 TEXT NOT NULL DEFAULT '',
+  evidence               TEXT NOT NULL DEFAULT '[]',
+  need                   TEXT NOT NULL DEFAULT '',   -- what blocked / need_input asked for
+  step_count             INTEGER NOT NULL DEFAULT 0,
+  plan_hash              TEXT NOT NULL DEFAULT '',   -- the planned steps' fingerprint
+  reply_message_id       INTEGER,                    -- llm_messages: the planner reply this plan is
+  input_message_id       INTEGER,                    -- llm_messages: the input that reply answered
+  task_input_message_id  INTEGER,                    -- llm_messages: the task's own first user input
+  reason_turn_id         INTEGER,                    -- reason_turns: the run that produced the reply
+  created_at             TEXT NOT NULL,
+  UNIQUE(reply_message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_execution_plan_task ON execution_plan(task_id, id);
+
+-- execution_step_plan is the plan's steps, written in full before the first one
+-- runs and never updated afterwards: whether a step ran is a question for
+-- execution_step (a left join), not a column here.
+CREATE TABLE IF NOT EXISTS execution_step_plan (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id         INTEGER NOT NULL, -- execution_plan.id
+  idx             INTEGER NOT NULL, -- position in the plan (1-based)
+  capability      TEXT NOT NULL DEFAULT '',
+  input           TEXT NOT NULL DEFAULT '{}', -- the input the plan asked for, verbatim
+  expected_effect TEXT NOT NULL DEFAULT '',
+  evidence_refs   TEXT NOT NULL DEFAULT '[]',
+  created_at      TEXT NOT NULL,
+  UNIQUE(plan_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_execution_step_plan_plan ON execution_step_plan(plan_id);
+
+-- execution_step is what actually happened: one row per executed step, linked to
+-- the plan step it carries out. The first failing step ends the cycle, so the
+-- steps after it have no row at all.
+CREATE TABLE IF NOT EXISTS execution_step (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id      INTEGER NOT NULL, -- execution_plan.id
+  plan_step_id INTEGER NOT NULL, -- execution_step_plan.id
+  task_id      TEXT NOT NULL DEFAULT '',
+  agent_id     INTEGER NOT NULL DEFAULT 0, -- the agent that ran the step (its planner)
+  cycle        INTEGER NOT NULL DEFAULT 0,
+  idx          INTEGER NOT NULL DEFAULT 0, -- execution order within the plan
+  capability   TEXT NOT NULL DEFAULT '',
+  provider     TEXT NOT NULL DEFAULT '', -- github / agent-control-plane / cursor / cline / autonomy
+  status       TEXT NOT NULL DEFAULT '', -- ok | failed
+  input        TEXT NOT NULL DEFAULT '{}', -- what the capability was actually called with
+  output       TEXT NOT NULL DEFAULT '{}',
+  error        TEXT NOT NULL DEFAULT '',
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  duration_ms  INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_execution_step_plan ON execution_step(plan_step_id);
+CREATE INDEX IF NOT EXISTS idx_execution_step_plan_id ON execution_step(plan_id, idx);
+CREATE INDEX IF NOT EXISTS idx_execution_step_task ON execution_step(task_id, cycle);
+
+-- execution_step_interaction is what one step talked to while it ran: a step may
+-- have several interactions, and each is with one provider. An agent-backed
+-- capability points at its LLM run here (reason_turn_id); a capability that talks
+-- to an API over HTTP records the interaction kind and provider, with the run
+-- detail left to the non-LLM event stream (see docs/execution-step.md).
+CREATE TABLE IF NOT EXISTS execution_step_interaction (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  step_id        INTEGER NOT NULL, -- execution_step.id
+  seq            INTEGER NOT NULL, -- which interaction of that step (1-based)
+  kind           TEXT NOT NULL DEFAULT '', -- llm | http | local
+  provider       TEXT NOT NULL DEFAULT '',
+  reason_turn_id INTEGER, -- reason_turns.id for an LLM interaction
+  created_at     TEXT NOT NULL,
+  UNIQUE(step_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_execution_step_interaction_step ON execution_step_interaction(step_id);
+CREATE INDEX IF NOT EXISTS idx_execution_step_interaction_turn ON execution_step_interaction(reason_turn_id);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)
