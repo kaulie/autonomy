@@ -82,7 +82,6 @@ func TestServiceDeployTriggersThePipelineAtTheGivenBranch(t *testing.T) {
 		t.Fatalf("body=%s", stub.rawBody)
 	}
 	for k, want := range map[string]string{
-		"branch":      "release/1.2",
 		"pipeline_id": "pipeline-1a2b3c4d",
 		"state":       "queued",
 		"poll":        "/api/pipelines/pipeline-1a2b3c4d",
@@ -91,13 +90,12 @@ func TestServiceDeployTriggersThePipelineAtTheGivenBranch(t *testing.T) {
 			t.Errorf("out[%q]=%q, want %q (out=%v)", k, out[k], want, out)
 		}
 	}
-	// The service is the step's own input, and the control plane's message is prose:
-	// neither is something this call produced, so neither is reported.
-	if _, ok := out["service"]; ok {
-		t.Errorf("out=%v, want no service echoed back", out)
-	}
-	if _, ok := out["message"]; ok {
-		t.Errorf("out=%v, want no prose line from the control plane", out)
+	// What was asked for is the step's input, and who triggered it is the control
+	// plane's audit — neither is something this call produced.
+	for _, notAResult := range []string{"service", "branch", "message", "identity"} {
+		if _, ok := out[notAResult]; ok {
+			t.Errorf("out=%v carries %q, which is about the call, not its product", out, notAResult)
+		}
 	}
 }
 
@@ -116,11 +114,13 @@ func TestServiceDeployWithoutBranchLetsTheControlPlanePickTheDefault(t *testing.
 	if strings.Contains(stub.rawBody, "ref") {
 		t.Fatalf("empty branch must not be sent, body=%s", stub.rawBody)
 	}
-	if out["branch"] != "main" {
-		t.Errorf("branch=%q, want the control plane's resolved %q", out["branch"], "main")
-	}
 	if out["poll"] != "/api/pipelines/pipeline-9" {
 		t.Errorf("poll=%q, want the poll path derived from the pipeline id", out["poll"])
+	}
+	// Which ref the control plane picked is its resolution of this call's input, not
+	// something the call produced: the pipeline it created is what is reported.
+	if _, ok := out["branch"]; ok {
+		t.Errorf("out=%v, want no branch: the ref is the step's own input", out)
 	}
 }
 
@@ -233,8 +233,9 @@ func TestServiceDeployAlwaysCarriesItsIdentityHeaders(t *testing.T) {
 		t.Fatalf("headers identity_role=%q identity_id=%q, want %q / %q",
 			stub.identityRol, stub.identityID, sd.DefaultIdentityRole, sd.DefaultIdentityID)
 	}
-	if want := sd.DefaultIdentityRole + ":" + sd.DefaultIdentityID; out["identity"] != want {
-		t.Errorf("out[identity]=%q, want %q (out=%v)", out["identity"], want, out)
+	// The attribution goes with the call; the output is the pipeline it created.
+	if _, ok := out["identity"]; ok {
+		t.Errorf("out=%v, want no identity: who triggered it is the control plane's audit", out)
 	}
 }
 
@@ -247,15 +248,12 @@ func TestServiceDeployIdentityComesFromTheEnvironment(t *testing.T) {
 	stub := newPipelineStub(t, http.StatusAccepted, `{"requestId":"pipeline-6","state":"queued"}`)
 	srv := stub.start()
 
-	out, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
+	_, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stub.identityRol != "user" || stub.identityID != "user_001" {
 		t.Fatalf("headers identity_role=%q identity_id=%q, want user / user_001", stub.identityRol, stub.identityID)
-	}
-	if out["identity"] != "user:user_001" {
-		t.Errorf("out[identity]=%q, want user:user_001", out["identity"])
 	}
 }
 
@@ -295,25 +293,6 @@ func TestServiceDeployRejectsAnUnusableIdentityBeforeCalling(t *testing.T) {
 	}
 	if stub.callCount() != 0 {
 		t.Fatalf("called the control plane %d time(s) with an unusable identity", stub.callCount())
-	}
-}
-
-// TestServiceDeployIdentityIsWhatTheControlPlaneRecorded: when the control plane
-// echoes back the triggerer it stored, that is what the planner is told — the
-// authoritative attribution, not merely what this call intended.
-func TestServiceDeployIdentityIsWhatTheControlPlaneRecorded(t *testing.T) {
-	t.Setenv(sd.EnvIdentityRole, "")
-	t.Setenv(sd.EnvIdentityID, "")
-	stub := newPipelineStub(t, http.StatusAccepted,
-		`{"requestId":"pipeline-9","state":"queued","triggeredBy":"user:user_007"}`)
-	srv := stub.start()
-
-	out, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out["identity"] != "user:user_007" {
-		t.Errorf("out[identity]=%q, want the control plane's recorded triggerer", out["identity"])
 	}
 }
 

@@ -83,11 +83,9 @@ func (DeployService) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "pipeline_id", Description: "the accepted pipeline's id — poll it, do not wait for this call"},
 		{Name: "state", Description: "the pipeline's state as accepted (queued)"},
-		{Name: "branch", Description: "the ref the control plane actually packaged: the one named in the input, or the service's own default branch when the input left it empty"},
 		{Name: "poll", Description: "the status path to follow, e.g. /api/pipelines/<id> (deployment.monitor takes it as poll)"},
 		{Name: "deployment", Description: "the deployment the pipeline belongs to, once the control plane reports it"},
 		{Name: "version", Description: "the version being deployed, once the control plane reports it"},
-		{Name: "identity", Description: "who the control plane recorded as the triggerer, role:id (e.g. agent:autonomy)"},
 	}
 }
 
@@ -151,17 +149,16 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 	}
 
 	out := map[string]string{
-		"branch":      job.Ref,
 		"pipeline_id": job.RequestID,
 		"state":       job.State,
 		"poll":        firstNonEmpty(job.Poll, "/api/pipelines/"+job.RequestID),
-		// The control plane echoes what it recorded as the triggerer; fall back to
-		// the identity this call carried when an older control plane does not.
-		"identity": firstNonEmpty(job.TriggeredBy, identity.String()),
 	}
-	// The service is the step's own input, and the control plane's message about
-	// accepting the request is prose — neither is something this call produced. What
-	// only it can say is in `branch` (the ref it resolved), `deployment` and `version`.
+	// What this call produced is the pipeline it created and what the control plane
+	// says about it. Everything else is about the call itself: the service and the
+	// ref are the step's own input (the control plane's answer to an empty ref is its
+	// resolution of that input), the attribution is the control plane's audit (its
+	// panel is where it is authoritative), and `message` is its prose about accepting
+	// the request.
 	for k, v := range map[string]string{
 		"deployment": job.Deployment,
 		"version":    job.Version,

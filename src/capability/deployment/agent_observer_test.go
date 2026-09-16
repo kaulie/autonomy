@@ -293,8 +293,8 @@ func TestMonitorMonitorsThroughAnAgentWhenItHasABroker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["source"] != "agent" {
-		t.Fatalf("source=%q, want the monitoring agent to have produced this", out["source"])
+	if _, ok := out["source"]; ok {
+		t.Errorf("out=%v, want no source: who looked is the capability's wiring, not the observation", out)
 	}
 	if out["state"] != "failed" || out["problem"] != "true" {
 		t.Fatalf("state/problem = %q/%q", out["state"], out["problem"])
@@ -321,10 +321,11 @@ func TestMonitorMonitorsThroughAnAgentWhenItHasABroker(t *testing.T) {
 	}
 }
 
-// TestMonitorReportsWhichProviderMonitored: without a broker the deterministic
-// reader answers (and says so); an explicitly injected observer is reported as
-// custom.
-func TestMonitorReportsWhichProviderMonitored(t *testing.T) {
+// TestMonitorObservesThroughTheReaderItHas: which provider monitors is the
+// capability's own wiring, and the report says what was observed either way —
+// without a broker the HTTP reader answers, and an injected observer answers
+// instead of it (the server is not read at all).
+func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 	srv := newRecordingServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"state":"running"}`)
 	})
@@ -332,17 +333,29 @@ func TestMonitorReportsWhichProviderMonitored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["source"] != "http" {
-		t.Fatalf("source=%q, want http without an agent broker", out["source"])
+	if out["state"] != "running" {
+		t.Fatalf("state=%q, want the HTTP reader's observation", out["state"])
+	}
+	if _, ok := out["source"]; ok {
+		t.Errorf("out=%v, want no source: who looked is not what was seen", out)
+	}
+	if !srv.asked("/api/pipelines/p-9") {
+		t.Fatalf("the HTTP reader did not answer: %v", srv.paths)
 	}
 
-	out, err = (deployment.Monitor{Observer: observeOnce(deployment.Snapshot{ID: "p-9", State: deployment.StateRunning})}).
-		Run(map[string]string{"deployment": "p-9", "endpoint": "http://x"})
+	// An injected observer answers instead, and nothing is read over HTTP.
+	read := len(srv.paths)
+	injected := observeOnce(deployment.Snapshot{ID: "p-9", State: deployment.StateSucceeded})
+	out, err = (deployment.Monitor{Observer: injected}).
+		Run(map[string]string{"deployment": "p-9", "endpoint": srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["source"] != "custom" {
-		t.Fatalf("source=%q, want custom for an injected observer", out["source"])
+	if out["state"] != "succeeded" {
+		t.Fatalf("state=%q, want the injected observer's snapshot", out["state"])
+	}
+	if len(srv.paths) != read {
+		t.Fatalf("the injected observer answered but the server was read: %v", srv.paths[read:])
 	}
 }
 

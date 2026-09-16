@@ -94,9 +94,9 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 
 - 语义：把「某个服务的某个分支」交给部署控制面（agent-control-plane），由它打包该 git ref、再部署。
 - 输入：`{"service":"<service id>","branch":"<branch/tag>"}`（`service_id` / `ref` 亦可；`branch` 留空 = 用服务契约里的默认分支）。
-- 输出：`{"pipeline_id","state","branch","poll","identity"}`；`branch` 是**控制面真正打包的那个 ref**（输入留空时就是服务自己的默认分支），流水线报回来的 `deployment` / `version` 一并带上。**不回显**输入里的 `service`，也不带控制面那句散文 `message`：能力只报它**产出**的东西（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。
+- 输出：`{"pipeline_id","state","poll","deployment","version"}` —— **这次调用产出的那条流水线**，以及控制面随后报回来的归属（`deployment` / `version`）。不回显输入（`service`、`branch`：控制面对空 `branch` 的解析也是它对这个输入的解析）、不带控制面那句散文 `message`、也不带归属审计 `identity`（谁是触发者由控制面自己的面板/审计记录说了算，能力不把它当产出回传）。能力只报产出，见 [execution-step.md](execution-step.md) 的「计划的数据来源」。
 - **触发 ≠ 等待**：打包→部署要跑几分钟，所以 Run 在控制面**受理**（HTTP 202）后立刻返回 pipeline id，不占住 decision cycle；最终结果由后续观察决定（`poll` 就是 `GET /api/pipelines/<id>`）—— 触发成功不等于世界状态已达成（见[不变式](#不变式) 第 3 条）。
-- **identity 注入（每个触发都要带）**：控制面的两个写接口（`/api/deploy-notify`、`/api/deploys`）要求调用方自报身份（[第一阶段身份校验](https://github.com/kaulie/agent-control-plane-deployment)：`identity_role: user|agent` + `identity_id: user_001 / agent_002`，缺失/非法 → 401），部署才能被审计与面板归因。`service.deploy` **永远**带这两个头，不依赖控制面 `IDENTITY_ENFORCE=0` 的逃生开关：取值顺序是 **输入**（`identity_role` / `identity_id`，可选，可把某次部署归给某个身份）→ **环境**（`IDENTITY_ROLE` / `IDENTITY_ID`，与控制面自己调用方同名，改归属不用改代码）→ **默认**（`agent:autonomy`：autonomy 是 agent 不是人，默认就署它自己的名）。角色大小写不敏感，非法值在**发请求之前**就报错，而不是拿 401 回来；输出里的 `identity` 是控制面**记录下来的**触发者（`triggeredBy`），比调用方自述更权威。
+- **identity 注入（每个触发都要带）**：控制面的两个写接口（`/api/deploy-notify`、`/api/deploys`）要求调用方自报身份（[第一阶段身份校验](https://github.com/kaulie/agent-control-plane-deployment)：`identity_role: user|agent` + `identity_id: user_001 / agent_002`，缺失/非法 → 401），部署才能被审计与面板归因。`service.deploy` **永远**带这两个头，不依赖控制面 `IDENTITY_ENFORCE=0` 的逃生开关：取值顺序是 **输入**（`identity_role` / `identity_id`，可选，可把某次部署归给某个身份）→ **环境**（`IDENTITY_ROLE` / `IDENTITY_ID`，与控制面自己调用方同名，改归属不用改代码）→ **默认**（`agent:autonomy`：autonomy 是 agent 不是人，默认就署它自己的名）。角色大小写不敏感，非法值在**发请求之前**就报错，而不是拿 401 回来。**归属只走请求头**：它是这次调用的元信息，权威记录在控制面那边（`triggeredBy` / 面板审计），能力不把它当产出回传。
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`；`IDENTITY_ROLE` / `IDENTITY_ID` 覆盖署谁的名，缺省 `agent` / `autonomy`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 
