@@ -205,44 +205,27 @@ func (Monitor) Outputs() []spec.Field {
 	}
 }
 
-// polling is who observes during one monitor call. poll runs every poll of a watch —
-// cheap and deterministic, with no agent behind it — and judge produces the one
-// observation the call returns and reports. judge is nil when both are the same
-// observer (the deterministic reader, or one the host injected).
+// observer is the provider for one call, with the one agent it may hold already acquired
+// and bound — and the release that ends it.
 //
-// They differ only when the monitor delegates: an agent-backed monitor polls the
-// deployment API itself and asks its agent once, for the observation that settled. A
-// verdict on a poll in between would die with that snapshot — only the last one is
-// returned — and a worker agent per poll is one per poll, when one per call is what a
-// single observation is worth.
-type polling struct {
-	poll  Observer
-	judge Observer // nil: poll is the one asked for the result
-}
-
-// observation is the observer to ask for the result of this call.
-func (p polling) observation() Observer {
-	if p.judge != nil {
-		return p.judge
-	}
-	return p.poll
-}
-
-// observer picks the monitoring provider: an explicit one wins, then the agent-backed
-// observer when an agent broker is available, then the deterministic HTTP reader. Which
-// one it was is the capability's own wiring, not part of the observation (an agent-backed
-// observation shows as this step's interaction row: one row per agent, one agent per
-// call).
-func (m Monitor) observer() polling {
+// A watch asks this observer once per poll; an agent-backed observer asks its *bound*
+// agent, so one `deployment.monitor` call holds one agent (not one per poll: task-27's
+// watch acquired four workers for one deployment) and that agent is told about every
+// observation, so it knows the states in between.
+//
+// An observer the host injected is returned as it is: its cost is its business.
+func (m Monitor) observer(req Request) (Observer, func(), error) {
 	if m.Observer != nil {
-		// The host's own observer is asked for every poll: its cost is its business.
-		return polling{poll: m.Observer}
+		return m.Observer, func() {}, nil
 	}
-	if m.Agents != nil {
-		agent := &AgentObserver{Agents: m.Agents}
-		return polling{poll: agent.base(), judge: agent}
+	if m.Agents == nil {
+		return NewHTTPObserver(), func() {}, nil
 	}
-	return polling{poll: NewHTTPObserver()}
+	bound, release, err := (&AgentObserver{Agents: m.Agents}).begin(context.Background(), req)
+	if err != nil {
+		return nil, nil, err
+	}
+	return bound, release, nil
 }
 
 // Run observes the deployment and turns that observation into a report: the
@@ -254,23 +237,27 @@ func (m Monitor) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	snap, _, err := observe(m.observer(), req, m.Sleep)
+	obs, release, err := m.observer(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", Name, err)
+	}
+	defer release()
+	snap, _, err := observe(obs, req, m.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
 	return report(snap, req, time.Now()), nil
 }
 
-// observe takes one observation, or — with Watch — polls until the deployment reaches a
-// terminal state or the window closes. The window is bounded twice (poll count and wall
-// clock) so a capability call can never block the decision loop indefinitely.
+// observe takes one snapshot, or — with Watch — polls until the deployment
+// reaches a terminal state or the window closes. The window is bounded twice
+// (poll count and wall clock) so a capability call can never block the decision
+// loop indefinitely.
 //
-// One observation asks the observer that decides (the agent, when the monitor delegates).
-// A watch polls `p.poll` — the deterministic reader, for a delegated monitor — and asks
-// `p.judge` once, when the observation is over, because the observation that settled is
-// the only one anybody sees. Either way one `deployment.monitor` call holds at most one
-// agent, and asks it once.
-func observe(p polling, req Request, sleep func(context.Context, time.Duration) error) (Snapshot, int, error) {
+// Every poll is one observation, and an agent-backed observer is asked about each of
+// them: the agent it holds for this call sees the states in between, and the one it
+// reports is the observation that settled.
+func observe(obs Observer, req Request, sleep func(context.Context, time.Duration) error) (Snapshot, int, error) {
 	if sleep == nil {
 		sleep = defaultSleep
 	}
@@ -285,15 +272,6 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 		timeout = 0
 	}
 	ctx := context.Background()
-
-	if !req.Watch {
-		snap, err := p.observation().Observe(ctx, req)
-		if err != nil {
-			return Snapshot{}, 1, err
-		}
-		return snap, 1, nil
-	}
-
 	deadline := time.Now().Add(timeout)
 	maxPolls := 1 + int(timeout/interval)
 	var last Snapshot
@@ -301,17 +279,17 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 	polls := 0
 	for {
 		polls++
-		snap, err := p.poll.Observe(ctx, req)
+		snap, err := obs.Observe(ctx, req)
 		if err != nil {
 			lastErr = err
 		} else {
 			lastErr = nil
 			last = snap
-			if snap.state().terminal() {
-				break
+			if !req.Watch || snap.state().terminal() {
+				return snap, polls, nil
 			}
 		}
-		if polls >= maxPolls || !time.Now().Before(deadline) {
+		if !req.Watch || polls >= maxPolls || !time.Now().Before(deadline) {
 			break
 		}
 		if err := sleep(ctx, interval); err != nil {
@@ -321,16 +299,7 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 	if lastErr != nil {
 		return Snapshot{}, polls, lastErr
 	}
-	// The observation that settled is the one the judge is asked about: one agent per
-	// call, asked once, however many times the watch polled.
-	if p.judge == nil {
-		return last, polls, nil
-	}
-	snap, err := p.judge.Observe(ctx, req)
-	if err != nil {
-		return Snapshot{}, polls, err
-	}
-	return snap, polls, nil
+	return last, polls, nil
 }
 
 func defaultSleep(ctx context.Context, d time.Duration) error {

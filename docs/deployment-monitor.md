@@ -35,7 +35,7 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 | `status_url` | 否 | — | 完整状态 URL（优先级最高） |
 | `endpoint` | 否 | `$DEPLOYMENT_API_URL` → `http://127.0.0.1:4220` | 部署服务 base URL；状态地址 = `<endpoint>/api/pipelines/<deployment>` |
 | `logs_url` | 否 | `<status_url>/logs` | 单独的日志地址（状态里已带 `logs` 时不会去取） |
-| `watch` | 否 | `false` | `true` 时轮询到终态或超时为止（**轮询直接用 API/observer，不加 agent**；agent 只在观察结束时被问一次，见下） |
+| `watch` | 否 | `false` | `true` 时轮询到终态或超时为止（**一次调用只有一个 agent，每轮观察都喂给它**，见下） |
 | `interval` | 否 | `5`（秒） | 轮询间隔，最小 1s |
 | `timeout` | 否 | `60`（秒） | 整个观察窗口（`watch` 时生效），上限 600s |
 | `tail` | 否 | `40` | 保留最近多少行日志作为证据，上限 500 |
@@ -115,7 +115,7 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 - **自定义**：宿主可以注入自己的 Observer（CI API、编排器、本地部署记录）：
   `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`。
 
-**一次调用最多一个 agent，且只问一次**：`watch` 的轮询用确定性 reader（`AgentObserver` 的 base）直接读部署 API，**观察结束（终态/超时）时**才把那份观察交给监控 agent 判一次 —— 中途各轮的判断本来就会随着它的 snapshot 一起被丢掉（返回值只有 settle 的那一份），而"每轮一个 worker"就是"每轮一个 agent"。所以一次 `deployment.monitor` 调用期间最多存在一个 agent，用完即释放（agent-backed 的那次观察在这步自己的交互行上留一行）。
+**一次调用只有一个 agent，而且每轮观察都喂给它**：`watch` 的每一轮都把那一份观察（原始 reader 读到的状态 + 坐标）交给**同一个**监控 agent，所以它知道中间发生了什么 —— 只 acquire 一次、调用结束时释放，**不是每轮一个 worker**（task-27 那次 watch 为一次部署开了 4 个 agent）。返回的是 agent 对 **settle 那一份观察**的判断（它看过前面几轮，判断里就带着这段经过）；单次（非 `watch`）观察同样是"谁决定谁被问"，一次观察一个 agent。注入的 observer 仍然每轮都被问：那是宿主自己的成本。
 
 **"是谁在观察"不进输出**：走的是 agent 还是直接读 API，是能力的**接线**（agent 那条路在这步自己的交互行上看得见）；输出只说观察到了什么，`source` / `polls` / `observed_at` / `provider` 都不在里面。
 

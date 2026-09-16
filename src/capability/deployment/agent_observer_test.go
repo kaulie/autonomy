@@ -20,7 +20,8 @@ type fakeSession struct {
 	id       string
 	answer   string
 	err      error
-	prompt   string
+	prompt   string   // the last prompt
+	prompts  []string // every prompt, in order: one per observation
 	released bool
 }
 
@@ -30,6 +31,7 @@ func (s *fakeSession) Workspace() string { return "/sandbox/agent-deployment.mon
 
 func (s *fakeSession) Prompt(_ context.Context, prompt string) (string, error) {
 	s.prompt = prompt
+	s.prompts = append(s.prompts, prompt)
 	return s.answer, s.err
 }
 
@@ -360,22 +362,42 @@ func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 	}
 }
 
-// TestWatchHoldsOneAgentAndAsksItOnce: watching polls the deployment API itself and asks
-// the monitoring agent once, for the observation that settled — one deployment.monitor
-// call holds one agent, however many times it polls. task-27's watch acquired four (one
-// per poll) and threw three of their verdicts away with the snapshots they described.
-func TestWatchHoldsOneAgentAndAsksItOnce(t *testing.T) {
+// answeringSession answers by what it was shown: a deployment it sees as still running is
+// reported as running, and one it sees as succeeded as succeeded — so a watch really has
+// to poll (and the agent's own verdict is what decides when to stop).
+type answeringSession struct {
+	fakeSession
+}
+
+func (s *answeringSession) Prompt(ctx context.Context, prompt string) (string, error) {
+	_, _ = s.fakeSession.Prompt(ctx, prompt) // records the observation it was given
+	state := "running"
+	if strings.Contains(prompt, "state: succeeded") {
+		state = "succeeded"
+	}
+	return `{"state":"` + state + `","problem":false,"signals":[],` +
+		`"diagnosis":"the deployment is ` + state + `","suggestions":[],"logs":[]}`, nil
+}
+
+// TestWatchFeedsEveryPollToOneAgent: a watch acquires one agent for the call and puts
+// every observation to it, so the agent knows the states in between — one
+// deployment.monitor call holds one agent (task-27's watch acquired four workers for one
+// deployment, one per poll), and the observation it reports is the one that settled.
+func TestWatchFeedsEveryPollToOneAgent(t *testing.T) {
 	useRepoPrompt(t)
 	reads := 0
-	srv := newRecordingServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		reads++
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// Count the status reads only: the reader also fetches the logs path.
+		if !strings.HasSuffix(r.URL.Path, "/logs") {
+			reads++
+		}
 		state := "running"
 		if reads >= 3 {
 			state = "succeeded"
 		}
 		_, _ = io.WriteString(w, `{"state":"`+state+`"}`)
 	})
-	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
+	sess := &answeringSession{fakeSession: fakeSession{id: "agent-deployment.monitor-1"}}
 	b := &fakeBroker{sess: sess}
 
 	out, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
@@ -388,18 +410,21 @@ func TestWatchHoldsOneAgentAndAsksItOnce(t *testing.T) {
 	if b.calls != 1 {
 		t.Fatalf("agents acquired=%d, want one agent for the whole call", b.calls)
 	}
+	if len(sess.prompts) != 3 {
+		t.Fatalf("the agent was asked %d time(s), want one observation per poll (3)", len(sess.prompts))
+	}
+	// Every poll reached the agent: what it saw is what happened.
+	if !strings.Contains(sess.prompts[0], "state: running") {
+		t.Fatalf("the first observation was not fed to the agent: %s", sess.prompts[0])
+	}
+	if !strings.Contains(sess.prompts[2], "state: succeeded") {
+		t.Fatalf("the settled observation was not fed to the agent: %s", sess.prompts[2])
+	}
 	if !sess.released {
 		t.Error("the agent was not released when the call ended")
 	}
-	if reads < 3 {
-		t.Fatalf("the deployment was read %d times, want the watch to have polled it", reads)
-	}
-	// The agent judged the observation that settled, not one of the polls on the way.
-	if !strings.Contains(sess.prompt, "succeeded") {
-		t.Fatalf("the agent was not shown the settled observation: %s", sess.prompt)
-	}
-	if out["state"] != "failed" {
-		t.Fatalf("state=%q, want the agent's own verdict (agentAnswerJSON says failed)", out["state"])
+	if out["state"] != "succeeded" {
+		t.Fatalf("state=%q, want the agent's verdict on the settled observation", out["state"])
 	}
 }
 

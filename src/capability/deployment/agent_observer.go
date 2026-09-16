@@ -30,6 +30,36 @@ type AgentObserver struct {
 	Model string
 	// Backend overrides the host's default LLM backend.
 	Backend string
+	// sess is the one agent this observer holds for a call, when its caller bound it
+	// (begin). Every observation is then put to that agent — a watch asks one agent
+	// about every poll, so the agent sees the states in between and one
+	// deployment.monitor call holds one agent. nil means this observer acquires and
+	// releases an agent per observation: one observation, self-contained.
+	sess broker.AgentSession
+}
+
+// begin acquires the one agent this observer may hold for a call and returns an observer
+// bound to it, plus the release that ends it.
+//
+// It is what makes a watch affordable: the polls are put to the same agent instead of a
+// fresh worker per poll (task-27's watch acquired four for one deployment), and because
+// the session keeps the conversation, the agent knows what it saw before.
+func (o *AgentObserver) begin(ctx context.Context, req Request) (*AgentObserver, func(), error) {
+	if o == nil || o.Agents == nil {
+		return nil, nil, fmt.Errorf("agent observer: agent broker not configured (use Runtime.AcquireAgent)")
+	}
+	sess, err := o.Agents.AcquireAgent(ctx, broker.AcquireAgentOpts{
+		Purpose: Name,
+		Backend: o.Backend,
+		Model:   o.Model,
+		TaskID:  req.TaskID,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent observer: acquire agent: %w", err)
+	}
+	bound := *o
+	bound.sess = sess
+	return &bound, func() { _ = sess.Release(ctx) }, nil
 }
 
 func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, error) {
@@ -47,16 +77,22 @@ func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, err
 	// investigate for itself, and the failure is part of what it is told.
 	base, baseErr := o.base().Observe(ctx, req)
 
-	sess, err := o.Agents.AcquireAgent(ctx, broker.AcquireAgentOpts{
-		Purpose: Name,
-		Backend: o.Backend,
-		Model:   o.Model,
-		TaskID:  req.TaskID,
-	})
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("agent observer: acquire agent: %w", err)
+	// The session this call holds, or one acquired for this single observation and
+	// released with it.
+	sess := o.sess
+	if sess == nil {
+		acquired, err := o.Agents.AcquireAgent(ctx, broker.AcquireAgentOpts{
+			Purpose: Name,
+			Backend: o.Backend,
+			Model:   o.Model,
+			TaskID:  req.TaskID,
+		})
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("agent observer: acquire agent: %w", err)
+		}
+		sess = acquired
+		defer func() { _ = sess.Release(ctx) }()
 	}
-	defer func() { _ = sess.Release(ctx) }()
 
 	// The monitoring agent is a delegated worker like any other, so its prompt
 	// carries the frame of the runtime that delegated: the World and Runtime
