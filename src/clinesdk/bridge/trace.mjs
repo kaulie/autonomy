@@ -17,7 +17,7 @@
  * AUTONOMY_LLM_DEBUG keeps its Cursor-client meaning (=1 verbose firehose, =0
  * silence) so one variable can trace both backends.
  */
-import { coerceText, messageOf } from "./config.mjs";
+import { coerceText, errorReason, messageOf } from "./config.mjs";
 
 /** DEFAULT_WIDTH is the per-field character budget for a signal line. */
 export const DEFAULT_WIDTH = 600;
@@ -132,7 +132,7 @@ function agentSignalLine(inner, width) {
 		case "done":
 			return `done ${condense(inner.reason ?? "", width)} iterations=${intOf(inner.iterations)}`;
 		case "error":
-			return `error ${condense(messageOf(inner.error ?? inner.message, "agent error"), width)}`;
+			return `error ${condense(errorReason(inner, "agent error"), width)}`;
 		default:
 			return type === "" ? null : type;
 	}

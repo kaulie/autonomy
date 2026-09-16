@@ -36,8 +36,13 @@ func Manager(self string) *clinesdk.BridgeManager {
 //
 //	first send on a session  -> reasoning + text "pong", usage in 11/out 2, cost 0.0001
 //	later sends              -> tool call + text "tool said hi", delta usage
-//	prompt containing "hang" -> never answers (the client must time out)
-//	prompt containing "fail" -> provider error
+//	prompt containing "never answer" -> never answers (the client must time out)
+//	prompt containing "out of balance" -> finished with no text, and the reason only
+//	                            in the run result (an exhausted account)
+//	prompt containing "fail me" -> provider error
+//
+// Triggers are phrases, not single words: a real prompt carries the agent policy,
+// so a bare "hang" would match its "change" and a busy prompt would look stuck.
 func Main() {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -108,7 +113,7 @@ func Main() {
 				}},
 			})
 			switch {
-			case strings.Contains(prompt, "hang"):
+			case strings.Contains(prompt, "never answer"):
 				// Never answers: the client must abort on its own context.
 			case strings.Contains(prompt, "stream slowly"):
 				// Keeps producing events well past any short idle budget: this is
@@ -137,6 +142,14 @@ func Main() {
 				event(req.ID, agentID, sessionID, map[string]any{
 					"type": "error", "error": map[string]any{}, "errorClass": "unknown",
 					"iteration": 2, "recoverable": false,
+				})
+				// The reason the run result carries, re-emitted inside the request
+				// window the way bridge.mjs does (runResultErrorEvent): an event that
+				// arrives after that window closes is dropped by the client, so the
+				// failure would exist only in the result.
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "error", "error": map[string]any{"message": "Insufficient Balance"},
+					"source": "run_result", "recoverable": false,
 				})
 				result(req.ID, map[string]any{
 					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "finished",

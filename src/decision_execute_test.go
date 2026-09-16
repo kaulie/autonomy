@@ -194,7 +194,61 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	}
 }
 
-// TestRunRecordsWhyItCouldNotDecide: when a task cannot even be planned there is
+// TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask: the whole chain, from the
+// provider ending a run with no answer to what a person can look up later — the
+// task says why it failed, and the run's stream carries the reason too (the
+// client stores the events itself, so a reason that only the result knew would be
+// missing from the record).
+func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
+	installFakeClineClient(t)
+	// The fake bridge answers an empty "finished" run to a prompt that says it is
+	// out of balance; the task description travels in the delta, so it reaches it.
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "llm")
+	t.Setenv("PROJECT_ROOT", filepath.Join("..")) // the shipped agent policy
+
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prevStore, prevAuto, prevFlag := _store, _autonomy, bootstrapFlag
+	t.Cleanup(func() { _store, _autonomy, bootstrapFlag = prevStore, prevAuto, prevFlag })
+	_store = store
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: f, Store: store}
+	bootstrapFlag = true
+
+	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
+	task := &Task{ID: "t-out-of-balance", Description: "out of balance", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	err = rt.Run(task)
+	if err == nil || !strings.Contains(err.Error(), "empty model response") {
+		t.Fatalf("Run=%v, want the empty answer to have failed the decide", err)
+	}
+
+	var status, reason string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "error" || !strings.Contains(reason, "Insufficient Balance") {
+		t.Fatalf("task status/error=%q/%q, want the failure and its reason", status, reason)
+	}
+
+	// The reason is in the recorded stream as well, marked as sourced from the run
+	// result: it arrived after the provider's own error event said nothing.
+	var events int
+	if err := store.db.QueryRow(`
+SELECT count(*) FROM llm_events e JOIN reason_turns r ON r.id = e.turn_id
+WHERE r.task_id = ? AND json_extract(e.payload, '$.source') = 'run_result'
+  AND json_extract(e.payload, '$.error.message') = 'Insufficient Balance'`, task.ID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("run_result error events=%d, want exactly one carrying the reason", events)
+	}
+}
+
 // nothing else to explain the failure — the reason the decide could not happen is
 // the whole of it, and it has to reach the row.
 func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {

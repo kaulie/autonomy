@@ -191,6 +191,11 @@ tool_call  ← tool_call_started, tool_call_delta, tool_call_completed
 
 **粒度差异是 provider 能力差异，不是语义差异**（有意不抹平）：Cursor 的思考/回答是**整块**（一条消息 + 上报时长），Cline 是**逐 token 增量** + 块结束标记；思考块结束事件把全文放在 `payload.text`，但**不重复写入 `text_delta`**（否则聚合出的 thinking 消息会翻倍）。
 
+**失败的原因必须进流，不能在别处**：一次 run 失败时，provider 的那句话（`Insufficient Balance` …）可能只出现在 run result 里 —— SDK 的 error 事件本身可能是 `{"error":{}}`，或者那句话作为「run 的最后一个事件」落在请求窗口关闭之后（客户端按 request 关联事件，窗口外的会被丢掉）。Cline bridge 因此做两件事（`src/clinesdk/bridge/config.mjs`：`errorReason` / `withErrorReason` / `runResultErrorEvent`）：
+
+1. 转发的 error 事件先被补齐 `error.message`（`error ?? message` 会优先选那个空对象，所以按「谁真的说了话」挑）；
+2. result 里有、但流里没送达的原因，在**返回 result 之前**作为一条 error 事件补进本次请求窗口，payload 标 `"source":"run_result"` —— 于是 `llm_events` 与 `reason_turns.error_message` 说法一致，UI 的事件视图也看得到。
+
 **一致性由测试兜底**：`src/llm_event_contract_test.go` 是契约的**可执行版本** —— 表里每个语义都要求两个后端给出同一 `family` + 同一 `channel` + 同一批规范键。新增 provider 时照表补样例即可，漂移会直接测挂。
 
 查询示例：

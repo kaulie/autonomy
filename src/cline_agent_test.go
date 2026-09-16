@@ -155,11 +155,18 @@ func TestPromptLLMStreamSwitchesSessionMode(t *testing.T) {
 // "finished" while having answered nothing at all — an exhausted account does,
 // after a long think. That run is a failure, and the row has to say so, or the
 // only account of it is the message it carried.
+//
+// The reason has to reach the stream too: the runtime stores these events, and a
+// failure whose reason exists only in the run result is not diagnosable from what
+// was recorded.
 func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 	installFakeClineClient(t)
 	agent := newClineTestAgent(t)
 
-	text, meta, err := agent.PromptLLMStream(context.Background(), "out of balance", ReasonModeAgent, nil)
+	var events []LLMEvent
+	text, meta, err := agent.PromptLLMStream(context.Background(), "out of balance", ReasonModeAgent, func(ev LLMEvent) {
+		events = append(events, ev)
+	})
 	if err == nil {
 		t.Fatalf("an empty answer was reported as a run: text=%q meta=%+v", text, meta)
 	}
@@ -174,6 +181,24 @@ func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 	// What the provider said is kept: it is the only reason there is.
 	if !strings.Contains(meta.ErrorMessage, "Insufficient Balance") {
 		t.Errorf("error message=%q, want the provider's own", meta.ErrorMessage)
+	}
+
+	// And it is in the stream, as an error event the run result sourced.
+	var carried bool
+	for _, ev := range events {
+		if ev.Channel != LLMChannelError {
+			continue
+		}
+		if payloadString(payloadMap(ev.Payload, "error"), "message") != "Insufficient Balance" {
+			continue
+		}
+		if payloadString(ev.Payload, "source") != "run_result" {
+			t.Errorf("event=%+v, want it marked as sourced from the run result", ev.Payload)
+		}
+		carried = true
+	}
+	if !carried {
+		t.Fatalf("no error event carried the reason; events=%+v", events)
 	}
 }
 

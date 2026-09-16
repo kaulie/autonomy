@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clineConfigCandidates, coerceText, interactiveSession, messageOf, resolveClineDefaults } from "./config.mjs";
+import { clineConfigCandidates, coerceText, errorReason, interactiveSession, messageOf, resolveClineDefaults, runResultErrorEvent, withErrorReason } from "./config.mjs";
 
 const file = JSON.stringify({
 	version: 1,
@@ -69,6 +69,69 @@ test("interactiveSession defaults on, because only interactive sessions stay res
 	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "off" }), false);
 	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "false" }), false);
 	assert.equal(interactiveSession({ AUTONOMY_CLINE_INTERACTIVE: "no" }), false);
+});
+
+test("errorReason finds the reason wherever the SDK left it", () => {
+	assert.equal(errorReason({ error: { message: "provider exploded" } }), "provider exploded");
+	assert.equal(errorReason({ error: "boom" }), "boom");
+	// The case an exhausted account produces: an empty error object with the
+	// message beside it. `error ?? message` would pick the empty object.
+	assert.equal(errorReason({ error: {}, message: "Insufficient Balance" }), "Insufficient Balance");
+	assert.equal(errorReason({ message: "Insufficient Balance" }), "Insufficient Balance");
+	assert.equal(errorReason({ error: {}, errorClass: "unknown" }, "agent run failed"), "agent run failed");
+	assert.equal(errorReason(undefined, "agent run failed"), "agent run failed");
+});
+
+test("withErrorReason puts the reason back on the event", () => {
+	const repaired = withErrorReason({
+		type: "agent_event",
+		payload: { sessionId: "s1", event: { type: "error", error: {}, iteration: 5, message: "Insufficient Balance" } },
+	});
+	assert.deepEqual(repaired.payload.event, {
+		type: "error",
+		error: { message: "Insufficient Balance" },
+		iteration: 5,
+		message: "Insufficient Balance",
+	});
+	// A bare inner event is repaired in place (as a copy), and the original is left alone.
+	const inner = { type: "error", error: {}, message: "boom" };
+	assert.deepEqual(withErrorReason(inner), { type: "error", error: { message: "boom" }, message: "boom" });
+	assert.deepEqual(inner, { type: "error", error: {}, message: "boom" });
+	// Nothing to repair: no reason to find, or the reason is already there.
+	const silent = { type: "error", error: {} };
+	assert.equal(withErrorReason(silent), silent);
+	const said = { type: "error", error: { message: "rate limited" } };
+	assert.equal(withErrorReason(said), said);
+	const moved = { type: "tool", error: {} };
+	assert.equal(withErrorReason(moved), moved);
+});
+
+test("runResultErrorEvent streams a reason the client never received", () => {
+	// The failure arrived outside the request window: the stream has to carry it.
+	assert.deepEqual(runResultErrorEvent("Insufficient Balance", ""), {
+		type: "error",
+		error: { message: "Insufficient Balance" },
+		source: "run_result",
+		recoverable: false,
+	});
+	// Already streamed: an extra event would be noise.
+	assert.equal(runResultErrorEvent("Insufficient Balance", "Insufficient Balance"), null);
+	// Nothing to say: a reason that already reached the stream is not repeated.
+	assert.equal(runResultErrorEvent("agent run failed", "agent run failed"), null);
+	// A failure with no reason of its own is still visible: the bridge's phrase is
+	// what the run result says too, so the stream is not silent about a failed run.
+	assert.deepEqual(runResultErrorEvent("", ""), {
+		type: "error",
+		error: { message: "agent run failed" },
+		source: "run_result",
+		recoverable: false,
+	});
+	assert.deepEqual(runResultErrorEvent(null, ""), {
+		type: "error",
+		error: { message: "agent run failed" },
+		source: "run_result",
+		recoverable: false,
+	});
 });
 
 test("messageOf picks a human message out of an error-ish value", () => {

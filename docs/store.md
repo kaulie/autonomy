@@ -98,6 +98,10 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 - `reason_turns.status` / `error_code` / `error_message` 是每一轮 LLM run 自己的结果：provider 说
   `finished` 却一个字都没回也算**失败**（`status=error`），它自己那句话（如 `Insufficient Balance`）留在
   `error_message` 里 —— 否则一次没吐字的 run 在库里看起来是「跑完了」。
+  **流里也有这句话**：provider 的 error 事件缺 message、或那句话落在请求窗口之后时，Cline bridge 会把它补回事件流
+  （见 [llm-event-stream.md](llm-event-stream.md)），所以 `llm_events` 与 run header 说法一致；`llm_messages`
+  只渲染「对话」（输入、思考、工具、run 的返回文本），不是 run 元数据的记录 —— 因此失败原因不在那里，模型没吐字时
+  那一行 assistant 是空的，它只带 `status`。
 
 ## 代码位置
 
