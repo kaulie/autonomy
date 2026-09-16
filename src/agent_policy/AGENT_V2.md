@@ -269,8 +269,8 @@ For example:
 
 ## Plan Data Lineage
 
-Every step input has a source, and the plan says what it is. An input is either a
-**literal you write** or a **binding** to one of exactly two places:
+Every step input says where its value comes from. There are exactly **three**
+sources, and nothing else is one:
 
 ```json
 "inputs": {
@@ -280,21 +280,26 @@ Every step input has a source, and the plan says what it is. An input is either 
 }
 ```
 
-- `step:<name>.output.<key>` — an output of a step **earlier in this same plan**,
-  under a key that step's capability declares (see Constructs → `output`).
-- `world_model:asset.<id>.<kind|state>` — a value of the World Model, as `## World`
-  shows it.
+- `"branch": "main"` — **a literal you wrote**. You are its source: write one for
+  text that is yours (an instruction, a value the task or the user gave you), never
+  as a stand-in for a value you have not got.
+- `{"source": "step:<name>.output.<key>"}` — an output of a step **earlier in this
+  same plan**, under a key that step's capability declares (Constructs → `output`).
+- `{"source": "world_model:asset.<id>.<kind|state>"}` — a value the World Model
+  holds, as `## World` shows it.
 
-What follows from that:
+There is **no fourth source**. A value nobody bound is not read from the shared
+context, and an input the runtime would have to invent is not invented: a capability
+that requires an input you did not supply fails the plan before anything runs. When a
+step needs a value nobody has, that is a `blocked` / `need_input` decision — not a
+sentence written into an input.
+
+What follows:
 
 - **Field names are local to a capability.** One capability reporting
   `artifact_version` and the next taking `version` is not a problem to solve in the
   World — it is a mapping you make, because you are the one who knows both meanings.
   The runtime never matches names across capabilities.
-- **The runtime resolves what you bound; it infers nothing.** A value no input bound
-  is not looked up in the shared context, and an input the runtime would have to
-  invent is not invented: a capability that requires an input you did not supply
-  fails the plan. Everything a step needs is either in the plan or not there at all.
 - **No implicit aggregation.** Do not combine, reshape or summarise several outputs
   into one input. Either pass the capability the values it takes, or make the
   transformation its own step and bind the next step to its result.
@@ -315,7 +320,9 @@ Each step should include:
 - `name` — what this step is called, so a later step can bind to it
   (`step:<name>.output.<key>`). Short, unique in the plan, no dots.
 - `capability` — the capability to execute, as Constructs names it
-- `inputs` — a literal per input, or `{"source": "…"}` (see Plan Data Lineage)
+- `inputs` — **every** input, each with its source: a literal you wrote, or
+  `{"source": "…"}` (see Plan Data Lineage). An input key the capability does not
+  declare, or a `Required` input you leave out, fails the plan.
 - `expected_effect` — the intended World State change
 - `evidence_refs` — the evidence items that justify this step
 
@@ -325,7 +332,7 @@ Each step should include:
     "name": "edit",
     "capability": "code_edit",
     "inputs": {
-      "instruction": "…"
+      "instruction": "rename the pipeline events and open a pull request"
     },
     "expected_effect": {},
     "evidence_refs": ["E1", "E2"]
@@ -334,13 +341,18 @@ Each step should include:
     "name": "land",
     "capability": "pull_request.review",
     "inputs": {
-      "pr": {"source": "step:edit.output.pr_url"}
+      "pr": {"source": "step:edit.output.pr_url"},
+      "method": "squash"
     },
     "expected_effect": {},
     "evidence_refs": ["E2"]
   }
 ]
 ```
+
+The first step's `instruction` and the second step's `method` are literals you write;
+`pr` is bound to the output `edit` is expected to report — that is the difference
+between a value you have and a value that does not exist yet.
 
 `expected_effect` describes the intended World State change. It must not be presented as a fact unless supported by capability semantics or prior observations.
 
@@ -379,7 +391,7 @@ For `blocked` or `need_input`, describe what is missing.
         "name": "what this step is called (a later step binds to it)",
         "capability": "capability.name",
         "inputs": {
-          "input_name": "a literal value",
+          "input_name": "a literal you wrote",
           "other_input": {"source": "step:<name>.output.<key>"},
           "third_input": {"source": "world_model:asset.<id>.<kind|state>"}
         },

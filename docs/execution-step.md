@@ -35,12 +35,12 @@ execution_step_interaction(id, step_id, seq, kind, provider, reason_turn_id, cre
 
 ## 计划的数据来源（Plan Data Lineage）
 
-step 的每个入参都有**来源**，而且写在计划里：要么是 planner 写的**字面量**，要么是一个**绑定**，只认两种：
+step 的每个入参都写清**来源**，而且只有三种（没有第四种）：
 
-```
-step:<name>.output.<key>          同一计划里更早那个 step 的输出（key 必须是它声明过的 output）
-world_model:asset.<id>.<kind|state>  World Model 的一个值（就是 ## World 里看到的那个资产）
-```
+- **planner 自己写的字面量**（`"branch":"main"`）—— 他自己就是来源：只用来写属于他自己的文本（instruction、任务或用户给他的值），
+  **绝不**当作"还没有拿到手"的值的占位。
+- `{"source":"step:<name>.output.<key>"}` —— 同一计划里更早那个 step 的输出，`key` 必须是它声明过的 output。
+- `{"source":"world_model:asset.<id>.<kind|state>"}` —— World Model 里的值（就是 `## World` 里看到的那个资产）。
 
 - **能力之间的字段名各自为政、不做全局统一**：`code_edit` 报 `pr_url`、`pull_request.review` 收 `pr`（别名 `pr_url`），
   "A 的 `artifact_version` 就是 B 的 `version`" 这种**语义映射是 planner 的判断**，runtime 从不跨能力猜名字。
