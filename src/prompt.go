@@ -75,15 +75,20 @@ func goalTypeOf(task *Task) GoalType {
 }
 
 // constraintsJSON is what the Runtime holds an agent to, as data a ## Constraints
-// section renders: the task the work belongs to, the sandbox files may be changed
-// in, and the boundary that deployment is the Runtime's move — never an agent's
-// (see the Deploy Policy in src/agent_policy/CODE_EDIT.md).
+// section renders: its own facts about this cycle — the task the work belongs to,
+// the sandbox files may be changed in — plus the rules of the runtime's policy
+// (src/policy.go, src/agent_policy/CONSTRAINTS.json). No rule of any particular
+// domain is written here: deployment, budget or privacy are the policy file's
+// words about the world, not this layer's.
 func constraintsJSON(ctx DecisionContext) []byte {
-	m := map[string]any{
-		"scope":          "the files this task touches",
-		"workspace_rule": "the only place files may be changed",
-		"deploy":         "the Runtime's move, not the agent's",
+	m := map[string]any{}
+	for key, value := range policyConstraints() {
+		m[key] = value
 	}
+	// The runtime's own facts come last: its policy cannot redefine the task, nor
+	// the sandbox an agent works in.
+	m["scope"] = "the files this task touches"
+	m["workspace_rule"] = "the only place files may be changed"
 	if ctx.Task != nil && strings.TrimSpace(ctx.Task.ID) != "" {
 		m["task"] = ctx.Task.ID
 	}

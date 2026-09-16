@@ -74,6 +74,14 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 - 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的五个都声明**，这条被 `capability_test.go` 钉住。
 - 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 的 `summary` 带着它自己开的 PR URL，而 `pull_request.review` 的 `pr` 直接吃那个 URL。
 
+### `{{CONSTRAINTS}}` 从哪来
+
+`## Constraints` 那节渲染两样东西：**runtime 自己的事实**（这条 Task、唯一可改文件的沙箱、scope）+
+**runtime 的 policy**（`$PROJECT_ROOT/src/agent_policy/CONSTRAINTS.json`，见 [policy.md](policy.md)）。
+planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的都是这两样；渲染它的那层
+（`src/prompt.go` / `src/policy.go`）不认识其中任何一条规则属于哪个领域 —— 「deploy 是 runtime 的动作」
+是**部署边界**自己的一句话，不是提示词层的知识。
+
 ## `service.deploy`（触发指定服务、指定分支的流水线部署）
 
 - 语义：把「某个服务的某个分支」交给部署控制面（agent-control-plane），由它打包该 git ref、再部署。
