@@ -63,7 +63,12 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	// The workspace is the worker's own; rendering it into the prompt is what the
 	// worker treats as binding (see src/agent_policy/CODE_EDIT.md).
 	workspace := sess.Workspace()
-	prompt := renderPrompt(tmpl, workspace, instruction)
+	// The prompt may also carry the frame vocabulary of the planner policy (World
+	// / Runtime Context / Constraints / Constructs / Completion Principles): the
+	// host that acquired this session renders those values for this worker (see
+	// broker.WorkerPromptContext), so the worker sees the runtime it is working
+	// for rather than guessing at it.
+	prompt := renderPrompt(tmpl, workspace, instruction, workerPlaceholders(sess))
 
 	summary, err := sess.Prompt(ctx, prompt)
 	if err != nil {

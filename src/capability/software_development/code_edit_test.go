@@ -32,9 +32,19 @@ func (m *mockSession) Release(context.Context) error { return nil }
 
 type mockBroker struct {
 	lastOpts broker.AcquireAgentOpts
-	sess     *mockSession
+	sess     broker.AgentSession
 	err      error
 }
+
+// mockWorkerSession is a session whose host can describe the delegation's runtime
+// context (broker.WorkerPromptContext), so a test can pin what the worker prompt
+// does with those values.
+type mockWorkerSession struct {
+	mockSession
+	values map[string]string
+}
+
+func (m *mockWorkerSession) WorkerPlaceholders() map[string]string { return m.values }
 
 func (m *mockBroker) AcquireAgent(_ context.Context, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
 	m.lastOpts = opts
@@ -156,6 +166,102 @@ func TestCodeEditNeedsNoWorkspaceInput(t *testing.T) {
 	}
 	if !strings.Contains(sess.prompt, "/sandbox/agent-10099/") {
 		t.Fatalf("prompt=%q", sess.prompt)
+	}
+}
+
+// TestCodeEditInjectsTheHostRuntimeContext: the worker prompt may name the
+// runtime the worker is working for — World, Runtime Context, Completion
+// Principles, Constraints, Constructs — and those values come from the host that
+// acquired the session (broker.WorkerPromptContext), as of the delegating cycle.
+// The worker's own workspace and goal stay this package's to fill.
+func TestCodeEditInjectsTheHostRuntimeContext(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, filepath.FromSlash(sd.DefaultPromptRel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := "ws={{WORKSPACE}}\ngoal={{GOAL}}\nworld={{WORLD}}\nrc={{RUNTIME_CONTEXT}}\n" +
+		"principles={{COMPLETION_PRINCIPLES}}\nconstraints={{CONSTRAINTS}}\nconstructs={{CONSTRUCTS}}\n" +
+		"unknown={{NOT_A_PLACEHOLDER}}\n"
+	if err := os.WriteFile(path, []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECT_ROOT", root)
+
+	const workerWorkspace = "/sandbox/agent-10099/"
+	const someoneElsesWorkspace = "/sandbox/agent-10095/"
+	sess := &mockWorkerSession{
+		mockSession: mockSession{id: "agent-code_edit-9", workspace: workerWorkspace, summary: "done"},
+		values: map[string]string{
+			"{{WORLD}}":                 `{"assets":[{"id":"asset-1","state":"healthy"}]}`,
+			"{{RUNTIME_CONTEXT}}":       `{"agent":{"name":"agent-code_edit-9","workspace":"` + workerWorkspace + `"},"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
+			"{{COMPLETION_PRINCIPLES}}": "- Deliver a working implementation that satisfies the requested feature.",
+			"{{CONSTRUCTS}}":            `[{"name":"code_edit"}]`,
+			// An empty host value is a gap, not a blank section.
+			"{{CONSTRAINTS}}": "",
+			// The host does not get to decide what the worker's own workspace and
+			// goal are.
+			"{{WORKSPACE}}": someoneElsesWorkspace,
+			"{{GOAL}}":      "someone else's goal",
+		},
+	}
+	if _, err := (sd.CodeEdit{Agents: &mockBroker{sess: sess}}).Run(map[string]string{"instruction": "do it"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ws=" + workerWorkspace,
+		"goal=do it",
+		`"asset-1"`,
+		`"name":"agent-code_edit-9"`,
+		`"delegated_by"`,
+		`"task-9"`,
+		"- Deliver a working implementation that satisfies the requested feature.",
+		`[{"name":"code_edit"}]`,
+		// A placeholder outside the vocabulary stays visible rather than silently
+		// dropping the line.
+		"unknown={{NOT_A_PLACEHOLDER}}",
+	} {
+		if !strings.Contains(sess.prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, sess.prompt)
+		}
+	}
+	for _, line := range []string{"constraints=(not provided by this runtime)"} {
+		if !strings.Contains(sess.prompt, line) {
+			t.Fatalf("prompt missing %q:\n%s", line, sess.prompt)
+		}
+	}
+	if strings.Contains(sess.prompt, someoneElsesWorkspace) || strings.Contains(sess.prompt, "someone else's goal") {
+		t.Fatalf("the host overrode the worker's own workspace/goal:\n%s", sess.prompt)
+	}
+}
+
+// TestCodeEditPromptRendersWithoutAHostContext: a session whose host cannot
+// describe a runtime context (here: a plain session) still produces a readable
+// prompt — the shipped template's frame placeholders say they were not provided
+// instead of reaching the worker as raw {{NAME}}.
+func TestCodeEditPromptRendersWithoutAHostContext(t *testing.T) {
+	useRepoPrompt(t)
+	sess := &mockSession{id: "agent-code_edit-7", workspace: "/sandbox/agent-10099/", summary: "done"}
+	if _, err := (sd.CodeEdit{Agents: &mockBroker{sess: sess}}).Run(map[string]string{"instruction": "do it"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sess.prompt, "{{") {
+		t.Fatalf("prompt still has an unrendered placeholder:\n%s", sess.prompt)
+	}
+	for _, want := range []string{
+		"## World",
+		"## Runtime Context",
+		"## Completion",
+		"## Completion Principles",
+		"## Constraints",
+		"## Constructs",
+	} {
+		if !strings.Contains(sess.prompt, want) {
+			t.Fatalf("shipped template missing %q:\n%s", want, sess.prompt)
+		}
+	}
+	if n := strings.Count(sess.prompt, "(not provided by this runtime)"); n != 5 {
+		t.Fatalf("prompt marks %d frame placeholders as not provided, want 5:\n%s", n, sess.prompt)
 	}
 }
 

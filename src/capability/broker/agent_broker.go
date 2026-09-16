@@ -38,3 +38,18 @@ type AgentSession interface {
 type AgentBroker interface {
 	AcquireAgent(ctx context.Context, opts AcquireAgentOpts) (AgentSession, error)
 }
+
+// WorkerPromptContext is implemented by an AgentSession whose host can describe
+// the runtime context of the delegation it was acquired for: the World, Runtime
+// Context, Constraints, Constructs and Completion Principles of the cycle that
+// delegated the sub-task, keyed by the placeholder names a worker prompt may use
+// ({{WORLD}} / {{RUNTIME_CONTEXT}} / {{CONSTRAINTS}} / {{CONSTRUCTS}} /
+// {{COMPLETION_PRINCIPLES}} — the vocabulary of src/agent_policy/AGENT_V2.md, see
+// src/agent_policy/CODE_EDIT.md).
+//
+// It is optional on purpose: a session whose host has no runtime to describe (a
+// test double, a host without a World) simply does not implement it, and the
+// prompt renders those sections without them.
+type WorkerPromptContext interface {
+	WorkerPlaceholders() map[string]string
+}

@@ -41,7 +41,10 @@ Task Owner → Coding Agent → Research Agent → …
 
 - **提示词在文件里，不在代码里**：worker 拿到的提示词是仓库文件，每次委托现读现渲染；
   改措辞不用重新编译，文件缺失则该次委托直接失败：
-  - `code_edit` → `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md`（`{{WORKSPACE}}` / `{{GOAL}}`）
+  - `code_edit` → `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md`（`{{WORKSPACE}}` / `{{GOAL}}`，
+    外加与 AGENT_V2 同一套的 `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` /
+    `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}`：委托方那个 runtime 的 World、构造与完成原则，
+    按 worker 自己的身份/沙箱渲染，委托方记成 `delegated_by`；见 [capability.md](capability.md)）
   - `deployment.monitor` → `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md`
     （`{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` …，见 [deployment-monitor.md](deployment-monitor.md)）
 

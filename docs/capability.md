@@ -41,10 +41,12 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 | 文件 | 占位符 | 说明 |
 |---|---|---|
 | `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
-| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
 | `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
+
+**worker 和 planner 共用一套占位符词表**：`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}`（以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）由同一个渲染器出（`src/prompt.go`），所以被委托的 worker 看到的世界、构造、完成原则和 planner 看到的是同一份。差别只有视角：worker 那份按**它自己**渲染 —— agent 身份 / workspace / backend 是 worker 的（委托方的沙箱永远不会被说成 worker 的，委托方以 `delegated_by` 出现），Task 与 `previous_actions` 是它被委托的那条 Task。取值经由 `broker.WorkerPromptContext`（`Runtime.AcquireAgent` 发出的 session 实现它，`Runtime.WorkerPlaceholders`）传下去；取不到的 host（测试替身）则该节渲染成 `(not provided by this runtime)`，而不是把 `{{NAME}}` 原样丢给模型。
 
 ## `service.deploy`（触发指定服务、指定分支的流水线部署）
 
