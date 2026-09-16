@@ -240,6 +240,65 @@ func plannerRun(t *testing.T, description string) (*SQLiteStore, *Autonomy) {
 	return store, &Autonomy{AgentFactory: NewAgentFactory(), Runtime: rtu, Store: store}
 }
 
+// TestRunStopsWhenTheDecisionConcludesTheTask: done / blocked / need_input are answers,
+// not plans — the run ends on them instead of spending the rest of its budget asking the
+// planner the same question again (task-26 asked three times after its four steps had all
+// succeeded), and the status the task keeps is the decision that concluded it.
+func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
+	cases := []struct {
+		phrase string
+		status string
+	}{
+		{"answer done", TaskStatusCompleted},
+		{"answer blocked", TaskStatusBlocked},
+		{"answer need_input", TaskStatusNeedInput},
+	}
+	for _, tc := range cases {
+		t.Run(tc.phrase, func(t *testing.T) {
+			store, rt := plannerRun(t, tc.phrase)
+			t.Setenv("AUTONOMY_MAX_STEPS", "4")
+
+			taskID := "task-" + strings.ReplaceAll(tc.phrase, " ", "-")
+			task := &Task{ID: taskID, Description: tc.phrase, Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+			if err := rt.Run(task); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			var turns int
+			if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, taskID).Scan(&turns); err != nil {
+				t.Fatal(err)
+			}
+			if turns != 1 {
+				t.Fatalf("reason_turns=%d, want the run to stop at the decision that concluded it (budget was 4)", turns)
+			}
+			plans, err := store.ListExecutionPlans(taskID)
+			if err != nil || len(plans) != 1 {
+				t.Fatalf("plans=%v err=%v, want the one decision recorded", plans, err)
+			}
+			concluded := strings.TrimPrefix(tc.phrase, "answer ")
+			if plans[0].DecisionType != concluded || plans[0].StepCount != 0 {
+				t.Fatalf("plan=%+v, want the %s decision and no steps", plans[0], concluded)
+			}
+			// Why a task is blocked is the decision's own need, on its plan row — the
+			// status does not have to carry the reason.
+			if concluded != "done" && !strings.Contains(plans[0].Need, "description") {
+				t.Fatalf("plan=%+v, want the need the decision was blocked on", plans[0])
+			}
+
+			var status, taskError string
+			if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, taskID).Scan(&status, &taskError); err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.status {
+				t.Fatalf("status=%q, want %q", status, tc.status)
+			}
+			if taskError != "" {
+				t.Fatalf("tasks.error=%q, want empty: that field is why a run failed", taskError)
+			}
+		})
+	}
+}
+
 // TestRunRecordsThePlanAndWhatItTalkedTo drives the whole chain: the planner answers
 // (through the fake bridge), the runtime writes the plan and executes its step, and
 // afterwards the plan is traceable to the exact reply — and to the task's own first

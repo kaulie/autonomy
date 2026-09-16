@@ -93,8 +93,9 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 **失败必须落成可查的数据，而不是只留在终端上**：
 
-- `tasks.status` 是结果，`tasks.error` 是原因：这一轮 **decide 失败**（`decide: ...`）或**最后一个 cycle 的
-  action 失败**。写在「记下结果」的两处，不在起跑时写（见 [task.md](task.md)）。
+- `tasks.status` 是结果（`running` / `completed` / `blocked` / `need_input` / `error` —— **收束这次运行的那个决策**），
+  `tasks.error` 是原因：这一轮 **decide 失败**（`decide: ...`）或**最后一个 cycle 的 action 失败**；`blocked` /
+  `need_input` 的原因在 `execution_plan.need` 里，不写进 `error`。写在「记下结果」的两处，不在起跑时写（见 [task.md](task.md)）。
 - `reason_turns.status` / `error_code` / `error_message` 是每一轮 LLM run 自己的结果：provider 说
   `finished` 却一个字都没回也算**失败**（`status=error`），它自己那句话（如 `Insufficient Balance`）留在
   `error_message` 里 —— 否则一次没吐字的 run 在库里看起来是「跑完了」。
