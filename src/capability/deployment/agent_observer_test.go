@@ -362,28 +362,11 @@ func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 	}
 }
 
-// answeringSession answers by what it was shown: a deployment it sees as still running is
-// reported as running, and one it sees as succeeded as succeeded — so a watch really has
-// to poll (and the agent's own verdict is what decides when to stop).
-type answeringSession struct {
-	fakeSession
-}
-
-func (s *answeringSession) Prompt(ctx context.Context, prompt string) (string, error) {
-	_, _ = s.fakeSession.Prompt(ctx, prompt) // records the observation it was given
-	state := "running"
-	if strings.Contains(prompt, "state: succeeded") {
-		state = "succeeded"
-	}
-	return `{"state":"` + state + `","problem":false,"signals":[],` +
-		`"diagnosis":"the deployment is ` + state + `","suggestions":[],"logs":[]}`, nil
-}
-
-// TestWatchFeedsEveryPollToOneAgent: a watch acquires one agent for the call and puts
-// every observation to it, so the agent knows the states in between — one
-// deployment.monitor call holds one agent (task-27's watch acquired four workers for one
-// deployment, one per poll), and the observation it reports is the one that settled.
-func TestWatchFeedsEveryPollToOneAgent(t *testing.T) {
+// TestWatchAsksTheAgentOnceAndTellsItWhatHappened: a watch polls the deployment API every
+// round (cheap, deterministic) and asks the monitoring agent **once**, when the observation
+// is over — handing it the states it passed through, because asking a model every five
+// seconds is one model call per five seconds. One deployment.monitor call holds one agent.
+func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
 	useRepoPrompt(t)
 	reads := 0
 	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -395,9 +378,9 @@ func TestWatchFeedsEveryPollToOneAgent(t *testing.T) {
 		if reads >= 3 {
 			state = "succeeded"
 		}
-		_, _ = io.WriteString(w, `{"state":"`+state+`"}`)
+		_, _ = io.WriteString(w, `{"state":"`+state+`","phase":"deploy","progress":"1/3"}`)
 	})
-	sess := &answeringSession{fakeSession: fakeSession{id: "agent-deployment.monitor-1"}}
+	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
 	b := &fakeBroker{sess: sess}
 
 	out, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
@@ -410,21 +393,23 @@ func TestWatchFeedsEveryPollToOneAgent(t *testing.T) {
 	if b.calls != 1 {
 		t.Fatalf("agents acquired=%d, want one agent for the whole call", b.calls)
 	}
-	if len(sess.prompts) != 3 {
-		t.Fatalf("the agent was asked %d time(s), want one observation per poll (3)", len(sess.prompts))
+	if len(sess.prompts) != 1 {
+		t.Fatalf("the agent was asked %d time(s), want once for the whole watch", len(sess.prompts))
 	}
-	// Every poll reached the agent: what it saw is what happened.
-	if !strings.Contains(sess.prompts[0], "state: running") {
-		t.Fatalf("the first observation was not fed to the agent: %s", sess.prompts[0])
+	prompt := sess.prompts[0]
+	// Asked once, and told what the polls on the way saw (the two running polls collapsed
+	// into one line), then asked about the observation that settled.
+	if !strings.Contains(prompt, "earlier observations") || !strings.Contains(prompt, "running") || !strings.Contains(prompt, "x2") {
+		t.Fatalf("the observation does not carry the states in between: %s", prompt)
 	}
-	if !strings.Contains(sess.prompts[2], "state: succeeded") {
-		t.Fatalf("the settled observation was not fed to the agent: %s", sess.prompts[2])
+	if !strings.Contains(prompt, "state: succeeded") {
+		t.Fatalf("the observation is not the one that settled: %s", prompt)
 	}
 	if !sess.released {
 		t.Error("the agent was not released when the call ended")
 	}
-	if out["state"] != "succeeded" {
-		t.Fatalf("state=%q, want the agent's verdict on the settled observation", out["state"])
+	if out["state"] != "failed" {
+		t.Fatalf("state=%q, want the agent's own verdict (agentAnswerJSON says failed)", out["state"])
 	}
 }
 

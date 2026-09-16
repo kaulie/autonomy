@@ -61,11 +61,15 @@ func renderPrompt(tmpl string, own, frame map[string]string) string {
 }
 
 // renderObservation renders the raw observation for the prompt: what the
-// deterministic reader saw (or why it saw nothing), and the log window.
-func renderObservation(req Request, snap Snapshot, err error) string {
+// deterministic reader saw (or why it saw nothing), what the polls before it saw when the
+// caller watched, and the log window.
+func renderObservation(req Request, snap Snapshot, err error, history []Snapshot) string {
 	var b strings.Builder
 	if err != nil {
 		fmt.Fprintf(&b, "the raw reader failed: %v\n", err)
+	}
+	if timeline := renderTimeline(history); timeline != "" {
+		b.WriteString(timeline)
 	}
 	fmt.Fprintf(&b, "deployment: %s\n", firstNonEmpty(snap.ID, req.Deployment))
 	fmt.Fprintf(&b, "state: %s\n", snap.state())
@@ -99,4 +103,61 @@ func renderObservation(req Request, snap Snapshot, err error) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// renderTimeline renders what a watch saw before the observation it is reporting: the
+// states it passed through, oldest first, with consecutive repeats collapsed into one line
+// — a watch may poll a hundred times, and a hundred identical lines is not information.
+//
+// It is how a monitoring agent is told what happened in between without being asked about
+// every poll: the polls are the deterministic reader's, and the agent is asked once.
+func renderTimeline(history []Snapshot) string {
+	if len(history) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("earlier observations (oldest first, repeats collapsed):\n")
+	for i := 0; i < len(history); {
+		run := 1
+		for i+run < len(history) && observationKey(history[i]) == observationKey(history[i+run]) {
+			run++
+		}
+		fmt.Fprintf(&b, "  - %s", observationLine(history[i]))
+		if run > 1 {
+			fmt.Fprintf(&b, " x%d until %s", run, observationStamp(history[i+run-1]))
+		}
+		b.WriteString("\n")
+		i += run
+	}
+	return b.String()
+}
+
+// observationLine is one poll's observation in one line: its time, state, and the phase,
+// progress and message when it reported them.
+func observationLine(snap Snapshot) string {
+	parts := []string{observationStamp(snap), string(snap.state())}
+	if snap.Phase != "" {
+		parts = append(parts, "phase "+snap.Phase)
+	}
+	if snap.Progress != "" {
+		parts = append(parts, "progress "+snap.Progress)
+	}
+	if snap.Message != "" {
+		parts = append(parts, snap.Message)
+	}
+	return strings.Join(parts, " ")
+}
+
+// observationStamp is when a poll was taken, or "" when the reader did not say.
+func observationStamp(snap Snapshot) string {
+	if snap.UpdatedAt.IsZero() {
+		return "(no timestamp)"
+	}
+	return snap.UpdatedAt.Format("15:04:05")
+}
+
+// observationKey is what makes two polls the same observation: the state and what the
+// deployment said about it, without the time (a repeat is a repeat however long it took).
+func observationKey(snap Snapshot) string {
+	return strings.Join([]string{string(snap.state()), snap.Phase, snap.Progress, snap.Message}, "\x00")
 }
