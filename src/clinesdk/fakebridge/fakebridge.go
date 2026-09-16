@@ -23,6 +23,29 @@ const EnvVar = "CLINE_FAKE_BRIDGE"
 // Enabled reports whether this process was started as the fake bridge.
 func Enabled() bool { return os.Getenv(EnvVar) == "1" }
 
+// decisionAnswers are the concluding decisions a test drives the loop with, one per
+// type and each a whole valid answer: `done` carries the evidence that proves it, and
+// `blocked` / `need_input` say what is missing. A run must stop on any of them.
+var decisionAnswers = map[string]string{
+	"answer done": `{"type":"done","reason":"the fake planner found the goal satisfied","evidence":[` +
+		`{"id":"E1","source":"observation","reference":"asset-1","fact":"the asset is healthy"}]}`,
+	"answer blocked": `{"type":"blocked","reason":"nothing here can do this",` +
+		`"need":{"type":"capability","description":"no capability in this runtime can change that service"}}`,
+	"answer need_input": `{"type":"need_input","reason":"the target is ambiguous",` +
+		`"need":{"type":"decision","description":"which environment should this deploy to?"}}`,
+}
+
+// cannedDecisionAnswer is the reply for one of the decision phrases, or "" when the
+// prompt asks for none of them.
+func cannedDecisionAnswer(prompt string) string {
+	for phrase, answer := range decisionAnswers {
+		if strings.Contains(prompt, phrase) {
+			return answer
+		}
+	}
+	return ""
+}
+
 // Manager returns a BridgeManager that runs this test binary as the bridge.
 func Manager(self string) *clinesdk.BridgeManager {
 	return &clinesdk.BridgeManager{
@@ -39,6 +62,9 @@ func Manager(self string) *clinesdk.BridgeManager {
 //	prompt containing "truncate my turn" -> the provider cuts the turn off at the
 //	                            output-token limit: the run fails with the SDK's
 //	                            own message (the runtime may retry that turn)
+//	prompt containing "answer done" / "answer blocked" / "answer need_input" -> that
+//	                            concluding decision, validly written (evidence for `done`,
+//	                            a described need for the other two), and no steps
 //	prompt containing "never answer" -> never answers (the client must time out)
 //	prompt containing "out of balance" -> finished with no text, and the reason only
 //	                            in the run result (an exhausted account)
@@ -122,6 +148,27 @@ func Main() {
 				// asserting what a parsed decision would do.
 				text := `{"type":"plan","reason":"the fake planner decided","evidence":[{"id":"E1","source":"goal","reference":"the goal","fact":"the asset must change"}],"plan":{"steps":[` +
 					`{"capability":"asset.change","input":{"target":"asset-1"},"expected_effect":"the asset's state changes","evidence_refs":["E1"]}]},"need":{}}`
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_start", "contentType": "text", "text": text, "accumulated": text,
+				})
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_end", "contentType": "text", "text": text,
+				})
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "done", "reason": "completed", "text": text, "iterations": 1,
+				})
+				cumulativeInput += 11
+				result(req.ID, map[string]any{
+					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "finished",
+					"text": text, "finishReason": "completed", "usageSource": "run",
+					"usage": map[string]any{"inputTokens": 11, "outputTokens": 2, "totalTokens": 13, "costUsd": 0.0001},
+				})
+			case cannedDecisionAnswer(prompt) != "":
+				// A concluding decision, written the way the planner writes one: `done` with the
+				// evidence that proves it, `blocked` / `need_input` with the need that says what
+				// is missing. None of them executes anything, and each is what a run stops on
+				// (Decision.Concludes).
+				text := cannedDecisionAnswer(prompt)
 				event(req.ID, agentID, sessionID, map[string]any{
 					"type": "content_start", "contentType": "text", "text": text, "accumulated": text,
 				})

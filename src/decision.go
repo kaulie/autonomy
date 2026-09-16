@@ -3,6 +3,7 @@ package autonomy
 import (
 	"context"
 	"os"
+	"strings"
 )
 
 // DecisionContext is the input bag for one decision cycle.
@@ -163,6 +164,38 @@ type ActionResult struct {
 	// one.
 	PlanStepID      int64
 	ExecutionStepID int64
+}
+
+// Concludes reports whether this decision ends the run instead of planning more work.
+//
+// AGENT_V2: a plan plans; the other three decide the task. `done` is the completion
+// contract satisfied — and the runtime requires it to carry its evidence — while
+// `blocked` and `need_input` are the task saying it cannot go on without something.
+//
+// The loop stops at one of those: asking the planner again spends a whole cycle to be
+// told the same thing, which is what "a cycle concludes with observation and
+// verification, not with the step count running out" means (docs/execution-loop.md).
+func (d Decision) Concludes() bool {
+	switch strings.ToLower(strings.TrimSpace(d.Type)) {
+	case decisionDone, decisionBlocked, decisionNeedInput:
+		return true
+	}
+	return false
+}
+
+// TaskStatusFor is the outcome a concluding decision writes on the task row: the
+// decision type itself — `done` under the vocabulary's own word for it, `completed` —
+// so a task ended by `blocked` / `need_input` says so instead of looking finished. Why
+// it is blocked is the decision's own `need` (execution_plan.need) and its reply;
+// tasks.error stays what docs/store.md says it is: why a run *failed*.
+func TaskStatusFor(decision Decision) string {
+	switch strings.ToLower(strings.TrimSpace(decision.Type)) {
+	case decisionBlocked:
+		return TaskStatusBlocked
+	case decisionNeedInput:
+		return TaskStatusNeedInput
+	}
+	return TaskStatusCompleted
 }
 
 // Result is what happened after executing a decision.

@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+// Task statuses. `running` while a run is going, and afterwards whatever concluded it:
+// `completed` when the decision was `done` (the goal satisfied, with its evidence),
+// `blocked` / `need_input` when the concluding decision said the task cannot go on
+// without something, and `error` when the run failed — with the reason in Error.
+const (
+	TaskStatusRunning   = "running"
+	TaskStatusPending   = "pending"
+	TaskStatusCompleted = "completed"
+	TaskStatusBlocked   = "blocked"
+	TaskStatusNeedInput = "need_input"
+	TaskStatusError     = "error"
+)
+
 // Task is the work contract: what to achieve and how completion is judged.
 // It defines goal, not path.
 type Task struct {

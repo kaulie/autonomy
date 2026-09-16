@@ -85,6 +85,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   `Resume` 回来的会话视为已有 frame。见 `src/prompt.go` / `src/reasoner.go` / `src/llm_frame_test.go`。
 - step 的 `capability` 未注册 → 该位置变成 `NothingAction{Reason}`：**只跳过这一步，后面的 action 照常执行**（旧实现会让整份 plan 消失）。
 - `type` 不是 `plan`（`done` / `blocked` / `need_input`）时 `Actions` 为空，`Execute` 不执行任何动作，且不是错误。
+- **结论了任务的一轮就收束**：`done` / `blocked` / `need_input` 是**答案**而不是计划（`Decision.Concludes()`），循环在这一轮结束 —— `done` 是完成契约被满足（且按 §Type-specific Requirements 必须带证据），另两个是任务在等外部的东西。再问一次 planner 只会用一个 cycle 换回同一句话（task-26 就是计划四步全成功后连答了三次 `done`）：这正是不变式 2「每轮以观察与验证收束，不是以轮数用尽收束」。**失败**的轮才是继续重规划的那一类，`MaxSteps` 兜住它。任务行跟着落同一个结论：`done` → `completed`，`blocked` / `need_input` → 同名状态（`TaskStatusFor`，`src/decision.go`）—— 任务在等东西不是跑完了；为什么在等是那次决策的 `need`，`tasks.error` 仍然只写失败的原因。
 - 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 1`；它数的是 **decision cycle**，`step` 这个词现在专指「执行步」）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。
 
 ## 不变式

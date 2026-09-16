@@ -112,7 +112,7 @@ func (r *Autonomy) Run(task *Task) error {
 		return fmt.Errorf("nil task")
 	}
 	if task.Status == "" {
-		task.Status = "running"
+		task.Status = TaskStatusRunning
 	}
 	persistTask(task)
 
@@ -145,15 +145,32 @@ func (r *Autonomy) Run(task *Task) error {
 		result = r.executeDecision(agent, decision)
 		err = result.Err
 		history = append(history, result)
+		// A decision that concludes the task ends the run here: done / blocked /
+		// need_input are answers, not plans, so another cycle would only ask the same
+		// question again (task-26 asked three times after its plan had succeeded).
+		// A *failed* cycle is the other case — it re-plans until the budget is gone.
+		if decision.Concludes() {
+			break
+		}
 	}
 
 	// ret, err := agent.Result()
 	// fmt.Printf("Agent result: %v, error: %v\n", ret, err)
-	if task.Status == "running" || task.Status == "pending" {
-		if err != nil {
+	if task.Status == TaskStatusRunning || task.Status == TaskStatusPending {
+		switch {
+		case err != nil:
 			failTask(task, err)
-		} else {
-			task.Status = "completed" //completed not means success, it means the task is completed
+		case decision.Concludes():
+			// The decision that concluded the run is what happened to the task: `done`
+			// under the vocabulary's own word for it, and `blocked` / `need_input` as
+			// themselves, since a task waiting on something is not a finished one. Why it
+			// is blocked is that decision's `need`, on its plan row and in its reply;
+			// Error stays what docs/store.md says it is: why a run failed.
+			task.Status = TaskStatusFor(decision)
+			persistTask(task)
+		default:
+			// No failure and no conclusion: the budget ran out after a plan.
+			task.Status = TaskStatusCompleted //completed not means success, it means the task is completed
 			persistTask(task)
 		}
 	}
@@ -172,7 +189,7 @@ func failTask(task *Task, err error) {
 	if task == nil {
 		return
 	}
-	task.Status = "error"
+	task.Status = TaskStatusError
 	if err != nil {
 		task.Error = err.Error()
 	}
@@ -214,7 +231,9 @@ func (r *Autonomy) executeDecision(agent *Agent, decision Decision) Result {
 
 // maxSteps is how many decision cycles a task may run: Autonomy.MaxSteps, or
 // AUTONOMY_MAX_STEPS when set. It is the loop's budget, not its goal (see
-// docs/execution-loop.md); the default keeps one cycle per task.
+// docs/execution-loop.md): a decision that concludes the task (done / blocked /
+// need_input) ends the run before the budget is spent, and the budget is what bounds
+// re-planning after a failed cycle.
 func (r *Autonomy) maxSteps() int {
 	if env := strings.TrimSpace(os.Getenv("AUTONOMY_MAX_STEPS")); env != "" {
 		if n, err := strconv.Atoi(env); err == nil && n > 0 {
