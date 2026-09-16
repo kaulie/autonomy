@@ -37,8 +37,7 @@ func (AssetChange) Inputs() []spec.Field {
 
 func (AssetChange) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "target", Description: "the asset that was changed"},
-		{Name: "state", Description: "the state it has now (changed)"},
+		{Name: "state", Description: "the state the asset has now — the change this capability made"},
 	}
 }
 
@@ -60,5 +59,5 @@ func (c AssetChange) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"target": target, "state": state}, nil
+	return map[string]string{"state": state}, nil
 }

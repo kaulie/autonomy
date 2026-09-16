@@ -82,7 +82,6 @@ func TestServiceDeployTriggersThePipelineAtTheGivenBranch(t *testing.T) {
 		t.Fatalf("body=%s", stub.rawBody)
 	}
 	for k, want := range map[string]string{
-		"service":     "web-cursor",
 		"branch":      "release/1.2",
 		"pipeline_id": "pipeline-1a2b3c4d",
 		"state":       "queued",
@@ -91,6 +90,14 @@ func TestServiceDeployTriggersThePipelineAtTheGivenBranch(t *testing.T) {
 		if out[k] != want {
 			t.Errorf("out[%q]=%q, want %q (out=%v)", k, out[k], want, out)
 		}
+	}
+	// The service is the step's own input, and the control plane's message is prose:
+	// neither is something this call produced, so neither is reported.
+	if _, ok := out["service"]; ok {
+		t.Errorf("out=%v, want no service echoed back", out)
+	}
+	if _, ok := out["message"]; ok {
+		t.Errorf("out=%v, want no prose line from the control plane", out)
 	}
 }
 

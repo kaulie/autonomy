@@ -71,6 +71,11 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if out["state"] != "changed" {
 		t.Fatalf("out=%v", out)
 	}
+	// The asset it changed is the step's own input; reporting it back would be an
+	// echo, not an output (see the output rule in docs/execution-step.md).
+	if _, ok := out["target"]; ok {
+		t.Fatalf("out=%v, want no target echoed back", out)
+	}
 }
 
 // TestBuiltinsDeclareTheirSignature: every built-in capability says what it takes

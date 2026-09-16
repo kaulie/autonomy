@@ -76,7 +76,8 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 | `suggestions` | 每个信号对应的下一步（去查什么 / 改什么） |
 | `source` | 这次观察是谁做的：`agent`（监控 agent 看的）/ `http`（直接读 API）/ `custom`（注入的 Observer） |
 | `note` | 需要说明的例外情况（例如 agent 的答复不合格式、已回退到原始观察） |
-| `polls` / `observed_at` / `provider` | 轮询次数、观察时间、实现方 |
+
+**不回显、不带 bookkeeping**：轮询次数、观察时间、实现方（`polls` / `observed_at` / `provider`）都不在输出里——"看了几次、什么时候看的、是哪个能力"记在这一步自己的行上，观察的内容才是输出（能力只报产出，见 [capability.md](capability.md)）。
 
 ## 信号
 

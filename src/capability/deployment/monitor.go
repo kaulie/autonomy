@@ -202,7 +202,6 @@ func (Monitor) Outputs() []spec.Field {
 		{Name: "evidence", Description: "the log lines the verdict rests on"},
 		{Name: "suggestions", Description: "concrete next steps, semicolon-joined"},
 		{Name: "source", Description: "who observed: agent (a monitoring agent), http (the API read directly) or custom (an injected observer)"},
-		{Name: "provider", Description: "the capability's provider (autonomy)"},
 		{Name: "phase", Description: "the stage the pipeline is in, when it reports one"},
 		{Name: "progress", Description: "the pipeline's own progress, e.g. 3/5, when it reports one"},
 		{Name: "healthy", Description: `"true"/"false" when the deployment reports health`},
@@ -211,8 +210,6 @@ func (Monitor) Outputs() []spec.Field {
 		{Name: "service", Description: "the service being deployed, when the pipeline names it"},
 		{Name: "version", Description: "the version being deployed, when the pipeline names it"},
 		{Name: "deployment_name", Description: "the deployment's name, when the pipeline names it"},
-		{Name: "observed_at", Description: "when this observation was taken (RFC 3339)"},
-		{Name: "polls", Description: "how many times the deployment was read in this call"},
 		{Name: "note", Description: "an exception worth knowing: an agent answer that did not parse, and what was reported instead"},
 	}
 }
@@ -251,11 +248,13 @@ func (m Monitor) Run(in map[string]string) (map[string]string, error) {
 		return nil, err
 	}
 	obs, source := m.observer()
-	snap, polls, err := observe(obs, req, m.Sleep)
+	// How many times the deployment was read is not part of what it reports — the
+	// call's own timing is on the step row.
+	snap, _, err := observe(obs, req, m.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
-	return report(snap, req, polls, time.Now(), source), nil
+	return report(snap, req, time.Now(), source), nil
 }
 
 // observe takes one snapshot, or — with Watch — polls until the deployment
@@ -416,19 +415,20 @@ func firstNonEmpty(vals ...string) string {
 // report renders the observation for the agent: what is happening, whether it
 // is a problem, the evidence, and the next steps. source names the monitoring
 // provider that produced the observation.
-func report(snap Snapshot, req Request, polls int, now time.Time, source string) map[string]string {
+//
+// What the capability *did* (when it looked, how many times it polled, which
+// provider it is) is not part of the observation: the step row records when the
+// call ran, and the observation's own facts are what the deployment reports.
+func report(snap Snapshot, req Request, now time.Time, source string) map[string]string {
 	d := Diagnose(snap, now, req.Tail)
 	out := map[string]string{
-		"deployment":  firstNonEmpty(snap.ID, req.Deployment),
-		"state":       string(snap.state()),
-		"terminal":    strconv.FormatBool(snap.state().terminal()),
-		"problem":     strconv.FormatBool(d.Problem),
-		"diagnosis":   d.Summary,
-		"evidence":    d.Evidence,
-		"observed_at": now.Format(time.RFC3339),
-		"polls":       strconv.Itoa(polls),
-		"provider":    Provider,
-		"source":      source,
+		"deployment": firstNonEmpty(snap.ID, req.Deployment),
+		"state":      string(snap.state()),
+		"terminal":   strconv.FormatBool(snap.state().terminal()),
+		"problem":    strconv.FormatBool(d.Problem),
+		"diagnosis":  d.Summary,
+		"evidence":   d.Evidence,
+		"source":     source,
 	}
 	if snap.AgentNote != "" {
 		out["note"] = snap.AgentNote

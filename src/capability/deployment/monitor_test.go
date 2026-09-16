@@ -71,8 +71,11 @@ func TestMonitorReportsFailedDeploymentWithEvidence(t *testing.T) {
 	if out["phase"] != "rollout" || out["progress"] != "2/3" {
 		t.Fatalf("phase/progress = %q/%q", out["phase"], out["progress"])
 	}
-	if out["provider"] != deployment.Provider || out["polls"] != "1" {
-		t.Fatalf("provider/polls = %q/%q", out["provider"], out["polls"])
+	if _, ok := out["provider"]; ok {
+		t.Errorf("out=%v, want no provider: the capability's own name is not an observation", out)
+	}
+	if _, ok := out["polls"]; ok {
+		t.Errorf("out=%v, want no poll count: how often it looked is not what it saw", out)
 	}
 	if obs.last.Deployment != "deployment-abc" || obs.last.Endpoint != "http://deploy.internal" {
 		t.Fatalf("observer request=%+v", obs.last)
@@ -151,14 +154,14 @@ func TestMonitorStalledDeploymentIsAProblem(t *testing.T) {
 // observation, because the decision loop is what re-runs it.
 func TestMonitorDefaultObservesOnce(t *testing.T) {
 	obs := observeOnce(deployment.Snapshot{ID: "d4", State: deployment.StateRunning})
-	out, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{
+	_, err := (deployment.Monitor{Observer: obs}).Run(map[string]string{
 		"deployment": "d4", "endpoint": "http://deploy.internal",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs.calls != 1 || out["polls"] != "1" {
-		t.Fatalf("calls/polls = %d/%q, want a single observation", obs.calls, out["polls"])
+	if obs.calls != 1 {
+		t.Fatalf("calls=%d, want a single observation", obs.calls)
 	}
 }
 
@@ -181,8 +184,8 @@ func TestMonitorWatchPollsUntilTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["state"] != "succeeded" || out["polls"] != "3" {
-		t.Fatalf("state/polls = %q/%q, want the third observation", out["state"], out["polls"])
+	if out["state"] != "succeeded" || obs.calls != 3 {
+		t.Fatalf("state=%q calls=%d, want the third observation to say succeeded", out["state"], obs.calls)
 	}
 	if out["problem"] != "false" {
 		t.Fatalf("problem=%q, a clean rollout is not a problem", out["problem"])
@@ -205,8 +208,8 @@ func TestMonitorWatchWindowIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["state"] != "running" || out["polls"] != "4" { // 1 + timeout/interval
-		t.Fatalf("state/polls = %q/%q", out["state"], out["polls"])
+	if out["state"] != "running" || obs.calls != 4 { // 1 + timeout/interval
+		t.Fatalf("state=%q calls=%d, want the bounded window to stop it", out["state"], obs.calls)
 	}
 }
 
