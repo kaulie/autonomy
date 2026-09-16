@@ -40,7 +40,7 @@ func (s *fakeSession) Release(context.Context) error {
 // fakeBroker records what the capability asked for.
 type fakeBroker struct {
 	lastOpts broker.AcquireAgentOpts
-	sess     *fakeSession
+	sess     broker.AgentSession
 	err      error
 	calls    int
 }
@@ -346,6 +346,68 @@ func TestMonitorReportsWhichProviderMonitored(t *testing.T) {
 	}
 }
 
+// frameSession is a monitoring agent whose host can describe the runtime the
+// observation was delegated from (broker.WorkerPromptContext).
+type frameSession struct {
+	fakeSession
+	frame map[string]string
+}
+
+func (s *frameSession) WorkerPlaceholders() map[string]string { return s.frame }
+
+// TestAgentObserverInjectsTheDelegationFrame: the monitoring agent is a delegated
+// worker, so it is told the world it is observing, the context of the delegation,
+// the completion principles of this task's goal and the constraints it works
+// under — the same frame every other delegated worker gets — while a host that
+// cannot describe one renders those sections as such instead of leaking {{NAME}}
+// to the agent.
+func TestAgentObserverInjectsTheDelegationFrame(t *testing.T) {
+	useRepoPrompt(t)
+	base := observeOnce(deployment.Snapshot{ID: "req-77", State: deployment.StateRunning})
+
+	framed := &frameSession{
+		fakeSession: fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON},
+		frame: map[string]string{
+			"{{WORLD}}":                 `{"assets":[{"id":"asset-1","kind":"service","state":"healthy"}]}`,
+			"{{RUNTIME_CONTEXT}}":       `{"agent":{"name":"agent-deployment.monitor-1"},"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
+			"{{COMPLETION_PRINCIPLES}}": "- Keep the service available and healthy.",
+			"{{CONSTRAINTS}}":           `{"deploy":"the Runtime's move, not the agent's"}`,
+		},
+	}
+	if _, err := (&deployment.AgentObserver{Agents: &fakeBroker{sess: framed}, Base: base}).Observe(
+		context.Background(), deployment.Request{Deployment: "req-77", Tail: 10, TaskID: "task-9"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## World", `"asset-1"`,
+		"## Runtime Context", `"delegated_by"`, `"task-9"`,
+		"## Completion",
+		"## Completion Principles", "- Keep the service available and healthy.",
+		"## Constraints", "the Runtime's move, not the agent's",
+	} {
+		if !strings.Contains(framed.prompt, want) {
+			t.Errorf("monitoring prompt missing %q:\n%s", want, framed.prompt)
+		}
+	}
+	if strings.Contains(framed.prompt, "{{") {
+		t.Errorf("monitoring prompt still has an unrendered placeholder:\n%s", framed.prompt)
+	}
+
+	// A host that cannot describe a runtime still produces a readable prompt: the
+	// frame sections say they were not provided.
+	plain := &fakeSession{id: "agent-deployment.monitor-2", answer: agentAnswerJSON}
+	if _, err := (&deployment.AgentObserver{Agents: &fakeBroker{sess: plain}, Base: base}).Observe(
+		context.Background(), deployment.Request{Deployment: "req-77", Tail: 10, TaskID: "task-9"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(plain.prompt, broker.WorkerFrameMissingValue); n != 4 {
+		t.Errorf("prompt marks %d frame sections as not provided, want 4:\n%s", n, plain.prompt)
+	}
+	if strings.Contains(plain.prompt, "{{") {
+		t.Errorf("monitoring prompt still has an unrendered placeholder:\n%s", plain.prompt)
+	}
+}
+
 // TestShippedMonitoringPromptKeepsTheAgentObservingOnly: the prompt is the
 // agent's contract, so the safety property lives in the shipped file, not only
 // in the code that renders it.
@@ -364,6 +426,13 @@ func TestShippedMonitoringPromptKeepsTheAgentObservingOnly(t *testing.T) {
 		"is not a problem",
 		"{{DEPLOYMENT}}",
 		"{{OBSERVATION}}",
+		// The frame sections a delegated worker's prompt carries: the monitoring
+		// agent is told the world it observes, the context of the delegation, what
+		// completion means here and the constraints it works under.
+		"{{WORLD}}",
+		"{{RUNTIME_CONTEXT}}",
+		"{{COMPLETION_PRINCIPLES}}",
+		"{{CONSTRAINTS}}",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("shipped prompt no longer says %q:\n%s", want, prompt)

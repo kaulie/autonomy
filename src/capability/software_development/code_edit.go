@@ -64,11 +64,11 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	// worker treats as binding (see src/agent_policy/CODE_EDIT.md).
 	workspace := sess.Workspace()
 	// The prompt may also carry the frame vocabulary of the planner policy (World
-	// / Runtime Context / Constraints / Constructs / Completion Principles): the
-	// host that acquired this session renders those values for this worker (see
-	// broker.WorkerPromptContext), so the worker sees the runtime it is working
-	// for rather than guessing at it.
-	prompt := renderPrompt(tmpl, workspace, instruction, workerPlaceholders(sess))
+	// / Runtime Context / Completion / Completion Principles / Constraints /
+	// Constructs): the host that acquired this session renders those values for
+	// this worker (see broker.WorkerFrame), so the worker sees the runtime it is
+	// working for rather than guessing at it.
+	prompt := renderPrompt(tmpl, workspace, instruction, broker.WorkerFrame(sess))
 
 	summary, err := sess.Prompt(ctx, prompt)
 	if err != nil {

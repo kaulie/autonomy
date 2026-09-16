@@ -41,12 +41,19 @@ Task Owner → Coding Agent → Research Agent → …
 
 - **提示词在文件里，不在代码里**：worker 拿到的提示词是仓库文件，每次委托现读现渲染；
   改措辞不用重新编译，文件缺失则该次委托直接失败：
-  - `code_edit` → `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md`（`{{WORKSPACE}}` / `{{GOAL}}`，
-    外加与 AGENT_V2 同一套的 `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` /
-    `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}`：委托方那个 runtime 的 World、构造与完成原则，
-    按 worker 自己的身份/沙箱渲染，委托方记成 `delegated_by`；见 [capability.md](capability.md)）
+  - **凡是「需要 agent」的能力，交给这个 agent 的提示词都带委托方 runtime 的 frame**：
+    `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` /
+    `{{CONSTRUCTS}}`（以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`），词表与渲染规则只有一份
+    （`src/capability/broker`：`WorkerFramePlaceholders` / `WorkerFrame` / `RenderWorkerPrompt`），
+    按 worker 自己的身份/沙箱渲染，委托方记成 `delegated_by`；取不到的 host（测试替身、没有 World 的宿主）
+    该节渲染成 `(not provided by this runtime)`，而不是把 `{{NAME}}` 原样丢给模型。
+    提示词文件用哪几节由模板决定。
+  - `code_edit` → `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md`（`{{WORKSPACE}}` / `{{GOAL}}` + 上面整套 frame）
   - `deployment.monitor` → `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md`
-    （`{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` …，见 [deployment-monitor.md](deployment-monitor.md)）
+    （`{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + World / Runtime Context /
+    Completion / Completion Principles / Constraints，见 [deployment-monitor.md](deployment-monitor.md)）
+  - 不拿 agent 的能力（如 `pull_request.review`、`service.deploy`）没有 frame 可言：它们是确定性调用，
+    值走输入和环境，不需要向谁交代世界状态
 
 ## 不变式
 

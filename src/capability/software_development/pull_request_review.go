@@ -43,6 +43,23 @@ const (
 	EnvGitRepoURL = "GIT_REPO_URL"
 	// EnvBaseBranch overrides which branch counts as the trunk.
 	EnvBaseBranch = "PR_BASE_BRANCH"
+
+	// The input keys that name the pull request itself rather than its branches:
+	// the URL everyone already has from the pull request (a code_edit report, a
+	// previous action's output) identifies it outright, so no branch pair and no
+	// repository lookup are needed.
+	inputPull     = "pr"
+	inputPullURL  = "pr_url"
+	inputPullAlt  = "pull_request"
+	inputFrom     = "from"
+	inputFromAlt  = "from_branch"
+	inputFromHead = "head"
+	inputFromSrc  = "source"
+	inputTo       = "to"
+	inputToAlt    = "to_branch"
+	inputToBase   = "base"
+	inputToTarget = "target"
+
 	// DefaultBaseBranch is the last resort for the trunk, when neither the input
 	// nor PR_BASE_BRANCH nor the repository itself says what it is.
 	DefaultBaseBranch = "main"
@@ -72,14 +89,15 @@ const (
 	reviewSnippetChars = 200
 )
 
-// PullRequestReview merges one pull request, identified by its branches, into
-// the base branch.
+// PullRequestReview merges one pull request into the base branch, identified
+// either by its own reference (`pr`: its URL, or owner/name#number) or by the
+// branch pair it was opened from (`from` → `to`).
 //
 // It is deliberately not an agent. Merging is a deterministic action against the
 // git host with a verifiable answer, so it is code over the GitHub REST API and
 // acquires no worker. code_edit may merge the pull request it opened itself (see
 // src/agent_policy/CODE_EDIT.md); this capability is the general one — it merges
-// the pull request identified by `from` → `to`, whoever opened it.
+// the pull request it was pointed at, whoever opened it.
 //
 // What it refuses is as much of its contract as what it does. A draft, a
 // conflict, red or unfinished checks, or unsatisfied branch protection stop the
@@ -104,18 +122,38 @@ func (PullRequestReview) Domain() string { return ReviewDomain }
 func (PullRequestReview) Provider() string { return ReviewProvider }
 
 func (PullRequestReview) Description() string {
-	return `merge one pull request, identified by its branches, into the base branch. input: {"from":"<head/topic branch>","to":"<base branch>"} ("from_branch"/"head" and "to_branch"/"base" work too; an empty "to" means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main). optional "method": merge (default) / squash / rebase. The merge happens only when the pull request is open, not a draft, free of conflict and its checks are green; otherwise it fails with the reason (not_found / draft / conflict / checks_failed / checks_pending / blocked) instead of merging. output: {"from","to","number","pr","merged":"true","method","sha","checks"} — sha is the merge commit on the base branch, checks is "passed"/"none"`
+	return `merge one pull request into the base branch. Name it either outright — "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted) — or by its branches: {"from":"<head/topic branch>","to":"<base branch>"} ("from_branch"/"head" and "to_branch"/"base" work too; an empty "to" means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main). A "repo" that contradicts the pull request url is refused rather than guessed at. optional "method": merge (default) / squash / rebase. The merge happens only when the pull request is open, not a draft, free of conflict and its checks are green; otherwise it fails with the reason (not_found / draft / conflict / checks_failed / checks_pending / blocked) instead of merging. output: {"from","to","number","pr","merged":"true","method","sha","checks"} — sha is the merge commit on the base branch, checks is "passed"/"none"`
 }
 
 // Run resolves what to merge, checks the gates, then merges. Every gate is
 // evaluated before the merge call, and each failure carries its own reason, so a
 // refusal reaches the planner as evidence rather than as a generic error.
 func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) {
-	from := strings.TrimSpace(firstNonEmpty(in["from"], in["from_branch"], in["head"], in["source"]))
-	if from == "" {
-		return nil, fmt.Errorf("%s: missing from (the head branch whose pull request should be merged)", ReviewName)
+	// A pull request can be named two ways: by its own reference — the URL
+	// everyone already has from it (a code_edit report, a previous action's
+	// output) — or by the branch pair it was opened from.
+	named, err := parsePullReference(firstNonEmpty(in[inputPull], in[inputPullURL], in[inputPullAlt]))
+	if err != nil {
+		return nil, err
 	}
-	repo := normalizeRepo(firstNonEmpty(in["repo"], in["repository"], c.Repo, os.Getenv(EnvRepository), os.Getenv(EnvGitRepoURL)))
+	from := strings.TrimSpace(firstNonEmpty(in[inputFrom], in[inputFromAlt], in[inputFromHead], in[inputFromSrc]))
+	if named.number == 0 && from == "" {
+		return nil, fmt.Errorf("%s: missing from (the head branch whose pull request should be merged) and no pull request was named (pass \"pr\":\"<pull request url>\")", ReviewName)
+	}
+	// What the caller names outright wins over the environment's default
+	// repository, and a "repo" that contradicts it is a mistake rather than a
+	// choice to be made here: merging a different repository than the one the
+	// caller named is exactly the silent outcome this capability must not have.
+	repo := normalizeRepo(firstNonEmpty(in["repo"], in["repository"], c.Repo))
+	if named.repo != "" {
+		if repo != "" && !strings.EqualFold(repo, named.repo) {
+			return nil, fmt.Errorf("%s: the pull request url names %s but \"repo\" says %s", ReviewName, named.repo, repo)
+		}
+		repo = named.repo
+	}
+	if repo == "" {
+		repo = normalizeRepo(firstNonEmpty(os.Getenv(EnvRepository), os.Getenv(EnvGitRepoURL)))
+	}
 	if repo == "" {
 		return nil, fmt.Errorf("%s: missing repository (pass \"repo\":\"owner/name\", or set %s / %s)", ReviewName, EnvRepository, EnvGitRepoURL)
 	}
@@ -139,14 +177,10 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	}
 	apiURL := strings.TrimRight(strings.TrimSpace(firstNonEmpty(c.APIURL, os.Getenv(EnvGitHubAPIURL), DefaultGitHubAPIURL)), "/")
 
-	// The base branch is resolved first: everything below (which pull request,
-	// which gates) is about the from → to pair, not about a branch name alone.
-	to, err := c.resolveBase(client, apiURL, repo, token, firstNonEmpty(in["to"], in["to_branch"], in["base"], in["target"]))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", ReviewName, err)
-	}
-
-	pr, err := c.findPullRequest(client, apiURL, repo, token, from, to)
+	// Which pull request this call is about is settled before any gate, so every
+	// gate below is about one concrete pull request with a base branch.
+	requested := firstNonEmpty(in[inputTo], in[inputToAlt], in[inputToBase], in[inputToTarget])
+	pr, to, err := c.identifyPull(client, apiURL, repo, token, named, from, requested)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ReviewName, err)
 	}
@@ -180,6 +214,43 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 		"sha":    merge.SHA,
 		"checks": checks,
 	}, nil
+}
+
+// identifyPull settles which pull request this call is about, and which branch it
+// must land on.
+//
+// A reference the caller named (its URL, its number) needs no list lookup: the
+// pull request is read by number, and the branch pair the caller may have passed
+// alongside has to agree with what the pull request actually is — a call that
+// names two different things is a mistake, and merging one of them silently is
+// exactly what this capability must never do. Without a reference, the base
+// branch is resolved first and the open pull request from `from` into it is the
+// one meant.
+func (c PullRequestReview) identifyPull(client *http.Client, apiURL, repo, token string, named pullReference, from, requested string) (gitHubPull, string, error) {
+	if named.number > 0 {
+		pr, err := c.getPullRequest(client, apiURL, repo, token, named.number)
+		if err != nil {
+			return gitHubPull{}, "", err
+		}
+		if from != "" && from != pr.Head.Ref {
+			return gitHubPull{}, "", fmt.Errorf("pull request #%d (%s) is from %s, not from %s", pr.Number, pr.HTMLURL, pr.Head.Ref, from)
+		}
+		if wanted := strings.TrimSpace(requested); wanted != "" && wanted != pr.Base.Ref {
+			return gitHubPull{}, "", fmt.Errorf("pull request #%d (%s) targets %s, not %s", pr.Number, pr.HTMLURL, pr.Base.Ref, wanted)
+		}
+		return pr, pr.Base.Ref, nil
+	}
+	// The base branch is resolved first: everything below (which pull request,
+	// which gates) is about the from → to pair, not about a branch name alone.
+	to, err := c.resolveBase(client, apiURL, repo, token, requested)
+	if err != nil {
+		return gitHubPull{}, "", err
+	}
+	pr, err := c.findPullRequest(client, apiURL, repo, token, from, to)
+	if err != nil {
+		return gitHubPull{}, "", err
+	}
+	return pr, to, nil
 }
 
 // resolveBase decides which branch the pull request must target: what the caller
@@ -234,6 +305,30 @@ func (c PullRequestReview) findPullRequest(client *http.Client, apiURL, repo, to
 		return gitHubPull{}, fmt.Errorf("not_found: %s has no open pull request from %s into %s", repo, from, to)
 	}
 	return pulls[0], nil
+}
+
+// getPullRequest reads one pull request by number — the lookup a caller that
+// named the pull request outright asked for. It reports the same not_found reason
+// the branch-pair lookup reports, so the planner can act on either: a pull
+// request that is already merged (or closed) is not there anymore, and saying so
+// is the answer, not a merge.
+func (c PullRequestReview) getPullRequest(client *http.Client, apiURL, repo, token string, number int) (gitHubPull, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/pulls/%d", apiURL, repo, number)
+	status, body, err := c.get(client, endpoint, token)
+	if err != nil {
+		return gitHubPull{}, err
+	}
+	if status == http.StatusNotFound {
+		return gitHubPull{}, fmt.Errorf("not_found: %s has no pull request #%d", repo, number)
+	}
+	if err := gitHubExpect(status, body, fmt.Sprintf("read pull request %s#%d", repo, number)); err != nil {
+		return gitHubPull{}, err
+	}
+	var pr gitHubPull
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return gitHubPull{}, fmt.Errorf("decode pull request: %w", err)
+	}
+	return pr, nil
 }
 
 // gateChecks refuses the merge unless the head commit's checks are green, and
@@ -420,6 +515,101 @@ func bodySnippet(body []byte) string {
 		text = text[:reviewSnippetChars] + "…"
 	}
 	return text
+}
+
+// pullReference is the pull request a caller named outright rather than by its
+// branches: the repository it lives in (empty when the caller named only a
+// number) and the number itself.
+type pullReference struct {
+	repo   string
+	number int
+}
+
+// parsePullReference reads the pull request a caller passed as its own reference
+// — what everyone already has from it (a code_edit report, a previous action's
+// output):
+//
+//	https://github.com/owner/name/pull/43   (any host; a trailing /, a query or
+//	                                         a #discussion fragment is cut away,
+//	                                         and /pulls/ is accepted too)
+//	owner/name#43
+//	43                                      (or #43, with "repo" naming the repo)
+//
+// An empty reference is not a pull request — the caller is naming it by its
+// branches — and yields the zero value. A reference that is there but unreadable
+// is an error rather than a guess: landing a repository or a pull request nobody
+// named is the one outcome this capability must not have.
+func parsePullReference(raw string) (pullReference, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return pullReference{}, nil
+	}
+	unreadable := func() (pullReference, error) {
+		return pullReference{}, fmt.Errorf("%s: cannot read a pull request from %q (want https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> with \"repo\")", ReviewName, s)
+	}
+
+	// The URL form: everything before /pull is the repository, everything after
+	// it is the number (plus whatever a browser URL drags along).
+	if i := strings.Index(strings.ToLower(s), "/pull"); i >= 0 {
+		repo := repoFromPrefix(s[:i])
+		tail := strings.TrimLeft(strings.TrimPrefix(s[i+len("/pull"):], "s"), "/")
+		if j := strings.IndexAny(tail, "?#/"); j >= 0 {
+			tail = tail[:j]
+		}
+		number, ok := pullNumber(tail)
+		if !ok || repo == "" {
+			return unreadable()
+		}
+		return pullReference{repo: repo, number: number}, nil
+	}
+	// The number-only form: the repository then has to come from elsewhere
+	// ("repo" / GITHUB_REPOSITORY / GIT_REPO_URL, checked by Run).
+	if number, ok := pullNumber(strings.TrimPrefix(s, "#")); ok && !strings.Contains(s, "/") {
+		return pullReference{number: number}, nil
+	}
+	// owner/name#43 — and a URL with the number in a fragment, which the same
+	// shape covers.
+	if j := strings.LastIndexByte(s, '#'); j > 0 {
+		number, ok := pullNumber(s[j+1:])
+		if repo := repoFromPrefix(s[:j]); ok && repo != "" {
+			return pullReference{repo: repo, number: number}, nil
+		}
+	}
+	return unreadable()
+}
+
+// repoFromPrefix reads the repository out of the part of a reference that comes
+// before the pull request number: an https or ssh remote, or a plain owner/name.
+// A scheme-less host (github.com/owner/name) is not read as owner/name — that
+// would name a repository nobody named — so it yields nothing and the reference
+// is refused instead of guessed at.
+func repoFromPrefix(prefix string) string {
+	if strings.Contains(prefix, "://") || strings.Contains(prefix, "@") {
+		return normalizeRepo(prefix)
+	}
+	parts := strings.Split(strings.Trim(prefix, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
+}
+
+// pullNumber reads a pull request number: digits only, and never zero.
+func pullNumber(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // normalizeRepo accepts what a caller reasonably has — "owner/name", an https
