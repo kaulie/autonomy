@@ -123,6 +123,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 
 	for _, want := range []string{
 		"## Agent",
+		"## Capability Dispatch",
 		"## Task",
 		"## Context Entity",
 		"## Goal",

@@ -23,7 +23,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |
 | Model | 记录当前使用的模型（如 `composer-2`；DB 列 `model`） |
-| Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者。**V1 只分两种**：`planner`（runtime 为一条 Task 创建的那个 agent，它决定每一轮）与 `worker`（capability 通过 `AcquireAgent` 要来的那个 agent，干一件事）；worker 的 **Purpose** 就是它被要来的原因（`code_edit` / `deployment.monitor`）。两者都是 runtime state，不落库，只用来渲染 agent 自己的提示词 |
+| Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者。**V1 只分两种**：`planner`（runtime 为一条 Task 创建的那个 agent，它决定每一轮）与 `worker`（capability 通过 `AcquireAgent` 要来的那个 agent，干一件事）；worker 的 **Purpose** 就是它被要来的原因（`code_edit` / `deployment.monitor`）。两者都是 runtime state，不落库，只用来渲染 agent 自己的提示词。**这条区分属于 runtime，不属于 planner 的计划**：planner 的 policy 只按 capability 派发（step = capability + input），哪个 capability 背后有 worker 由 runtime 决定，见 [capability.md](capability.md) |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |
 | Trust / Performance | 历史表现摘要（可后置） |
