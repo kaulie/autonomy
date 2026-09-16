@@ -14,7 +14,11 @@ import (
 type Capability interface {
 	Name() string
 	Domain() string
-	Provider() string // who provides this capability (e.g. cursor, autonomy)
+	// Provider is who provides this capability (e.g. cursor, autonomy). It is the
+	// runtime's own attribution — it travels on the step the runtime recorded
+	// (execution_step.provider), not into {{CONSTRUCTS}}: a plan step has no
+	// provider to fill in, so the planner is not offered one.
+	Provider() string
 	Description() string
 	Run(in map[string]string) (map[string]string, error)
 }
@@ -68,6 +72,13 @@ func (f *Factory) Has(name string) bool {
 // as a JSON array: what the runtime can do, and — for a capability that declares
 // them (spec.Declared) — the inputs it takes and the outputs it returns, so the
 // planner can call it correctly from this list alone.
+//
+// The provider is deliberately not part of this list. Who serves a capability is
+// the runtime's decision, not something a plan step can carry (a step is a
+// capability plus its input), and a plan that schedules on "who" cannot be
+// executed. The runtime keeps that attribution where it belongs — on the step it
+// recorded (see execution_step.provider / Runtime.providerOf) — rather than
+// offering the planner an axis it cannot use.
 func (f *Factory) FormatConstructs() string {
 	if f == nil || len(f.capabilities) == 0 {
 		return "[]"
@@ -75,7 +86,6 @@ func (f *Factory) FormatConstructs() string {
 	type constructJSON struct {
 		Name        string       `json:"name"`
 		Domain      string       `json:"domain"`
-		Provider    string       `json:"provider"`
 		Description string       `json:"description"`
 		Input       []spec.Field `json:"input,omitempty"`
 		Output      []spec.Field `json:"output,omitempty"`
@@ -85,7 +95,6 @@ func (f *Factory) FormatConstructs() string {
 		item := constructJSON{
 			Name:        c.Name(),
 			Domain:      c.Domain(),
-			Provider:    c.Provider(),
 			Description: c.Description(),
 		}
 		if declared, ok := c.(spec.Declared); ok {
