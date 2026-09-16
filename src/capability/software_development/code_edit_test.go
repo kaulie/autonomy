@@ -144,11 +144,14 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 	if strings.Contains(sess.prompt, "{{") {
 		t.Fatalf("prompt still has an unrendered placeholder:\n%s", sess.prompt)
 	}
-	if out["workspace"] != workerWorkspace {
-		t.Fatalf("out workspace=%q, want the worker's own %q", out["workspace"], workerWorkspace)
+	// The worker's own sandbox is what the prompt carries (asserted above); the output
+	// does not repeat it — where the worker ran is the agent's own record, not this
+	// step's product.
+	if _, ok := out["workspace"]; ok {
+		t.Fatalf("out=%v, want no workspace echoed into the output", out)
 	}
-	if out["agent_id"] != sess.id || out["summary"] != "edited files" {
-		t.Fatalf("out=%v, want the worker's own report and identity", out)
+	if out["summary"] != "edited files" {
+		t.Fatalf("out=%v, want the worker's own report", out)
 	}
 	if c.Name() != sd.Name || c.Domain() != sd.Domain || c.Provider() != sd.Provider {
 		t.Fatalf("meta name=%s domain=%s provider=%s", c.Name(), c.Domain(), c.Provider())
@@ -211,10 +214,12 @@ func TestCodeEditReportsThePullRequestItsWorkerNames(t *testing.T) {
 	}
 }
 
-// TestCodeEditOutputIsTheResultNotTheRun: what a step reports is what it produced.
-// The instruction it was given, the backend that ran it and whether the run
-// succeeded are all on the step's own row (input, provider, status); echoing them
-// into the output makes a value nobody can bind to and hides the ones that can.
+// TestCodeEditOutputIsTheResultNotTheRun: what a step reports is what it produced —
+// the worker's report and the pull request it opened. The instruction it was given,
+// the backend that ran it, whether the run succeeded, which worker it was and where
+// it ran are all recorded elsewhere (the step's input/provider/status, the agent,
+// the step's interaction row); echoing them into the output makes values nobody can
+// bind to and hides the ones that can.
 func TestCodeEditOutputIsTheResultNotTheRun(t *testing.T) {
 	useRepoPrompt(t)
 	sess := &mockSession{id: "agent-code_edit-1", workspace: "/sandbox/w/", summary: "Opened https://github.com/kaulie/autonomy/pull/9"}
@@ -231,13 +236,16 @@ func TestCodeEditOutputIsTheResultNotTheRun(t *testing.T) {
 			t.Errorf("output %q is not declared by code_edit", key)
 		}
 	}
-	for _, echoed := range []string{"instruction", "provider", "status"} {
-		if _, ok := out[echoed]; ok {
-			t.Errorf("output=%v echoes %q, which the step row already records", out, echoed)
+	for _, notAResult := range []string{"instruction", "provider", "status", "agent_id", "workspace"} {
+		if _, ok := out[notAResult]; ok {
+			t.Errorf("output=%v carries %q, which is recorded elsewhere", out, notAResult)
 		}
-		if declared[echoed] {
-			t.Errorf("code_edit still declares %q as an output", echoed)
+		if declared[notAResult] {
+			t.Errorf("code_edit still declares %q as an output", notAResult)
 		}
+	}
+	if len(out) != 2 || out["summary"] == "" {
+		t.Fatalf("out=%v, want the worker's report and the pull request", out)
 	}
 	if out["pr_url"] != "https://github.com/kaulie/autonomy/pull/9" {
 		t.Fatalf("out=%v, want the pull request it opened", out)
