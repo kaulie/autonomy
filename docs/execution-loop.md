@@ -26,6 +26,25 @@ Task
 
 Goal → Task → Agent → Capability → World State → Event → Agent → Completion
 
+## 术语：cycle 与 step
+
+- **cycle**：**某个 agent 自己的轮次**，从 **1** 开始，相对于它自己而言 —— 不跨 agent 比较。
+  一次 prompt → reply 就是一轮：planner 的 cycle 是它对这条 task 的决策轮；被委托的 worker 的 cycle 是**它自己的**轮次
+  （第一个 prompt 就是 1），而且 **worker 完全可能有自己的 decision cycle**（规则不预设它是「只干一件事」的：
+  它自己跑多轮就是 1、2、3…）。`mode`（plan / agent）说的是这一轮在做什么，不改变 cycle 的含义。
+  落库就是 `reason_turns.cycle` / `llm_messages.cycle`（历史名 `step` 已重命名 —— 一个词不能指两件事）。
+  要定位一次交互用 `(agent_id, cycle)` 或 turn id，不要拿两个 agent 的 cycle 相互对照；
+  委托方的 cycle 出现在 worker 提示词的 `delegated_by.cycle` 里 —— 那是「谁在第几轮把它派出去」，仍是相对委托方的。
+  `Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的是 planner 自己的 cycle（名字是历史包袱，语义以本文为准）。
+  **历史数据**：这次迁移把此前记的 `0`（worker 没有自己的 cycle 那个年代）与「委托方的 cycle」按**各自 agent 的先后**
+  重新编号（第一个 prompt 记 1、第二个记 2）；`llm_messages` 跟着它的 run header 走；只有 `agent_id = 0` 的行保持原样 ——
+  无从判断它是这个 agent 的第几轮。
+- **step**：**一次 plan 生成的具体行动步骤** —— planner 返回的 plan 里，每个 step 就是一次能力调用
+  （`plan.steps[]`）。运行时的执行记录用的才是这个词：计划 `execution_step_plan`（执行前一次性写全）与实际执行
+  `execution_step`（跑一步写一行）。
+
+一句话：**cycle 是「相对某个 agent 的第几轮」，step 是「某份 plan 里的第几个动作」。**
+
 ## 职责边界
 
 | 阶段 | 主要概念 |
@@ -40,28 +59,28 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 ## 实现：一轮 = 一个决定 = 整份 plan
 
-代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtStep` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
+代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtCycle` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
 
-- 每轮：`DecideAtStep(step)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Autonomy.MaxSteps`，默认 `1`）。
+- 每轮：`DecideAtCycle(cycle)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Autonomy.MaxSteps`，默认 `1`）。
 - 模型按 AGENT_V2 §Output Schema 回答；`parseDecision` **保留整份 plan**：`plan.steps[]` 每个 step 一个 action，按序放进 `Decision.Actions`，`evidence` / `need` / `deliverable` / `presentation` 一并带回（不再是"只留第一个 action，其余丢掉"）。
 - `Runtime.Execute` **在同一轮里按序执行所有 action**；第一个失败就结束该轮（`Result.Message` 会写第几个/共几个）。
 - **失败不结束 Task**：`Autonomy.executeDecision` 把失败记进该轮 `Result`（`Err` + `Message`），循环继续、进入下一轮 decide 重规划；只有当**最后一轮**失败时 task 才收成 `error`（`src/autonomy.go:Run`）。
 - 之前的每轮结果都作为 `DecisionContext.History` 传给下一次 decide，prompt 的 Runtime Context 里渲染成
-  `previous_actions: [{step, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
+  `previous_actions: [{cycle, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
   **每个 action 的原始 input/output 都原样保留、不合并**，planner 自己决定看哪条（例如 `code_edit` 的 `summary`/`workspace`）—— 这就是"观察结果再决定"的那一半。
 - **消息是增量的**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），所以 AGENT_V2 的
   **frame**（Agent / Role / Delegation / Output Schema / Goal Type / Completion Principles / Constructs）只在
   **一个会话的第一轮**发送；之后每轮只发 **delta**（当前 Task / Context Entity / World / Runtime Context /
-  Constraints，Runtime Context 里已经带着 `step` 与 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
+  Constraints，Runtime Context 里已经带着 `cycle` 与 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
   **谁是它自己（`{{AGENT}}`：role / id / name / backend / model / lifecycle / workspace）属于 frame**：
-  这些东西整个会话不变，而"这一轮是第几轮"（`step`）每轮都变、留在 delta —— 见 [agent.md](agent.md)。
+  这些东西整个会话不变，而"这一轮是第几轮"（`cycle`）每轮都变、留在 delta —— 见 [agent.md](agent.md)。
   frame 里的 per-cycle 占位符渲染成 `reasoningDeltaMarker`，所以 frame 整段字节不变、能吃到 prompt cache。
   是否发 frame 由 `Agent.needsLLMFrame()` 决定：新会话（Cursor `Create` / Cline 新 handle（含 mode|cwd 变化））
   为真，且只有 run **成功之后**才 `markLLMFrameSent()` —— 首轮失败会重发 frame，不会让会话裸着没有指令；
   `Resume` 回来的会话视为已有 frame。见 `src/prompt.go` / `src/reasoner.go` / `src/llm_frame_test.go`。
 - step 的 `capability` 未注册 → 该位置变成 `NothingAction{Reason}`：**只跳过这一步，后面的 action 照常执行**（旧实现会让整份 plan 消失）。
 - `type` 不是 `plan`（`done` / `blocked` / `need_input`）时 `Actions` 为空，`Execute` 不执行任何动作，且不是错误。
-- 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 1`）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。
+- 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 1`；它数的是 **decision cycle**，`step` 这个词现在专指「执行步」）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。
 
 ## 不变式
 

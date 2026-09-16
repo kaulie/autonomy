@@ -28,11 +28,11 @@ func TestDecideAtStepPassesTheHistory(t *testing.T) {
 		{Message: "executed 1 action(s)"},
 		{Message: "action 1/1 failed: boom", Err: errors.New("boom")},
 	}
-	if _, err := agent.DecideAtStep(2, history); err != nil {
+	if _, err := agent.DecideAtCycle(2, history); err != nil {
 		t.Fatal(err)
 	}
-	if got.Step != 2 {
-		t.Fatalf("step=%d, want 2", got.Step)
+	if got.Cycle != 2 {
+		t.Fatalf("step=%d, want 2", got.Cycle)
 	}
 	if len(got.History) != 2 {
 		t.Fatalf("history=%+v, want the two earlier cycles", got.History)
@@ -57,7 +57,7 @@ func TestRuntimeContextRendersPreviousActions(t *testing.T) {
 		EvidenceRefs   []string          `json:"evidence_refs"`
 	}
 	type seenStep struct {
-		Step    int          `json:"step"`
+		Cycle   int          `json:"cycle"`
 		Message string       `json:"message"`
 		Status  string       `json:"status"`
 		Error   string       `json:"error"`
@@ -95,7 +95,7 @@ func TestRuntimeContextRendersPreviousActions(t *testing.T) {
 		t.Fatalf("previous_actions=%+v, want 2 cycles", dumped.Previous)
 	}
 	first := dumped.Previous[0]
-	if first.Step != 1 || first.Status != "ok" || len(first.Actions) != 1 {
+	if first.Cycle != 1 || first.Status != "ok" || len(first.Actions) != 1 {
 		t.Fatalf("previous_actions[0]=%+v", first)
 	}
 	if first.Actions[0].Input["instruction"] != "standardise the events" ||

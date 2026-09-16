@@ -194,7 +194,7 @@ func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, err
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "## Decision Cycle %d — current values\n", ctx.Step)
+	fmt.Fprintf(&b, "## Decision Cycle %d — current values\n", ctx.Cycle)
 	fmt.Fprintf(&b, "Current values for the placeholders marked \"%s\" above.\n\n", reasoningDeltaMarker)
 	b.WriteString("```json\n")
 	b.Write(raw)
@@ -315,8 +315,8 @@ func formatRuntimeContextJSON(ctx DecisionContext, input ReasoningInput) []byte 
 // (agentIdentityMap).
 func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any {
 	m := map[string]any{}
-	if ctx.Step > 0 {
-		m["step"] = ctx.Step
+	if ctx.Cycle > 0 {
+		m["cycle"] = ctx.Cycle
 	}
 	if text := strings.TrimSpace(input.Text); text != "" {
 		m["additional_input"] = map[string]string{"text": text}
@@ -337,15 +337,19 @@ func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any
 // The worker's own identity — its agent, workspace and backend, never the
 // delegating agent's — is its own section ({{AGENT}}), not this one.
 func workerRuntimeContextJSON(ctx DecisionContext) []byte {
-	// A worker has no decision cycle of its own, so it is rendered without a step.
+	// A worker's Runtime Context describes the situation it was handed, not a cycle
+	// of its own: the cycle that would render here belongs to the agent that
+	// delegated (it appears as delegated_by.cycle). The worker's own cycles — it may
+	// have several, and need not be a worker forever — are its own, counted from 1
+	// on its own run headers (see beginDelegatedTrace).
 	workerCtx := ctx
-	workerCtx.Step = 0
+	workerCtx.Cycle = 0
 	m := runtimeContextMap(workerCtx, ReasoningInput{})
 	if ctx.Task != nil {
 		m["task"] = json.RawMessage(formatTaskJSON(ctx.Task))
 	}
 	if ctx.Agent != nil {
-		m["delegated_by"] = map[string]any{"agent": ctx.Agent.Name, "step": ctx.Step}
+		m["delegated_by"] = map[string]any{"agent": ctx.Agent.Name, "cycle": ctx.Cycle}
 	}
 	return mustJSON(m)
 }
@@ -358,7 +362,7 @@ func formatPreviousActionsJSON(history []Result) []map[string]any {
 	out := make([]map[string]any, 0, len(history))
 	for i, result := range history {
 		entry := map[string]any{
-			"step":    i + 1,
+			"cycle":   i + 1,
 			"message": result.Message,
 			"status":  "ok",
 		}

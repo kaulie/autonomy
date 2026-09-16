@@ -370,7 +370,7 @@ func TestAgentObserverInjectsTheDelegationFrame(t *testing.T) {
 		frame: map[string]string{
 			"{{AGENT}}":                 `{"role":"worker","purpose":"deployment.monitor","name":"agent-deployment.monitor-1"}`,
 			"{{WORLD}}":                 `{"assets":[{"id":"asset-1","kind":"service","state":"healthy"}]}`,
-			"{{RUNTIME_CONTEXT}}":       `{"step":2,"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
+			"{{RUNTIME_CONTEXT}}":       `{"cycle":2,"task":{"id":"task-9"},"delegated_by":{"agent":"agent-10095"}}`,
 			"{{COMPLETION_PRINCIPLES}}": "- Keep the service available and healthy.",
 			"{{CONSTRAINTS}}":           `{"deploy":"the Runtime's move, not the agent's"}`,
 		},

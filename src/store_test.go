@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 		t.Fatalf("model=%q, want %q", model, "composer-2")
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
-		TaskID: "t1", AgentID: 1, Step: 1, Mode: ReasonModeAgent,
+		TaskID: "t1", AgentID: 1, Cycle: 1, Mode: ReasonModeAgent,
 		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", RawOutput: "out",
 	}); err != nil {
 		t.Fatal(err)
@@ -312,19 +313,19 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 	task := &Task{ID: "t-local"}
 	agent := &Agent{ID: 42, CurrentTask: task}
 	r := NewLocalReasoner("local")
-	_, err = r.Reason(DecisionContext{Task: task, Agent: agent, Step: 2}, ReasoningInput{})
+	_, err = r.Reason(DecisionContext{Task: task, Agent: agent, Cycle: 2}, ReasoningInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var step int
+	var cycle int
 	var input, rawOutput, normalizedOutput, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT step, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 42).
-		Scan(&step, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
+	err = store.db.QueryRow(`SELECT cycle, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 42).
+		Scan(&cycle, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step != 2 || input == "" || rawOutput == "" || normalizedOutput == "" {
-		t.Fatalf("step=%d input=%q raw_output=%q normalized_output=%q", step, input, rawOutput, normalizedOutput)
+	if cycle != 2 || input == "" || rawOutput == "" || normalizedOutput == "" {
+		t.Fatalf("cycle=%d input=%q raw_output=%q normalized_output=%q", cycle, input, rawOutput, normalizedOutput)
 	}
 	if mode != string(ReasonModePlan) {
 		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
@@ -346,7 +347,7 @@ func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
 	t.Cleanup(func() { _store = prev })
 
 	agent := &Agent{ID: 9, Backend: AgentBackendCursor, LLMProvider: LLMProviderCursor, Model: "composer-2"}
-	recordReasonIO(DecisionContext{Agent: agent, Task: &Task{ID: "t-cursor"}, Step: 1}, "in", "out")
+	recordReasonIO(DecisionContext{Agent: agent, Task: &Task{ID: "t-cursor"}, Cycle: 1}, "in", "out")
 
 	var mode string
 	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, 9).Scan(&mode)
@@ -514,6 +515,229 @@ func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
 	}
 	if len(events) != 2 || events[1].Kind != LLMKindToolCallCompleted {
 		t.Fatalf("events=%+v want the kind to round-trip", events)
+	}
+}
+
+// TestSQLiteStoreMigratesStepToCycle: reason_turns.step / llm_messages.step counted
+// decision cycles and are called cycle now — a step is one execution step of a plan,
+// and one word should not mean two things. An older database is renamed in place:
+// the values survive, the indexes that referenced the column follow it, the old
+// name is gone, and the store's own queries work against the migrated table.
+func TestSQLiteStoreMigratesStepToCycle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pre-rename schema, indexes included.
+	_, err = db.Exec(`
+CREATE TABLE reason_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL DEFAULT '',
+  agent_id INTEGER NOT NULL DEFAULT 0,
+  step INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL DEFAULT '',
+  llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  input TEXT NOT NULL DEFAULT '',
+  raw_output TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_reason_turns_agent ON reason_turns(agent_id, step);
+CREATE TABLE llm_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  turn_id INTEGER NOT NULL DEFAULT 0,
+  task_id TEXT NOT NULL DEFAULT '',
+  agent_id INTEGER NOT NULL DEFAULT 0,
+  step INTEGER NOT NULL DEFAULT 0,
+  seq INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT '',
+  parent_id INTEGER,
+  content TEXT NOT NULL DEFAULT '',
+  normalized_content TEXT NOT NULL DEFAULT '',
+  llm_provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  run_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_llm_messages_task ON llm_messages(task_id, step);
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO reason_turns (task_id, agent_id, step, mode, input, raw_output, created_at)
+		VALUES ('t-old', 7, 3, 'plan', 'in', 'out', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO llm_messages (turn_id, task_id, agent_id, step, seq, role, content, created_at)
+		VALUES (1, 't-old', 7, 3, 0, 'user', 'hello', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer store.Close()
+
+	for _, table := range []string{"reason_turns", "llm_messages"} {
+		if has, err := store.columnExists(table, "step"); err != nil || has {
+			t.Fatalf("%s still has a step column (err=%v)", table, err)
+		}
+		if has, err := store.columnExists(table, "cycle"); err != nil || !has {
+			t.Fatalf("%s has no cycle column (err=%v)", table, err)
+		}
+	}
+	var cycle int
+	if err := store.db.QueryRow(`SELECT cycle FROM reason_turns WHERE agent_id = 7`).Scan(&cycle); err != nil {
+		t.Fatal(err)
+	}
+	if cycle != 3 {
+		t.Fatalf("reason_turns.cycle=%d, want the value the old column held", cycle)
+	}
+	if err := store.db.QueryRow(`SELECT cycle FROM llm_messages WHERE task_id = 't-old'`).Scan(&cycle); err != nil {
+		t.Fatal(err)
+	}
+	if cycle != 3 {
+		t.Fatalf("llm_messages.cycle=%d, want the value the old column held", cycle)
+	}
+
+	// The indexes followed the rename rather than being dropped with the old column.
+	for index, table := range map[string]string{"idx_reason_turns_agent": "reason_turns", "idx_llm_messages_task": "llm_messages"} {
+		var ddl string
+		if err := store.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&ddl); err != nil {
+			t.Fatalf("index %s: %v", index, err)
+		}
+		_ = table
+		if !strings.Contains(ddl, "cycle") {
+			t.Fatalf("index %s did not follow the rename: %s", index, ddl)
+		}
+	}
+
+	// And the store's own queries work against the migrated table.
+	messages, err := store.ListLLMMessages(1)
+	if err != nil {
+		t.Fatalf("list after migration: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Cycle != 3 {
+		t.Fatalf("messages=%+v, want the migrated row with cycle=3", messages)
+	}
+}
+
+// TestSQLiteStoreNumbersAgentCycles: cycle is relative to the agent it belongs to,
+// so the turns written before that was true — 0, or the delegating agent's cycle —
+// are numbered by their own order: this agent's first prompt is 1, its second 2.
+// Planner turns already carry their own cycle and are left alone, a turn whose
+// agent is unknown stays untouched, and every message follows its own run header.
+func TestSQLiteStoreNumbersAgentCycles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// What those writers left behind: a worker recorded as 0 twice, another once, a
+	// planner already numbered, and a turn nobody attributed.
+	for _, row := range []struct {
+		agentID   int64
+		mode      string
+		cycle     int
+		createdAt string
+	}{
+		{11, "agent", 0, "2026-01-01T00:00:00Z"},
+		{11, "agent", 0, "2026-01-01T00:01:00Z"},
+		{12, "agent", 1, "2026-01-01T00:02:00Z"}, // the delegating cycle era
+		{13, "plan", 1, "2026-01-01T00:03:00Z"},
+		{13, "plan", 2, "2026-01-01T00:04:00Z"},
+		{0, "agent", 0, "2026-01-01T00:05:00Z"},
+	} {
+		if _, err := store.db.Exec(`INSERT INTO reason_turns (task_id, agent_id, cycle, mode, created_at)
+			VALUES (?, ?, ?, ?, ?)`, "task-old", row.agentID, row.cycle, row.mode, row.createdAt); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+	}
+	// Messages carried the same (un-numbered) cycle as their turn.
+	var firstTurn int64
+	if err := store.db.QueryRow(`SELECT MIN(id) FROM reason_turns`).Scan(&firstTurn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO llm_messages (turn_id, task_id, agent_id, cycle, seq, role, content, created_at)
+		VALUES (?, 'task-old', 11, 0, 0, 'agent', 'do it', '2026-01-01T00:00:00Z')`, firstTurn); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopening numbers them.
+	reopened, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	rows, err := reopened.db.Query(`SELECT agent_id, mode, cycle FROM reason_turns ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var agentID int64
+		var mode string
+		var cycle int
+		if err := rows.Scan(&agentID, &mode, &cycle); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d/%s/%d", agentID, mode, cycle))
+	}
+	want := []string{"11/agent/1", "11/agent/2", "12/agent/1", "13/plan/1", "13/plan/2", "0/agent/0"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("cycles=%v, want %v", got, want)
+	}
+	// The message follows the run header it belongs to.
+	var messageCycle, turnCycle int
+	if err := reopened.db.QueryRow(`SELECT m.cycle, r.cycle FROM llm_messages m JOIN reason_turns r ON r.id = m.turn_id`).
+		Scan(&messageCycle, &turnCycle); err != nil {
+		t.Fatal(err)
+	}
+	if messageCycle != turnCycle || messageCycle != 1 {
+		t.Fatalf("message cycle=%d, turn cycle=%d, want both 1", messageCycle, turnCycle)
+	}
+
+	// Numbering is idempotent: reopening again leaves everything as it is.
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	rows, err = again.db.Query(`SELECT agent_id, mode, cycle FROM reason_turns ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var second []string
+	for rows.Next() {
+		var agentID int64
+		var mode string
+		var cycle int
+		if err := rows.Scan(&agentID, &mode, &cycle); err != nil {
+			t.Fatal(err)
+		}
+		second = append(second, fmt.Sprintf("%d/%s/%d", agentID, mode, cycle))
+	}
+	if strings.Join(second, " ") != strings.Join(want, " ") {
+		t.Fatalf("second open changed the cycles: %v", second)
 	}
 }
 

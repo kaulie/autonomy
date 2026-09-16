@@ -12,7 +12,7 @@ type DecisionContext struct {
 	Task  *Task
 	Agent *Agent
 	World World
-	Step  int // 1-based loop step when set by Autonomy.Run
+	Cycle int // 1-based decision cycle when set by Autonomy.Run
 	// History is what the previous cycles of this task did, oldest first: the
 	// planner sees it as previous_actions and can base its evidence on it (see
 	// AGENT_V2 evidence source previous_action).

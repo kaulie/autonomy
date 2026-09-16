@@ -19,7 +19,7 @@ func TestReasoningPromptSendsFrameOncePerSession(t *testing.T) {
 	ctx := DecisionContext{
 		Task:  &Task{ID: "t-frame", Description: "add a /healthz endpoint", GoalType: GoalType_FEATURE},
 		Agent: agent,
-		Step:  1,
+		Cycle: 1,
 	}
 
 	first, sentFrame, err := reasoningPrompt(ctx, ReasoningInput{})
@@ -57,7 +57,7 @@ func TestReasoningPromptSendsFrameOncePerSession(t *testing.T) {
 	}
 
 	// The delta follows the state: next cycle, plus what the last one did.
-	ctx.Step = 2
+	ctx.Cycle = 2
 	ctx.History = []Result{{Message: "executed 1 action(s): code_edit"}}
 	third, sentFrame3, err := reasoningPrompt(ctx, ReasoningInput{})
 	if err != nil {

@@ -35,7 +35,7 @@ func TestIdentityIsWhatTheAgentIsNotItsSituation(t *testing.T) {
 	}
 	// Nothing of the situation leaked in, and an agent nobody described is given
 	// no role: the prompt states what the runtime knows.
-	for _, unwanted := range []string{"task", "step", "delegated_by", "previous_actions"} {
+	for _, unwanted := range []string{`"task"`, `"cycle":`, `"delegated_by"`, `"previous_actions"`} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("identity carries %s:\n%s", unwanted, got)
 		}
@@ -103,7 +103,7 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 	ctx := DecisionContext{
 		Task:    task,
 		Agent:   planner,
-		Step:    2,
+		Cycle:   2,
 		History: []Result{{Message: "executed 1 action(s): code_edit"}},
 	}
 
@@ -154,7 +154,7 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 		t.Fatalf("runtime context still presents an agent as the worker's own:\n%s", rc)
 	}
 	// A worker has no decision cycle of its own, so it is told no step.
-	if _, ok := unfenceObject(t, rc)["step"]; ok {
+	if _, ok := unfenceObject(t, rc)["cycle"]; ok {
 		t.Fatalf("runtime context gives the worker a cycle it does not have:\n%s", rc)
 	}
 

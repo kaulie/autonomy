@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS llm_messages (
   turn_id            INTEGER NOT NULL DEFAULT 0,   -- → reason_turns.id（属于哪次 run）
   task_id            TEXT    NOT NULL DEFAULT '',
   agent_id           INTEGER NOT NULL DEFAULT 0,
-  step               INTEGER NOT NULL DEFAULT 0,
+  cycle              INTEGER NOT NULL DEFAULT 0,
   seq                INTEGER NOT NULL DEFAULT 0,   -- run 内顺序：输入=0, 中间行 1..N, assistant=N+1
   role               TEXT    NOT NULL DEFAULT '',  -- 输入作者: user | agent；产物: assistant | thinking | tool
   parent_id          INTEGER,                      -- 非 user 行 → 本次 run 的 user 消息 id（溯源）
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS llm_messages (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_messages_turn_seq ON llm_messages(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_messages_parent ON llm_messages(parent_id);
-CREATE INDEX IF NOT EXISTS idx_llm_messages_task   ON llm_messages(task_id, step);
+CREATE INDEX IF NOT EXISTS idx_llm_messages_task   ON llm_messages(task_id, cycle);
 ```
 
 设计要点：
@@ -69,7 +69,7 @@ tool 消息开始时结束，tool 消息在它的返回到达时结束），就�
 跑的过程中就能从表里和 stderr 上看到进展，不必等 `Finish`（`AppendLLMMessages`）。
 
 ```
-BeginLLMTrace(agent, taskID, step, mode, input)
+BeginLLMTrace(agent, taskID, cycle, mode, input)
   → BeginReasonTurn：建 header，写 user 消息(seq=0)，返回 handle{TurnID, InputMessageID}
        ↓  Emit(ev) 逐条：llm_events（可选，AUTONOMY_LLM_EVENTS）
        │                    ＋ 聚合：消息一完成就 AppendLLMMessages(seq 固定为创建序) + 打日志

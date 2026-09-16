@@ -65,7 +65,7 @@ func BeginLLMTrace(agent *Agent, taskID string, step int, mode ReasonMode, input
 // another agent delegated this run (a capability handing a sub-task to this
 // agent). The input row is the run's first llm_messages row, so this is where a
 // delegation becomes visible instead of looking like the user speaking again.
-func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, step int, mode ReasonMode, input string) *LLMTrace {
+func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cycle int, mode ReasonMode, input string) *LLMTrace {
 	if inputRole == "" {
 		inputRole = LLMMessageRoleUser
 	}
@@ -75,7 +75,7 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, st
 	}
 	turn := ReasonTurn{
 		TaskID:    taskID,
-		Step:      step,
+		Cycle:     cycle,
 		Mode:      mode,
 		Input:     input,
 		InputRole: inputRole,

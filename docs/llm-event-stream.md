@@ -85,7 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_events_turn_kind ON llm_events(turn_id, kind)
 ## 写入流程
 
 ```
-BeginLLMTrace(agent, taskID, step, mode, input)   → 建 header + 写 user 消息（status=running）
+BeginLLMTrace(agent, taskID, cycle, mode, input)  → 建 header + 写 user 消息（status=running）
    ↓  每个 provider 事件
 LLMTrace.Emit(LLMEvent)                            → 缓冲，按批写 llm_events
    │                                               ＋ 边聚合边写 llm_messages（消息一完成就落库 + 打日志）
@@ -149,7 +149,7 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 3. 在拿到 native 流的地方，把事件喂给 trace 或 `MapNativeLLMEvent(provider, native, started)`：
 
    ```go
-   trace := BeginLLMTrace(agent, taskID, step, mode, prompt)
+   trace := BeginLLMTrace(agent, taskID, cycle, mode, prompt)
    // ... provider 流每来一个事件：
    if ev, ok := MapNativeLLMEvent(agent.LLMProvider, native, started); ok {
        trace.Emit(ev)
