@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
 	"github.com/kaulie/autonomy/src/capability/deployment"
@@ -19,7 +20,8 @@ type fakeSession struct {
 	id       string
 	answer   string
 	err      error
-	prompt   string
+	prompt   string   // the last prompt
+	prompts  []string // every prompt, in order: one per observation
 	released bool
 }
 
@@ -29,6 +31,7 @@ func (s *fakeSession) Workspace() string { return "/sandbox/agent-deployment.mon
 
 func (s *fakeSession) Prompt(_ context.Context, prompt string) (string, error) {
 	s.prompt = prompt
+	s.prompts = append(s.prompts, prompt)
 	return s.answer, s.err
 }
 
@@ -356,6 +359,106 @@ func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 	}
 	if len(srv.paths) != read {
 		t.Fatalf("the injected observer answered but the server was read: %v", srv.paths[read:])
+	}
+}
+
+// TestWatchAsksTheAgentOnceAndTellsItWhatHappened: a watch polls the deployment API every
+// round (cheap, deterministic) and asks the monitoring agent **once**, when the observation
+// is over — handing it the changes it passed through, because asking a model every five
+// seconds is one model call per five seconds. One deployment.monitor call holds one agent.
+func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
+	useRepoPrompt(t)
+	reads := 0
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// Count the status reads only: the reader also fetches the logs path.
+		if !strings.HasSuffix(r.URL.Path, "/logs") {
+			reads++
+		}
+		state := "running"
+		if reads >= 3 {
+			state = "succeeded"
+		}
+		_, _ = io.WriteString(w, `{"state":"`+state+`","phase":"deploy"}`)
+	})
+	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
+	b := &fakeBroker{sess: sess}
+
+	out, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
+		"deployment": "p-watch", "endpoint": srv.URL,
+		"watch": "true", "interval": "1", "timeout": "30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.calls != 1 {
+		t.Fatalf("agents acquired=%d, want one agent for the whole call", b.calls)
+	}
+	if len(sess.prompts) != 1 {
+		t.Fatalf("the agent was asked %d time(s), want once for the whole watch", len(sess.prompts))
+	}
+	prompt := sess.prompts[0]
+	// Asked once, told how often it was read and what changed (the two polls where nothing
+	// changed are not two lines), and asked about the observation that settled.
+	if !strings.Contains(prompt, "watched (3 poll(s), 1 change(s)") {
+		t.Fatalf("the observation does not say what the watch saw: %s", prompt)
+	}
+	if !strings.Contains(prompt, "state: succeeded") {
+		t.Fatalf("the observation is not the one that settled: %s", prompt)
+	}
+	if !sess.released {
+		t.Error("the agent was not released when the call ended")
+	}
+	if out["state"] != "failed" {
+		t.Fatalf("state=%q, want the agent's own verdict (agentAnswerJSON says failed)", out["state"])
+	}
+}
+
+// TestWatchHandsItsJudgeWhatChangedAndItsEvidence: the polls where nothing changed are one
+// line — a change is what a monitoring agent is asked about — and a change that looked
+// wrong carries its evidence, so a failure that appeared mid-rollout and went away is still
+// in front of the agent when the deployment ends up succeeding.
+func TestWatchHandsItsJudgeWhatChangedAndItsEvidence(t *testing.T) {
+	useRepoPrompt(t)
+	reads := 0
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			if reads < 3 {
+				_, _ = io.WriteString(w, `{"lines":["applying revision 2","container terminated: OOMKilled (limit 512Mi)"]}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"lines":[]}`)
+			return
+		}
+		reads++
+		state := "running"
+		if reads >= 3 {
+			state = "succeeded"
+		}
+		_, _ = io.WriteString(w, `{"state":"`+state+`"}`)
+	})
+	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
+	b := &fakeBroker{sess: sess}
+
+	if _, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
+		"deployment": "p-flap", "endpoint": srv.URL,
+		"watch": "true", "interval": "1", "timeout": "30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.prompts) != 1 {
+		t.Fatalf("the agent was asked %d time(s), want once", len(sess.prompts))
+	}
+	prompt := sess.prompts[0]
+	if !strings.Contains(prompt, "signals: oom") {
+		t.Fatalf("the change the local rules found was not handed on: %s", prompt)
+	}
+	// The evidence of that change: the logs it rested on are gone from the settled
+	// observation, so this can only have come from the trail.
+	if !strings.Contains(prompt, "OOMKilled") {
+		t.Fatalf("the evidence around the change was not handed on: %s", prompt)
+	}
+	if !strings.Contains(prompt, "state: succeeded") {
+		t.Fatalf("the observation is not the one that settled: %s", prompt)
 	}
 }
 

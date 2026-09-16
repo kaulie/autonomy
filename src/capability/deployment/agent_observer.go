@@ -32,7 +32,20 @@ type AgentObserver struct {
 	Backend string
 }
 
+// Observe is ObserveWithHistory with nothing before it: one observation of a deployment
+// that nothing has been watching.
 func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, error) {
+	return o.ObserveWithHistory(ctx, req, "")
+}
+
+// ObserveWithHistory observes the deployment once and takes the agent's verdict on it.
+//
+// `timeline` is what the caller's polls before this observation saw, already rendered
+// (pollTrail.render): the changes a watch passed through, with the evidence around the ones
+// that looked wrong. One question carries them, so the agent knows what happened in between
+// without being asked once per poll — asking a model every five seconds is not what a model
+// is for, while an agent that cannot see what happened in between cannot explain it.
+func (o *AgentObserver) ObserveWithHistory(ctx context.Context, req Request, timeline string) (Snapshot, error) {
 	if o == nil || o.Agents == nil {
 		return Snapshot{}, fmt.Errorf("agent observer: agent broker not configured (use Runtime.AcquireAgent)")
 	}
@@ -70,7 +83,7 @@ func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, err
 		promptStatusURL:   firstNonEmpty(req.StatusURL, derivedStatusURL(req)),
 		promptLogsURL:     firstNonEmpty(req.LogsURL, derivedLogsURL(req)),
 		promptTail:        fmt.Sprintf("%d", req.Tail),
-		promptObservation: renderObservation(req, base, baseErr),
+		promptObservation: renderObservation(req, base, baseErr, timeline),
 	}, broker.WorkerFrame(sess))
 	answer, err := sess.Prompt(ctx, prompt)
 	if err != nil {

@@ -61,11 +61,15 @@ func renderPrompt(tmpl string, own, frame map[string]string) string {
 }
 
 // renderObservation renders the raw observation for the prompt: what the
-// deterministic reader saw (or why it saw nothing), and the log window.
-func renderObservation(req Request, snap Snapshot, err error) string {
+// deterministic reader saw (or why it saw nothing), what the polls before it saw when the
+// caller watched, and the log window.
+func renderObservation(req Request, snap Snapshot, err error, timeline string) string {
 	var b strings.Builder
 	if err != nil {
 		fmt.Fprintf(&b, "the raw reader failed: %v\n", err)
+	}
+	if timeline != "" {
+		b.WriteString(timeline)
 	}
 	fmt.Fprintf(&b, "deployment: %s\n", firstNonEmpty(snap.ID, req.Deployment))
 	fmt.Fprintf(&b, "state: %s\n", snap.state())
@@ -99,4 +103,55 @@ func renderObservation(req Request, snap Snapshot, err error) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// renderTrail renders what a watch hands its judge: how often the deployment was read, what
+// changed since the poll before it, and — for the changes that looked wrong — the log lines
+// the local rules found. It is what makes one question enough: the agent is not asked about
+// every poll, and the change that a hundred identical polls would have hidden is in front of
+// it, with the evidence that made it a change.
+func renderTrail(polls int, changes []trailChange, dropped int) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "the deployment was watched (%d poll(s), %d change(s), oldest first):\n", polls, len(changes)+dropped)
+	for _, change := range changes {
+		fmt.Fprintf(&b, "  - %s", observationLine(change.Snapshot))
+		if len(change.Signals) > 0 {
+			fmt.Fprintf(&b, " — signals: %s", strings.Join(change.Signals, ", "))
+		}
+		b.WriteString("\n")
+		for _, line := range change.Evidence {
+			fmt.Fprintf(&b, "      %s\n", line)
+		}
+	}
+	if dropped > 0 {
+		fmt.Fprintf(&b, "  (%d earlier change(s) not shown)\n", dropped)
+	}
+	return b.String()
+}
+
+// observationLine is one poll's observation in one line: its time, state, and the phase,
+// progress and message when it reported them.
+func observationLine(snap Snapshot) string {
+	parts := []string{observationStamp(snap), string(snap.state())}
+	if snap.Phase != "" {
+		parts = append(parts, "phase "+snap.Phase)
+	}
+	if snap.Progress != "" {
+		parts = append(parts, "progress "+snap.Progress)
+	}
+	if snap.Message != "" {
+		parts = append(parts, snap.Message)
+	}
+	return strings.Join(parts, " ")
+}
+
+// observationStamp is when a poll was taken, or a placeholder when the reader did not say.
+func observationStamp(snap Snapshot) string {
+	if snap.UpdatedAt.IsZero() {
+		return "(no timestamp)"
+	}
+	return snap.UpdatedAt.Format("15:04:05")
 }
