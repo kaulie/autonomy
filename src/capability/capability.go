@@ -3,7 +3,11 @@
 package capability
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
+
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 // Capability is a named thing the system can do to or with the world.
@@ -61,29 +65,44 @@ func (f *Factory) Has(name string) bool {
 }
 
 // FormatConstructs renders registered capabilities for AGENT_V2 {{CONSTRUCTS}}
-// as a JSON array.
+// as a JSON array: what the runtime can do, and — for a capability that declares
+// them (spec.Declared) — the inputs it takes and the outputs it returns, so the
+// planner can call it correctly from this list alone.
 func (f *Factory) FormatConstructs() string {
 	if f == nil || len(f.capabilities) == 0 {
 		return "[]"
 	}
 	type constructJSON struct {
-		Name        string `json:"name"`
-		Domain      string `json:"domain"`
-		Provider    string `json:"provider"`
-		Description string `json:"description"`
+		Name        string       `json:"name"`
+		Domain      string       `json:"domain"`
+		Provider    string       `json:"provider"`
+		Description string       `json:"description"`
+		Input       []spec.Field `json:"input,omitempty"`
+		Output      []spec.Field `json:"output,omitempty"`
 	}
 	out := make([]constructJSON, 0, len(f.capabilities))
 	for _, c := range f.capabilities {
-		out = append(out, constructJSON{
+		item := constructJSON{
 			Name:        c.Name(),
 			Domain:      c.Domain(),
 			Provider:    c.Provider(),
 			Description: c.Description(),
-		})
+		}
+		if declared, ok := c.(spec.Declared); ok {
+			item.Input = declared.Inputs()
+			item.Output = declared.Outputs()
+		}
+		out = append(out, item)
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
+	// The descriptions name placeholders (<id>, <head/topic branch>), so HTML
+	// escaping is turned off: \u003cid\u003e is the same JSON, but it is not what a
+	// planner should have to read.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(out); err != nil {
 		return "[]"
 	}
-	return string(b)
+	return strings.TrimRight(buf.String(), "\n")
 }

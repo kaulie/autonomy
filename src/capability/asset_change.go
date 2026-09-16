@@ -3,6 +3,8 @@ package capability
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 // AssetMutator reads/writes asset state for asset.change (injected by autonomy).
@@ -23,7 +25,21 @@ func (AssetChange) Domain() string { return "server" }
 func (AssetChange) Provider() string { return "autonomy" }
 
 func (AssetChange) Description() string {
-	return `mutate the task target asset state. input: {"target":"<asset id>"} (optional; defaults to task Target)`
+	return `mutate the task target asset state. input: {"target":"<asset id>"} (required: nothing defaults it)`
+}
+
+// Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
+func (AssetChange) Inputs() []spec.Field {
+	return []spec.Field{
+		{Name: "target", Required: true, Description: "the id of the asset whose state to change"},
+	}
+}
+
+func (AssetChange) Outputs() []spec.Field {
+	return []spec.Field{
+		{Name: "target", Description: "the asset that was changed"},
+		{Name: "state", Description: "the state it has now (changed)"},
+	}
 }
 
 func (c AssetChange) Run(in map[string]string) (map[string]string, error) {

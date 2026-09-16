@@ -59,6 +59,21 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 `{{GOAL}}`、监控用的 URL）永远由该能力自己填。不拿 agent 的能力（`pull_request.review` /
 `service.deploy`）没有 frame：它们是确定性调用，值只走输入与环境。
 
+### `{{CONSTRUCTS}}` 里有什么
+
+planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份** constructs：runtime 现在能做的事，而且带调用形状。
+
+| 字段 | 含义 |
+|---|---|
+| `name` / `domain` / `provider` | 语义名、语义域、真正干活的一方（见 [Provider](provider.md)） |
+| `description` | 一段散文：语义、默认值、拒绝时的原因 |
+| `input` | 入参：`name`（规范键）、`aliases`（同一入参的别名）、`required`、`description` |
+| `output` | 返回：`name` + `description` |
+
+- 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
+- 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的五个都声明**，这条被 `capability_test.go` 钉住。
+- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 的 `summary` 带着它自己开的 PR URL，而 `pull_request.review` 的 `pr` 直接吃那个 URL。
+
 ## `service.deploy`（触发指定服务、指定分支的流水线部署）
 
 - 语义：把「某个服务的某个分支」交给部署控制面（agent-control-plane），由它打包该 git ref、再部署。
