@@ -111,6 +111,10 @@ type PullRequestReview struct {
 	APIURL string
 	// Token overrides GITHUB_TOKEN / GH_TOKEN.
 	Token string
+	// GhAuthToken reads the credential when neither Token nor the environment has
+	// one (nil asks the gh CLI — see github_credential.go). Tests inject it so a
+	// run never depends on whose gh happens to be signed in.
+	GhAuthToken GhAuthTokenFn
 	// Repo is the repository (owner/name) when the input does not name one.
 	Repo string
 	// HTTPClient overrides the default client (tests).
@@ -184,9 +188,9 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	if repo == "" {
 		return nil, fmt.Errorf("%s: missing repository (pass \"repo\":\"owner/name\", or set %s / %s)", ReviewName, EnvRepository, EnvGitRepoURL)
 	}
-	token := strings.TrimSpace(firstNonEmpty(c.Token, os.Getenv(EnvGitHubToken), os.Getenv(EnvGitHubTokenAlt)))
+	token, _ := c.credential(c.Token)
 	if token == "" {
-		return nil, fmt.Errorf("%s: no credential (set %s)", ReviewName, EnvGitHubToken)
+		return nil, noCredential()
 	}
 	method := strings.ToLower(strings.TrimSpace(firstNonEmpty(in["method"], in["merge_method"])))
 	if method == "" {

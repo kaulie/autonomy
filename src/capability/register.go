@@ -30,8 +30,9 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	f.Register(sd.DeployService{})
 	// pull_request.review lands a pull request — named by its URL or by the branch
 	// pair it was opened from. Like service.deploy it is code over someone else's
-	// API (GitHub's REST API) rather than a delegation, so GITHUB_TOKEN
-	// (+ GITHUB_API_URL) is its wiring and no host hook is needed either.
+	// API (GitHub's REST API) rather than a delegation, so its wiring is the
+	// credential (GITHUB_TOKEN / GH_TOKEN, else the gh CLI's own — see
+	// github_credential.go) plus GITHUB_API_URL, and no host hook is needed.
 	f.Register(sd.PullRequestReview{})
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
