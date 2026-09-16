@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 const (
@@ -65,6 +67,27 @@ func (DeployService) Provider() string { return DeployProvider }
 
 func (DeployService) Description() string {
 	return `trigger the deployment pipeline of a service at a specific branch: the deployment control plane packages that git ref, then deploys it. input: {"service":"<service id>","branch":"<branch/tag>"} ("ref" works too; an empty branch means the service's default branch). Returns as soon as the pipeline is accepted — it does not wait for packaging/deploying. output: {"pipeline_id":"<id>","state":"queued","service":"...","branch":"...","poll":"/api/pipelines/<id>"} (plus deployment/version once the pipeline has them)`
+}
+
+// Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
+func (DeployService) Inputs() []spec.Field {
+	return []spec.Field{
+		{Name: "service", Aliases: []string{"service_id"}, Required: true, Description: "the service to deploy, by the id the deployment control plane knows it as"},
+		{Name: "branch", Aliases: []string{"ref"}, Description: "the git branch or tag to package; empty means the service's own default branch"},
+	}
+}
+
+func (DeployService) Outputs() []spec.Field {
+	return []spec.Field{
+		{Name: "pipeline_id", Description: "the accepted pipeline's id — poll it, do not wait for this call"},
+		{Name: "state", Description: "the pipeline's state as accepted (queued)"},
+		{Name: "service", Description: "the service that was deployed"},
+		{Name: "branch", Description: "the ref that was packaged"},
+		{Name: "poll", Description: "the status path to follow, e.g. /api/pipelines/<id> (deployment.monitor takes it as poll)"},
+		{Name: "deployment", Description: "the deployment the pipeline belongs to, once the control plane reports it"},
+		{Name: "version", Description: "the version being deployed, once the control plane reports it"},
+		{Name: "message", Description: "the control plane's own line about the accepted request"},
+	}
 }
 
 func (c DeployService) Run(in map[string]string) (map[string]string, error) {

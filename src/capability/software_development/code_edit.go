@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 const (
@@ -27,6 +28,25 @@ func (CodeEdit) Provider() string { return Provider }
 
 func (CodeEdit) Description() string {
 	return `delegate a software-development task to a coding agent, which runs in its own agent workspace. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored: the worker never runs in the delegating agent's workspace`
+}
+
+// Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
+func (CodeEdit) Inputs() []spec.Field {
+	return []spec.Field{
+		{Name: "instruction", Aliases: []string{"goal"}, Required: true, Description: "the goal or requirement to hand the coding agent; the runtime fills it from the task description when the step leaves it out"},
+		{Name: "task_id", Description: "the task the work belongs to (the runtime fills it); the worker's reason turns and current_task_id carry it"},
+	}
+}
+
+func (CodeEdit) Outputs() []spec.Field {
+	return []spec.Field{
+		{Name: "status", Description: `"ok" when the delegation ran`},
+		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
+		{Name: "workspace", Description: "the worker's sandbox — its own, never the caller's"},
+		{Name: "provider", Description: "the backend that ran the worker (cursor / cline)"},
+		{Name: "agent_id", Description: "the worker agent's name, as recorded in agents"},
+		{Name: "instruction", Description: "the instruction the worker was actually given"},
+	}
 }
 
 func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {

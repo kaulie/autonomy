@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 const (
@@ -172,6 +173,48 @@ func (Monitor) Provider() string { return Provider }
 
 func (Monitor) Description() string {
 	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://127.0.0.1:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions, source`
+}
+
+// Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
+func (Monitor) Inputs() []spec.Field {
+	return []spec.Field{
+		{Name: "deployment", Aliases: []string{"pipeline_id", "pipeline", "request_id", "target", "run", "id"}, Description: "the deployment / pipeline to follow, by the id the deployment control plane knows it as; required unless poll names it"},
+		{Name: "poll", Description: "the status path handed back by service.deploy (e.g. /api/pipelines/<id>); naming it is enough on its own and it is joined onto endpoint/status_url"},
+		{Name: "status_url", Description: "the full status URL, when it is not <endpoint>/api/pipelines/<deployment>; it wins over endpoint"},
+		{Name: "endpoint", Description: "the deployment API base URL; default $DEPLOYMENT_API_URL, else http://127.0.0.1:4220, with the status path <endpoint>/api/pipelines/<deployment>"},
+		{Name: "logs_url", Description: "a separate logs URL, for a control plane whose logs are not at <status_url>/logs; a status answer that already carries logs is used instead"},
+		{Name: "watch", Description: `"true" polls until the deployment reaches a terminal state or the window closes; the default takes one look only`},
+		{Name: "interval", Description: "seconds between polls when watching (default 5, minimum 1)"},
+		{Name: "timeout", Description: "the whole observation window in seconds when watching (default 60, maximum 600)"},
+		{Name: "tail", Description: "how many trailing log lines to keep as evidence (default 40, maximum 500)"},
+		{Name: "task_id", Description: "the task this observation belongs to (the runtime fills it); the monitoring agent's run is attributed to it"},
+	}
+}
+
+func (Monitor) Outputs() []spec.Field {
+	return []spec.Field{
+		{Name: "deployment", Description: "the deployment/pipeline that was observed"},
+		{Name: "state", Description: "pending / running / succeeded / failed / unknown — what the deployment is doing"},
+		{Name: "terminal", Description: `"true" once the state is final, so waiting can stop`},
+		{Name: "problem", Description: `"true" when this needs acting on; a succeeded deployment with recovered retries is not a problem`},
+		{Name: "signals", Description: "the short machine-readable labels behind the verdict, comma-joined (oom, crash_loop, stalled, unhealthy, deployment_failed, …); empty when there is no problem"},
+		{Name: "diagnosis", Description: "one or two sentences: what is happening and why it matters"},
+		{Name: "evidence", Description: "the log lines the verdict rests on"},
+		{Name: "suggestions", Description: "concrete next steps, semicolon-joined"},
+		{Name: "source", Description: "who observed: agent (a monitoring agent), http (the API read directly) or custom (an injected observer)"},
+		{Name: "provider", Description: "the capability's provider (autonomy)"},
+		{Name: "phase", Description: "the stage the pipeline is in, when it reports one"},
+		{Name: "progress", Description: "the pipeline's own progress, e.g. 3/5, when it reports one"},
+		{Name: "healthy", Description: `"true"/"false" when the deployment reports health`},
+		{Name: "error", Description: "the deployment's own failure reason, when it reports one"},
+		{Name: "message", Description: "the deployment's own status line"},
+		{Name: "service", Description: "the service being deployed, when the pipeline names it"},
+		{Name: "version", Description: "the version being deployed, when the pipeline names it"},
+		{Name: "deployment_name", Description: "the deployment's name, when the pipeline names it"},
+		{Name: "observed_at", Description: "when this observation was taken (RFC 3339)"},
+		{Name: "polls", Description: "how many times the deployment was read in this call"},
+		{Name: "note", Description: "an exception worth knowing: an agent answer that did not parse, and what was reported instead"},
+	}
 }
 
 // observer picks the monitoring provider: an explicit one wins, then the

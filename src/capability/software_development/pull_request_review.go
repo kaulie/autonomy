@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 const (
@@ -125,9 +127,34 @@ func (PullRequestReview) Description() string {
 	return `merge one pull request into the base branch. Name it either outright — "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted) — or by its branches: {"from":"<head/topic branch>","to":"<base branch>"} ("from_branch"/"head" and "to_branch"/"base" work too; an empty "to" means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main). A "repo" that contradicts the pull request url is refused rather than guessed at. optional "method": merge (default) / squash / rebase. The merge happens only when the pull request is open, not a draft, free of conflict and its checks are green; otherwise it fails with the reason (not_found / draft / conflict / checks_failed / checks_pending / blocked) instead of merging. output: {"from","to","number","pr","merged":"true","method","sha","checks"} — sha is the merge commit on the base branch, checks is "passed"/"none"`
 }
 
-// Run resolves what to merge, checks the gates, then merges. Every gate is
-// evaluated before the merge call, and each failure carries its own reason, so a
-// refusal reaches the planner as evidence rather than as a generic error.
+// Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
+func (PullRequestReview) Inputs() []spec.Field {
+	return []spec.Field{
+		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Description: "the pull request to land, named outright — the url everyone already has from it: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository. Required unless the pull request is named by from/to instead; nothing is read from the branches when it is given"},
+		{Name: "from", Aliases: []string{"from_branch", "head", "source"}, Description: "the head/topic branch whose pull request to merge — required unless pr names the pull request; when both are given they must agree"},
+		{Name: "to", Aliases: []string{"to_branch", "base", "target"}, Description: "the base branch; empty means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main. With pr it must match the pull request's own base"},
+		{Name: "repo", Aliases: []string{"repository"}, Description: "owner/name, when neither pr nor GITHUB_REPOSITORY / GIT_REPO_URL names the repository; it must not contradict pr"},
+		{Name: "method", Aliases: []string{"merge_method"}, Description: "how to land it: merge (default) / squash / rebase"},
+	}
+}
+
+func (PullRequestReview) Outputs() []spec.Field {
+	return []spec.Field{
+		{Name: "from", Description: "the head branch the pull request came from"},
+		{Name: "to", Description: "the base branch it was merged into"},
+		{Name: "number", Description: "the pull request number"},
+		{Name: "pr", Description: "the pull request's url"},
+		{Name: "merged", Description: `"true" — a merge happened`},
+		{Name: "method", Description: "the merge method that was used"},
+		{Name: "sha", Description: "the merge commit on the base branch"},
+		{Name: "checks", Description: `the gate's verdict: "passed", or "none" when the repository has no checks at all`},
+	}
+}
+
+// Run resolves which pull request this call is about, checks the gates, then
+// merges it. Every gate is evaluated before the merge call, and each failure
+// carries its own reason, so a refusal reaches the planner as evidence rather
+// than as a generic error.
 func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) {
 	// A pull request can be named two ways: by its own reference — the URL
 	// everyone already has from it (a code_edit report, a previous action's

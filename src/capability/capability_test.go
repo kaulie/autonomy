@@ -2,12 +2,14 @@ package capability_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/capability/broker"
 	"github.com/kaulie/autonomy/src/capability/deployment"
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 type memAssets map[string]string
@@ -69,6 +71,152 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if out["state"] != "changed" {
 		t.Fatalf("out=%v", out)
 	}
+}
+
+// TestBuiltinsDeclareTheirSignature: every built-in capability says what it takes
+// and what it returns, so {{CONSTRUCTS}} carries a callable contract instead of
+// prose a planner has to parse.
+func TestBuiltinsDeclareTheirSignature(t *testing.T) {
+	t.Parallel()
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: memAssets{"1": "alive"}})
+	for _, c := range f.GetAll() {
+		declared, ok := c.(spec.Declared)
+		if !ok {
+			t.Errorf("%s declares no inputs/outputs", c.Name())
+			continue
+		}
+		inputs, outputs := declared.Inputs(), declared.Outputs()
+		if len(inputs) == 0 || len(outputs) == 0 {
+			t.Errorf("%s declares %d input(s) / %d output(s), want at least one of each", c.Name(), len(inputs), len(outputs))
+		}
+		for _, fld := range append(append([]spec.Field{}, inputs...), outputs...) {
+			if strings.TrimSpace(fld.Name) == "" || strings.TrimSpace(fld.Description) == "" {
+				t.Errorf("%s declares an unnamed or undescribed field: %+v", c.Name(), fld)
+			}
+		}
+	}
+}
+
+// TestConstructsCarryInputsAndOutputs pins what the runtime injects as
+// {{CONSTRUCTS}}: each capability arrives with the fields a caller fills and the
+// keys it gets back, so a plan step can be written from the list alone.
+func TestConstructsCarryInputsAndOutputs(t *testing.T) {
+	t.Parallel()
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: memAssets{"1": "alive"}})
+
+	var constructs []struct {
+		Name   string       `json:"name"`
+		Input  []spec.Field `json:"input"`
+		Output []spec.Field `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
+		t.Fatalf("constructs are not the documented JSON: %v", err)
+	}
+	if len(constructs) != 5 {
+		t.Fatalf("constructs=%d want the 5 built-ins", len(constructs))
+	}
+	inputs := map[string][]spec.Field{}
+	outputs := map[string][]spec.Field{}
+	for _, c := range constructs {
+		if len(c.Input) == 0 || len(c.Output) == 0 {
+			t.Errorf("%s arrives with %d input(s) / %d output(s)", c.Name, len(c.Input), len(c.Output))
+		}
+		inputs[c.Name], outputs[c.Name] = c.Input, c.Output
+	}
+
+	// Where a plan step goes wrong when the declaration is missing: the field
+	// that names the thing to act on, and the key the next step reads back.
+	for _, tc := range []struct {
+		capability string
+		input      string
+		alias      string
+		required   bool
+		output     string
+	}{
+		{"asset.change", "target", "", true, "state"},
+		{"code_edit", "instruction", "goal", true, "summary"},
+		{"service.deploy", "service", "service_id", true, "pipeline_id"},
+		// task-15's shape: name the pull request by its url, read the merge sha.
+		{"pull_request.review", "pr", "pr_url", false, "sha"},
+		// A deployment is followed by its id or by the poll path service.deploy
+		// hands back, and signals is where a problem shows up.
+		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},
+	} {
+		field, ok := fieldNamed(inputs[tc.capability], tc.input)
+		if !ok {
+			t.Errorf("%s carries no %q input: %+v", tc.capability, tc.input, inputs[tc.capability])
+			continue
+		}
+		if strings.TrimSpace(field.Description) == "" {
+			t.Errorf("%s declares %q with no description", tc.capability, tc.input)
+		}
+		if field.Required != tc.required {
+			t.Errorf("%s %q required=%t want %t", tc.capability, tc.input, field.Required, tc.required)
+		}
+		if tc.alias != "" && !containsString(field.Aliases, tc.alias) {
+			t.Errorf("%s %q aliases=%v want %q among them", tc.capability, tc.input, field.Aliases, tc.alias)
+		}
+		if _, ok := fieldNamed(outputs[tc.capability], tc.output); !ok {
+			t.Errorf("%s returns no %q: %+v", tc.capability, tc.output, outputs[tc.capability])
+		}
+	}
+
+	// service.deploy's poll path is what the monitor takes next: the two have to
+	// agree, or a plan cannot chain them.
+	poll, ok := fieldNamed(outputs["service.deploy"], "poll")
+	if !ok || strings.TrimSpace(poll.Description) == "" {
+		t.Errorf("service.deploy does not declare its poll output: %+v", outputs["service.deploy"])
+	}
+	if _, ok := fieldNamed(inputs["deployment.monitor"], "poll"); !ok {
+		t.Errorf("deployment.monitor does not declare the poll input: %+v", inputs["deployment.monitor"])
+	}
+}
+
+// TestConstructsWithoutASignatureStillRender: declaring inputs/outputs is
+// optional — a capability that only has a description is still a construct, and
+// it renders without invented fields.
+func TestConstructsWithoutASignatureStillRender(t *testing.T) {
+	t.Parallel()
+	f := capability.NewFactory()
+	f.Register(bareCapability{})
+	got := f.FormatConstructs()
+	if !strings.Contains(got, `"name": "bare"`) || !strings.Contains(got, `"description": "does one thing"`) {
+		t.Fatalf("constructs=%q, want the described capability", got)
+	}
+	if strings.Contains(got, `"input"`) || strings.Contains(got, `"output"`) {
+		t.Fatalf("constructs=%q, want no input/output for a capability that declares none", got)
+	}
+}
+
+type bareCapability struct{}
+
+func (bareCapability) Name() string        { return "bare" }
+func (bareCapability) Domain() string      { return "test" }
+func (bareCapability) Provider() string    { return "test" }
+func (bareCapability) Description() string { return "does one thing" }
+func (bareCapability) Run(map[string]string) (map[string]string, error) {
+	return nil, nil
+}
+
+// fieldNamed finds a declared field by its canonical name.
+func fieldNamed(fields []spec.Field, name string) (spec.Field, bool) {
+	for _, f := range fields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return spec.Field{}, false
+}
+
+func containsString(vals []string, want string) bool {
+	for _, v := range vals {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRegisterDefaultsWiresTheDeploymentMonitor: the host's hooks reach the
