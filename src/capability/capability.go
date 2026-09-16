@@ -3,7 +3,9 @@
 package capability
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 
 	"github.com/kaulie/autonomy/src/capability/spec"
 )
@@ -92,9 +94,15 @@ func (f *Factory) FormatConstructs() string {
 		}
 		out = append(out, item)
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
+	// The descriptions name placeholders (<id>, <head/topic branch>), so HTML
+	// escaping is turned off: \u003cid\u003e is the same JSON, but it is not what a
+	// planner should have to read.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(out); err != nil {
 		return "[]"
 	}
-	return string(b)
+	return strings.TrimRight(buf.String(), "\n")
 }

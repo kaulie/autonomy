@@ -174,6 +174,22 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	}
 }
 
+// TestConstructsAreReadableJSON: the descriptions name placeholders (<id>,
+// <head/topic branch>), and a planner should read them as written. HTML escaping
+// is the same JSON — but \u003cid\u003e is not the same prompt.
+func TestConstructsAreReadableJSON(t *testing.T) {
+	t.Parallel()
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: memAssets{"1": "alive"}})
+	got := f.FormatConstructs()
+	if strings.Contains(got, `\u003c`) || strings.Contains(got, `\u003e`) {
+		t.Errorf("constructs HTML-escape their placeholders:\n%s", got)
+	}
+	if !strings.Contains(got, "<id>") {
+		t.Errorf("constructs no longer show what a caller passes:\n%s", got)
+	}
+}
+
 // TestConstructsWithoutASignatureStillRender: declaring inputs/outputs is
 // optional — a capability that only has a description is still a construct, and
 // it renders without invented fields.
