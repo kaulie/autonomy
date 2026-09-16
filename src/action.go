@@ -110,14 +110,6 @@ func activeCapabilityFactory() *capability.Factory {
 	return nil
 }
 
-func copyStringMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
 // ensureAgentWorkspace creates AGENT_WORKSPACE for the agent name and returns the path with trailing separator.
 func ensureAgentWorkspace(agentName string) (string, error) {
 	ws := AgentWorkspacePath(agentName)
