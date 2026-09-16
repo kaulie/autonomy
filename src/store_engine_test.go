@@ -24,7 +24,32 @@ func (fakeStore) FinishReasonTurn(ReasonTurnHandle, LLMRunResult) error {
 }
 func (fakeStore) ListLLMEvents(int64) ([]LLMEvent, error)     { return nil, nil }
 func (fakeStore) ListLLMMessages(int64) ([]LLMMessage, error) { return nil, nil }
-func (fakeStore) Close() error                                { return nil }
+func (fakeStore) AssistantMessageID(int64) (int64, bool, error) {
+	return 0, false, nil
+}
+func (fakeStore) CreateExecutionPlan(ExecutionPlan) (int64, error) {
+	return 0, nil
+}
+func (fakeStore) AppendExecutionStepPlans([]ExecutionStepPlan) error { return nil }
+func (fakeStore) AppendExecutionStep(ExecutionStep) (int64, error)   { return 0, nil }
+func (fakeStore) AppendExecutionStepInteraction(ExecutionStepInteraction) (int64, error) {
+	return 0, nil
+}
+func (fakeStore) TaskInputMessageID(string) (int64, bool, error) { return 0, false, nil }
+func (fakeStore) ListExecutionPlans(string) ([]ExecutionPlan, error) {
+	return nil, nil
+}
+func (fakeStore) ListExecutionStepPlan(int64) ([]ExecutionStepPlan, error) {
+	return nil, nil
+}
+func (fakeStore) ListExecutionSteps(int64) ([]ExecutionStep, error) { return nil, nil }
+func (fakeStore) ListExecutionStepInteractions(int64) ([]ExecutionStepInteraction, error) {
+	return nil, nil
+}
+func (fakeStore) ExecutionPlanOutcome(int64) (ExecutionPlanOutcome, bool, error) {
+	return ExecutionPlanOutcome{}, false, nil
+}
+func (fakeStore) Close() error { return nil }
 
 // fakeEngine records the DSN it was opened with so tests can assert dispatch to
 // the registered engine (and its DefaultDSN fallback).

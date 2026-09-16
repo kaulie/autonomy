@@ -51,6 +51,10 @@ type LLMTrace struct {
 	// thinking/tool rows are written (and logged) while the run streams instead of
 	// only when it ends. nil when the trace is inert.
 	aggregator *chatAggregator
+	// replyMessageID is the llm_messages row this run's reply was written to, read
+	// back when the run finishes so a decision can point at the exact message it is
+	// (see Origin).
+	replyMessageID int64
 }
 
 // BeginLLMTrace opens a run header for one LLM interaction whose input is the
@@ -176,7 +180,26 @@ func (t *LLMTrace) Finish(res LLMRunResult) {
 	if err := t.store.FinishReasonTurn(t.handle, res); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] finish llm trace: %v\n", err)
 	}
+	if id, found, err := t.store.AssistantMessageID(t.handle.TurnID); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] read assistant message: %v\n", err)
+	} else if found {
+		t.replyMessageID = id
+	}
 	t.active = false
+}
+
+// Origin is which LLM records this run wrote: its run header and the input and
+// reply messages, so a decision made from the run is traceable to them by id. It is
+// zero for a run that was not recorded (no store, or a trace that never began).
+func (t *LLMTrace) Origin() DecisionOrigin {
+	if t == nil {
+		return DecisionOrigin{}
+	}
+	return DecisionOrigin{
+		ReasonTurnID:   t.handle.TurnID,
+		InputMessageID: t.handle.InputMessageID,
+		ReplyMessageID: t.replyMessageID,
+	}
 }
 
 func (t *LLMTrace) flush() {

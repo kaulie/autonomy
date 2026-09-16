@@ -1,0 +1,358 @@
+package autonomy
+
+import (
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/kaulie/autonomy/src/capability"
+)
+
+// The execution tables: a plan is written before its steps run, is never rewritten,
+// and its outcome is derived from the steps. These tests pin the writing order, the
+// immutability and the traceability — not the storage (that is the engine's job).
+
+// executionTestStore opens a store and points the package's active store at it, so
+// persistTask / saveExecutionPlan write here.
+func executionTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := _store
+	t.Cleanup(func() {
+		_store = prev
+		_ = store.Close()
+	})
+	_store = store
+	return store
+}
+
+// fakeAction is a plan step that does nothing but say how it ended, so a test can
+// drive Runtime.Execute without a capability.
+type fakeAction struct {
+	name string
+	err  error
+	ran  bool
+}
+
+func (a *fakeAction) Execute(DecisionContext) (ActionResult, error) {
+	a.ran = true
+	// A failed step keeps what it produced before failing, so the record of a step
+	// that went wrong is as complete as the one of a step that went right.
+	return ActionResult{
+		Capability: a.name,
+		Input:      map[string]string{"in": "1"},
+		Output:     map[string]string{"out": "2"},
+	}, a.err
+}
+
+func executionContext() DecisionContext {
+	return DecisionContext{
+		Task:  &Task{ID: "task-exec"},
+		Agent: &Agent{ID: 7, Name: "agent-7"},
+		Cycle: 1,
+	}
+}
+
+func TestExecuteWritesThePlanBeforeItsSteps(t *testing.T) {
+	store := executionTestStore(t)
+	rt := NewRuntime(NewAgentFactory())
+	first := &fakeAction{name: "first", err: errors.New("boom")}
+	second := &fakeAction{name: "second"}
+
+	result, err := rt.Execute(Decision{
+		Type:    "plan",
+		Reason:  "two steps, the first one fails",
+		Actions: []Action{first, second},
+		Ctx:     executionContext(),
+	})
+	if err == nil {
+		t.Fatal("Execute succeeded; the first step failed")
+	}
+	if len(result.Actions) != 1 || result.Actions[0].ExecutionStepID == 0 || result.Actions[0].PlanStepID == 0 {
+		t.Fatalf("the failed action's record=%+v, want ids of the rows it is", result.Actions)
+	}
+	if second.ran {
+		t.Fatal("the step after the failing one ran; a plan stops at its first failure")
+	}
+
+	plans, err := store.ListExecutionPlans("task-exec")
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%v err=%v, want one", plans, err)
+	}
+	plan := plans[0]
+	if plan.StepCount != 2 || plan.DecisionType != "plan" || plan.Reason == "" {
+		t.Fatalf("plan=%+v", plan)
+	}
+
+	// Both steps were planned before either ran; only the first one has a record of
+	// having run, which is exactly how "planned but never executed" reads.
+	planned, err := store.ListExecutionStepPlan(plan.ID)
+	if err != nil || len(planned) != 2 {
+		t.Fatalf("planned=%v err=%v, want both steps", planned, err)
+	}
+	executed, err := store.ListExecutionSteps(plan.ID)
+	if err != nil || len(executed) != 1 {
+		t.Fatalf("executed=%v err=%v, want only the first step", executed, err)
+	}
+	if executed[0].PlanStepID != planned[0].ID || executed[0].Status != "failed" {
+		t.Fatalf("step=%+v, want it linked to the first planned step and failed", executed[0])
+	}
+	if executed[0].Error != "boom" || executed[0].Input != `{"in":"1"}` || executed[0].Output != `{"out":"2"}` {
+		t.Fatalf("step=%+v, want the reason and the actual input/output", executed[0])
+	}
+
+	// The plan's outcome is derived, not stored: the last step that ran, and how
+	// much of the plan that was.
+	outcome, found, err := store.ExecutionPlanOutcome(plan.ID)
+	if err != nil || !found {
+		t.Fatalf("outcome=%+v found=%v err=%v", outcome, found, err)
+	}
+	if outcome.Status != "failed" || outcome.Planned != 2 || outcome.Executed != 1 || outcome.StepID != executed[0].ID {
+		t.Fatalf("outcome=%+v, want failed, 1 of 2 steps, from step %d", outcome, executed[0].ID)
+	}
+}
+
+func TestAPlanWithNothingToExecuteIsStillWritten(t *testing.T) {
+	store := executionTestStore(t)
+	rt := NewRuntime(NewAgentFactory())
+
+	if _, err := rt.Execute(Decision{Type: "need_input", Reason: "no credential", Need: Need{Type: "decision", Description: "set GITHUB_TOKEN"}, Ctx: executionContext()}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	plans, err := store.ListExecutionPlans("task-exec")
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%v err=%v, want the decision recorded too", plans, err)
+	}
+	if plans[0].DecisionType != "need_input" || plans[0].StepCount != 0 {
+		t.Fatalf("plan=%+v", plans[0])
+	}
+	if !strings.Contains(plans[0].Need, "GITHUB_TOKEN") {
+		t.Fatalf("plan.need=%q, want what it asked for", plans[0].Need)
+	}
+	if outcome, found, _ := store.ExecutionPlanOutcome(plans[0].ID); found {
+		t.Fatalf("outcome=%+v, want none: nothing ran", outcome)
+	}
+}
+
+// planFailStore is a store that cannot write a plan, to pin what that means: a plan
+// is authoritative, so nothing runs when it cannot be recorded.
+type planFailStore struct{ *SQLiteStore }
+
+func (planFailStore) CreateExecutionPlan(ExecutionPlan) (int64, error) {
+	return 0, errors.New("the plan could not be recorded")
+}
+
+func TestExecuteDoesNotRunWhenThePlanCannotBeWritten(t *testing.T) {
+	store := executionTestStore(t)
+	prev := _store
+	t.Cleanup(func() { _store = prev })
+	_store = planFailStore{store}
+
+	action := &fakeAction{name: "first"}
+	rt := NewRuntime(NewAgentFactory())
+	if _, err := rt.Execute(Decision{Type: "plan", Actions: []Action{action}, Ctx: executionContext()}); err == nil {
+		t.Fatal("Execute succeeded although the plan could not be written")
+	}
+	if action.ran {
+		t.Fatal("the step ran although the plan it was supposed to carry out was never recorded")
+	}
+}
+
+func TestAPlanIsOneShotAndItsRowsNeverChange(t *testing.T) {
+	store := executionTestStore(t)
+	rt := NewRuntime(NewAgentFactory())
+
+	run := func() int64 {
+		t.Helper()
+		if _, err := rt.Execute(Decision{
+			Type:    "plan",
+			Reason:  "the same intention twice",
+			Actions: []Action{&fakeAction{name: "asset.change"}},
+			Ctx:     executionContext(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		plans, err := store.ListExecutionPlans("task-exec")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plans[len(plans)-1].ID
+	}
+
+	firstID := run()
+	firstPlan, err := store.ListExecutionStepPlan(firstID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID := run()
+
+	plans, err := store.ListExecutionPlans("task-exec")
+	if err != nil || len(plans) != 2 {
+		t.Fatalf("plans=%v err=%v, want two plans: a re-plan is a new plan", plans, err)
+	}
+	if plans[0].ID == plans[1].ID {
+		t.Fatal("the second plan reused the first plan's id")
+	}
+	// Planning exactly the same thing is still a new plan — and the equal hash is
+	// what says it was the same intention (a loop, not progress).
+	if plans[0].PlanHash == "" || plans[0].PlanHash != plans[1].PlanHash {
+		t.Fatalf("hashes=%q/%q, want the same fingerprint for the same steps", plans[0].PlanHash, plans[1].PlanHash)
+	}
+	// The first plan's rows are untouched: nothing rewrites a plan.
+	again, err := store.ListExecutionStepPlan(firstID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != len(firstPlan) || again[0].ID != firstPlan[0].ID || again[0].Input != firstPlan[0].Input {
+		t.Fatalf("the first plan changed: %+v (was %+v)", again, firstPlan)
+	}
+	if secondPlan, err := store.ListExecutionStepPlan(secondID); err != nil || secondPlan[0].ID == firstPlan[0].ID {
+		t.Fatalf("the second plan reused the first plan's step rows (err=%v)", err)
+	}
+}
+
+// plannerRun wires a real Run against the fake bridge, so the loop, the planner's
+// reply and the execution records are all exercised together.
+func plannerRun(t *testing.T, description string) (*SQLiteStore, *Autonomy) {
+	t.Helper()
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "llm")
+	t.Setenv("AUTONOMY_MAX_STEPS", "2")
+	t.Setenv("PROJECT_ROOT", filepath.Join(".."))
+
+	store := executionTestStore(t)
+	asset := Asset{ID: "asset-1", Kind: "repo", State: "healthy"}
+	_world = &World{assetManager: &AssetManager{
+		assets:     []Asset{asset},
+		assetsByID: map[string]Asset{asset.ID: asset},
+	}}
+	t.Cleanup(func() { _world = nil })
+
+	factory := capability.NewFactory()
+	capability.RegisterDefaults(factory, capability.Deps{Assets: worldAssetMutator()})
+	_autonomy = &Autonomy{CapabilityFactory: factory, Store: store}
+	rtu := NewRuntime(NewAgentFactory(), factory.GetAll()...)
+	return store, &Autonomy{AgentFactory: NewAgentFactory(), Runtime: rtu, Store: store}
+}
+
+// TestRunRecordsThePlanAndWhatItTalkedTo drives the whole chain: the planner answers
+// (through the fake bridge), the runtime writes the plan and executes its step, and
+// afterwards the plan is traceable to the exact reply — and to the task's own first
+// input — by message id rather than by cycle number.
+func TestRunRecordsThePlanAndWhatItTalkedTo(t *testing.T) {
+	store, rt := plannerRun(t, "give me a plan")
+	task := &Task{ID: "task-e2e", Description: "give me a plan", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	if err := rt.Run(task); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	plans, err := store.ListExecutionPlans("task-e2e")
+	if err != nil || len(plans) == 0 {
+		t.Fatalf("plans=%v err=%v", plans, err)
+	}
+	plan := plans[0]
+	if plan.ReplyMessageID == 0 || plan.InputMessageID == 0 || plan.TaskInputMessageID == 0 || plan.ReasonTurnID == 0 {
+		t.Fatalf("plan=%+v, want it traceable to the reply, its input and the task's input", plan)
+	}
+	// The reply the plan points at is the planner's own answer, and the plan it wrote
+	// is what that answer said — checked against the message, not against a re-parse.
+	var replyContent string
+	if err := store.db.QueryRow(`SELECT content FROM llm_messages WHERE id = ?`, plan.ReplyMessageID).Scan(&replyContent); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(replyContent, "the fake planner decided") {
+		t.Fatalf("reply=%q, want the planner's answer the plan came from", replyContent)
+	}
+	if !strings.Contains(replyContent, `"capability":"asset.change"`) {
+		t.Fatalf("reply=%q, want the plan it asked for", replyContent)
+	}
+	planned, err := store.ListExecutionStepPlan(plan.ID)
+	if err != nil || len(planned) != 1 {
+		t.Fatalf("planned=%v err=%v", planned, err)
+	}
+	if planned[0].Capability != "asset.change" || planned[0].Input != `{"target":"asset-1"}` {
+		t.Fatalf("planned step=%+v, want what the reply asked for", planned[0])
+	}
+
+	executed, err := store.ListExecutionSteps(plan.ID)
+	if err != nil || len(executed) != 1 {
+		t.Fatalf("executed=%v err=%v", executed, err)
+	}
+	step := executed[0]
+	if step.Status != "ok" || step.Capability != "asset.change" || step.Provider != "autonomy" {
+		t.Fatalf("step=%+v, want the capability's own provider and its outcome", step)
+	}
+	if step.PlanStepID != planned[0].ID || step.Idx != 1 || step.TaskID != "task-e2e" {
+		t.Fatalf("step=%+v, want it linked to the planned step and its task", step)
+	}
+	if outcome, found, err := store.ExecutionPlanOutcome(plan.ID); err != nil || !found || outcome.Status != "ok" {
+		t.Fatalf("outcome=%+v found=%v err=%v", outcome, found, err)
+	}
+
+	// A second cycle is a second plan, and both point at the same task input.
+	if len(plans) < 2 {
+		t.Fatalf("plans=%d, want one per cycle", len(plans))
+	}
+	if plans[1].ID == plan.ID || plans[1].TaskInputMessageID != plan.TaskInputMessageID {
+		t.Fatalf("second plan=%+v, want a new plan pointing at the task's same input %d", plans[1], plan.TaskInputMessageID)
+	}
+}
+
+// TestAStepRecordsTheAgentItAcquiredAsAnInteraction: a step whose capability
+// delegates records the worker run as an interaction of that step, so "what did this
+// step talk to" is answerable from the execution tables alone.
+func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("PROJECT_ROOT", filepath.Join(".."))
+	store := executionTestStore(t)
+
+	rtu := NewRuntime(NewAgentFactory())
+	factory := capability.NewFactory()
+	capability.RegisterDefaults(factory, capability.Deps{Agents: rtu})
+	rtu.SetCapabilities(factory.GetAll()...)
+	_autonomy = &Autonomy{CapabilityFactory: factory, Store: store}
+
+	result, err := rtu.Execute(Decision{
+		Type:    "plan",
+		Reason:  "hand the work to a coding agent",
+		Actions: []Action{CapabilityAction{Name: "code_edit", Input: map[string]string{"instruction": "do the thing"}}},
+		Ctx:     executionContext(),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Output["status"] != "ok" {
+		t.Fatalf("result=%+v, want the delegated step to have run", result.Actions)
+	}
+
+	plans, err := store.ListExecutionPlans("task-exec")
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%v err=%v", plans, err)
+	}
+	steps, err := store.ListExecutionSteps(plans[0].ID)
+	if err != nil || len(steps) != 1 {
+		t.Fatalf("steps=%v err=%v", steps, err)
+	}
+	interactions, err := store.ListExecutionStepInteractions(steps[0].ID)
+	if err != nil || len(interactions) != 1 {
+		t.Fatalf("interactions=%v err=%v, want the worker run recorded on the step", interactions, err)
+	}
+	got := interactions[0]
+	if got.Kind != InteractionLLM || got.Provider != string(AgentBackendCline) || got.ReasonTurnID == 0 {
+		t.Fatalf("interaction=%+v, want the LLM run this step talked to", got)
+	}
+	// The run it points at is the worker's own, not the planner's.
+	var mode, taskID string
+	if err := store.db.QueryRow(`SELECT mode, task_id FROM reason_turns WHERE id = ?`, got.ReasonTurnID).Scan(&mode, &taskID); err != nil {
+		t.Fatal(err)
+	}
+	if mode != string(ReasonModeAgent) || taskID != "task-exec" {
+		t.Fatalf("run=%s/%s, want the worker's agent-mode run of this task", mode, taskID)
+	}
+}

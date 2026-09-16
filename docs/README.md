@@ -21,6 +21,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 11. [llm-message.md](llm-message.md) — 输入与返回拆成两条独立记录（llm_messages），返回溯源到具体输入
 12. [store.md](store.md) — 存储统一接口与可插拔 engine（sqlite 为默认实现）
 13. [deployment-monitor.md](deployment-monitor.md) — `deployment.monitor` 能力参考（跟随部署、定位问题；概念边界见 [capability.md](capability.md)）
+14. [execution-step.md](execution-step.md) — 计划与执行两层记录（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`）：计划先写、不可改、结果派生，且按 message id 追溯到是哪条回复、哪条输入
 
 ## 终局四对象
 

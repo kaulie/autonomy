@@ -113,6 +113,27 @@ func Main() {
 				}},
 			})
 			switch {
+			case strings.Contains(prompt, "give me a plan"):
+				// A valid AGENT_V2 answer, so a test can drive the real loop — plan,
+				// execution records and all — against the fake bridge instead of only
+				// asserting what a parsed decision would do.
+				text := `{"type":"plan","reason":"the fake planner decided","plan":{"steps":[` +
+					`{"capability":"asset.change","input":{"target":"asset-1"}}]},"need":{}}`
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_start", "contentType": "text", "text": text, "accumulated": text,
+				})
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "content_end", "contentType": "text", "text": text,
+				})
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "done", "reason": "completed", "text": text, "iterations": 1,
+				})
+				cumulativeInput += 11
+				result(req.ID, map[string]any{
+					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "finished",
+					"text": text, "finishReason": "completed", "usageSource": "run",
+					"usage": map[string]any{"inputTokens": 11, "outputTokens": 2, "totalTokens": 13, "costUsd": 0.0001},
+				})
 			case strings.Contains(prompt, "never answer"):
 				// Never answers: the client must abort on its own context.
 			case strings.Contains(prompt, "stream slowly"):
