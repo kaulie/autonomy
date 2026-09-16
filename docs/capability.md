@@ -34,13 +34,15 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 ## 代码位置与提示词
 
-- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`），注册在 `capability.RegisterDefaults`。
+- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`deployment/monitor.go`），注册在 `capability.RegisterDefaults`。
+- `deployment.monitor`：跟随一次部署、发现并解释问题（见 [deployment-monitor.md](deployment-monitor.md)）。
 - **提示词不进代码**：委托给 worker 的提示词放在仓库文件里，运行时按次读取 —— 与 agent policy 同一套路（见 `src/prompt.go`）：
 
 | 文件 | 占位符 | 说明 |
 |---|---|---|
 | `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
 | `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
 
