@@ -28,16 +28,19 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 ## 术语：cycle 与 step
 
-- **cycle**：**和某个 LLM 的交互轮次** —— 一次 prompt → reply 算一轮，同一个 session 内递增（1、2、…）。
-  planner 的 cycle 就是它的决策轮（每个 task 尝试一个新 session）；被委托的 worker 的 cycle 是**它自己那个 session**
-  的交互轮次（第一个 prompt 就是 1），不是委托方 task 的决策轮，也不是 0 —— 它确实和它的 LLM 交互了。
-  落库就是 `reason_turns.cycle` / `llm_messages.cycle`（历史名 `step` 已重命名，一个词不能指两件事）。
-  `Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的是 planner 的 cycle（名字是历史包袱，语义以本文为准）。
+- **cycle**：**某个 agent 自己的轮次**，从 **1** 开始，相对于它自己而言 —— 不跨 agent 比较。
+  一次 prompt → reply 就是一轮：planner 的 cycle 是它对这条 task 的决策轮；被委托的 worker 的 cycle 是**它自己的**轮次
+  （第一个 prompt 就是 1），而且 **worker 完全可能有自己的 decision cycle**（规则不预设它是「只干一件事」的：
+  它自己跑多轮就是 1、2、3…）。`mode`（plan / agent）说的是这一轮在做什么，不改变 cycle 的含义。
+  落库就是 `reason_turns.cycle` / `llm_messages.cycle`（历史名 `step` 已重命名 —— 一个词不能指两件事）。
+  要定位一次交互用 `(agent_id, cycle)` 或 turn id，不要拿两个 agent 的 cycle 相互对照；
+  委托方的 cycle 出现在 worker 提示词的 `delegated_by.cycle` 里 —— 那是「谁在第几轮把它派出去」，仍是相对委托方的。
+  `Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的是 planner 自己的 cycle（名字是历史包袱，语义以本文为准）。
 - **step**：**一次 plan 生成的具体行动步骤** —— planner 返回的 plan 里，每个 step 就是一次能力调用
   （`plan.steps[]`）。运行时的执行记录用的才是这个词：计划 `execution_step_plan`（执行前一次性写全）与实际执行
   `execution_step`（跑一步写一行）。
 
-凡指「和 LLM 的第几轮」说 **cycle**，凡指「这份 plan 里的第几个动作」说 **step**。
+一句话：**cycle 是「相对某个 agent 的第几轮」，step 是「某份 plan 里的第几个动作」。**
 
 ## 职责边界
 

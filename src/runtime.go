@@ -142,10 +142,12 @@ type runtimeAgentSession struct {
 	rt     *Runtime
 	agent  *Agent
 	taskID string
-	// round counts the prompts this session has sent: cycle is the interaction
-	// round with this agent's LLM (1, 2, …), which is what the run header records
-	// for a worker as well as for a planner. A session is prompted sequentially —
-	// a capability asks and waits — so a plain counter is enough.
+	// round counts the prompts this session has sent. cycle is always *this
+	// agent's own* round number, starting at 1: an agent's cycles are its own,
+	// whether it is planning a task or working through a delegated job (and a
+	// delegated agent may well have decision cycles of its own). Nothing here
+	// compares two agents' cycles. A session is prompted sequentially — a
+	// capability asks and waits — so a plain counter is enough.
 	round int
 }
 
@@ -180,9 +182,9 @@ func (s *runtimeAgentSession) WorkerPlaceholders() map[string]string {
 // row is attributed to the agent that delegated rather than to the user: the user
 // only authors the top-level task.
 //
-// Its cycle is this session's interaction round (1 for the first prompt), not the
-// delegating task's decision cycle: cycle counts rounds with an LLM, and this
-// worker is having its own conversation with its own LLM.
+// Its cycle is this agent's own round number, from 1 — not the delegating agent's
+// cycle: every cycle is relative to the agent it belongs to, and the delegating
+// agent's cycle appears as delegated_by.cycle in the prompt's Runtime Context.
 func (s *runtimeAgentSession) beginDelegatedTrace(prompt string) *LLMTrace {
 	s.round++
 	return BeginLLMTraceFrom(s.agent, LLMMessageRoleAgent, s.taskID, s.round, ReasonModeAgent, prompt)

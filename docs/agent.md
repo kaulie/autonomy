@@ -48,6 +48,8 @@ planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方�
 
 - **身份 ≠ 处境**：身份（role / id / …）整个会话不变，所以在 AGENT_V2 的 **frame** 里；它正在做的 Task、第几轮
   （`cycle`）、谁委托的、`previous_actions` 是 Runtime Context，属于每轮的 **delta**（见 [execution-loop.md](execution-loop.md)）。
+  注意 `cycle` 是**相对某个 agent 自己**的轮次（从 1 起，不跨 agent 比较）：worker 的 Runtime Context 里不渲染自己的
+  cycle（那是它拿到的处境），它自己的轮次记在它自己的 run header 上，委托方的轮次以 `delegated_by.cycle` 出现。
 - **不编造**：runtime 没记录 role 的 agent（比如手搓的测试替身）不会被硬塞一个身份 —— 该字段就不出现。
 
 ## 不变式
