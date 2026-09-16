@@ -262,6 +262,12 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle)
 	if err := s.backfillLLMMessages(); err != nil {
 		return fmt.Errorf("backfill llm_messages: %w", err)
 	}
+	// Last, so it sees every column and every message row: cycle is relative to the
+	// agent it belongs to, and the turns written before that was true are numbered
+	// here (see backfillAgentCycles).
+	if err := s.backfillAgentCycles(); err != nil {
+		return fmt.Errorf("backfill agent cycles: %w", err)
+	}
 	return nil
 }
 
@@ -353,6 +359,66 @@ func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
 	}
 	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
 	return err
+}
+
+// backfillAgentCycles numbers the turns that were recorded before cycle meant
+// "this agent's own round, from 1".
+//
+// Rows written then say 0 (a worker was recorded as having no cycle) or the
+// delegating agent's cycle (the era before that). Both are relative to somebody
+// else, so each agent's turns are renumbered by their own order — oldest first —
+// which is the closest reconstruction of what the new writer would have recorded:
+// this agent's first prompt is cycle 1, its second is 2. Planner turns already
+// carry their own cycle and are left as they are, and a turn whose agent is
+// unknown (agent_id 0) stays untouched: nothing can say what its first round was.
+//
+// Messages follow their run header, so a message never disagrees with the turn it
+// belongs to. Both steps are guarded by "is anything actually different", so a
+// database that has already been numbered is a read-only check on every open.
+func (s *SQLiteStore) backfillAgentCycles() error {
+	// The round a turn is, counted within its own agent, oldest first.
+	const ownRound = `(SELECT COUNT(*) FROM reason_turns e
+	                   WHERE e.agent_id = reason_turns.agent_id AND e.mode = 'agent'
+	                     AND (e.created_at < reason_turns.created_at
+	                          OR (e.created_at = reason_turns.created_at AND e.id <= reason_turns.id)))`
+
+	misnumbered, err := s.exists(`
+SELECT EXISTS (SELECT 1 FROM reason_turns
+                WHERE mode = 'agent' AND agent_id <> 0 AND cycle <> ` + ownRound + `)`)
+	if err != nil {
+		return err
+	}
+	if misnumbered {
+		if _, err := s.db.Exec(`
+UPDATE reason_turns SET cycle = ` + ownRound + `
+ WHERE mode = 'agent' AND agent_id <> 0`); err != nil {
+			return fmt.Errorf("number agent cycles: %w", err)
+		}
+	}
+
+	unmirrored, err := s.exists(`
+SELECT EXISTS (SELECT 1 FROM llm_messages m JOIN reason_turns r ON r.id = m.turn_id
+                WHERE m.cycle <> r.cycle)`)
+	if err != nil {
+		return err
+	}
+	if unmirrored {
+		if _, err := s.db.Exec(`
+UPDATE llm_messages SET cycle = (SELECT r.cycle FROM reason_turns r WHERE r.id = llm_messages.turn_id)
+ WHERE turn_id IN (SELECT id FROM reason_turns)`); err != nil {
+			return fmt.Errorf("mirror cycles onto messages: %w", err)
+		}
+	}
+	return nil
+}
+
+// exists reports whether a `SELECT EXISTS (...)` query finds anything.
+func (s *SQLiteStore) exists(query string) (bool, error) {
+	var found bool
+	if err := s.db.QueryRow(query).Scan(&found); err != nil {
+		return false, err
+	}
+	return found, nil
 }
 
 // renameColumnIfPresent renames oldCol to newCol when the table still has the old

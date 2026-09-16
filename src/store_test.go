@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -626,6 +627,117 @@ CREATE INDEX idx_llm_messages_task ON llm_messages(task_id, step);
 	}
 	if len(messages) != 1 || messages[0].Cycle != 3 {
 		t.Fatalf("messages=%+v, want the migrated row with cycle=3", messages)
+	}
+}
+
+// TestSQLiteStoreNumbersAgentCycles: cycle is relative to the agent it belongs to,
+// so the turns written before that was true — 0, or the delegating agent's cycle —
+// are numbered by their own order: this agent's first prompt is 1, its second 2.
+// Planner turns already carry their own cycle and are left alone, a turn whose
+// agent is unknown stays untouched, and every message follows its own run header.
+func TestSQLiteStoreNumbersAgentCycles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// What those writers left behind: a worker recorded as 0 twice, another once, a
+	// planner already numbered, and a turn nobody attributed.
+	for _, row := range []struct {
+		agentID   int64
+		mode      string
+		cycle     int
+		createdAt string
+	}{
+		{11, "agent", 0, "2026-01-01T00:00:00Z"},
+		{11, "agent", 0, "2026-01-01T00:01:00Z"},
+		{12, "agent", 1, "2026-01-01T00:02:00Z"}, // the delegating cycle era
+		{13, "plan", 1, "2026-01-01T00:03:00Z"},
+		{13, "plan", 2, "2026-01-01T00:04:00Z"},
+		{0, "agent", 0, "2026-01-01T00:05:00Z"},
+	} {
+		if _, err := store.db.Exec(`INSERT INTO reason_turns (task_id, agent_id, cycle, mode, created_at)
+			VALUES (?, ?, ?, ?, ?)`, "task-old", row.agentID, row.cycle, row.mode, row.createdAt); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+	}
+	// Messages carried the same (un-numbered) cycle as their turn.
+	var firstTurn int64
+	if err := store.db.QueryRow(`SELECT MIN(id) FROM reason_turns`).Scan(&firstTurn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO llm_messages (turn_id, task_id, agent_id, cycle, seq, role, content, created_at)
+		VALUES (?, 'task-old', 11, 0, 0, 'agent', 'do it', '2026-01-01T00:00:00Z')`, firstTurn); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopening numbers them.
+	reopened, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	rows, err := reopened.db.Query(`SELECT agent_id, mode, cycle FROM reason_turns ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var agentID int64
+		var mode string
+		var cycle int
+		if err := rows.Scan(&agentID, &mode, &cycle); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d/%s/%d", agentID, mode, cycle))
+	}
+	want := []string{"11/agent/1", "11/agent/2", "12/agent/1", "13/plan/1", "13/plan/2", "0/agent/0"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("cycles=%v, want %v", got, want)
+	}
+	// The message follows the run header it belongs to.
+	var messageCycle, turnCycle int
+	if err := reopened.db.QueryRow(`SELECT m.cycle, r.cycle FROM llm_messages m JOIN reason_turns r ON r.id = m.turn_id`).
+		Scan(&messageCycle, &turnCycle); err != nil {
+		t.Fatal(err)
+	}
+	if messageCycle != turnCycle || messageCycle != 1 {
+		t.Fatalf("message cycle=%d, turn cycle=%d, want both 1", messageCycle, turnCycle)
+	}
+
+	// Numbering is idempotent: reopening again leaves everything as it is.
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	rows, err = again.db.Query(`SELECT agent_id, mode, cycle FROM reason_turns ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var second []string
+	for rows.Next() {
+		var agentID int64
+		var mode string
+		var cycle int
+		if err := rows.Scan(&agentID, &mode, &cycle); err != nil {
+			t.Fatal(err)
+		}
+		second = append(second, fmt.Sprintf("%d/%s/%d", agentID, mode, cycle))
+	}
+	if strings.Join(second, " ") != strings.Join(want, " ") {
+		t.Fatalf("second open changed the cycles: %v", second)
 	}
 }
 

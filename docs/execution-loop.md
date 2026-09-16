@@ -36,6 +36,9 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   要定位一次交互用 `(agent_id, cycle)` 或 turn id，不要拿两个 agent 的 cycle 相互对照；
   委托方的 cycle 出现在 worker 提示词的 `delegated_by.cycle` 里 —— 那是「谁在第几轮把它派出去」，仍是相对委托方的。
   `Autonomy.MaxSteps` / `AUTONOMY_MAX_STEPS` 数的是 planner 自己的 cycle（名字是历史包袱，语义以本文为准）。
+  **历史数据**：这次迁移把此前记的 `0`（worker 没有自己的 cycle 那个年代）与「委托方的 cycle」按**各自 agent 的先后**
+  重新编号（第一个 prompt 记 1、第二个记 2）；`llm_messages` 跟着它的 run header 走；只有 `agent_id = 0` 的行保持原样 ——
+  无从判断它是这个 agent 的第几轮。
 - **step**：**一次 plan 生成的具体行动步骤** —— planner 返回的 plan 里，每个 step 就是一次能力调用
   （`plan.steps[]`）。运行时的执行记录用的才是这个词：计划 `execution_step_plan`（执行前一次性写全）与实际执行
   `execution_step`（跑一步写一行）。
