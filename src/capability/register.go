@@ -25,6 +25,9 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	}
 	f.Register(AssetChange{Assets: deps.Assets})
 	f.Register(sd.CodeEdit{Agents: deps.Agents})
+	// service.deploy talks to the deployment control plane over HTTP, so it needs
+	// no host hook: DEPLOYMENT_API_URL (or the local default) is its wiring.
+	f.Register(sd.DeployService{})
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})
