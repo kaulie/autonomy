@@ -223,10 +223,10 @@ func TestAPlanStepReadsWhatAnEarlierStepProduced(t *testing.T) {
 		Type: "plan",
 		Ctx:  executionContext(),
 		Actions: []Action{
-			CapabilityAction{Name: "build", StepName: "build", Inputs: map[string]StepInput{}},
+			CapabilityAction{Name: "build", StepName: "build", Inputs: map[string]StepInput{}, ExpectedEffect: "the artifact is built"},
 			CapabilityAction{Name: "deploy", StepName: "deploy", Inputs: map[string]StepInput{
 				"version": BoundInput("step:build.output.artifact_version"),
-			}},
+			}, ExpectedEffect: "the artifact's version is deployed"},
 		},
 	})
 	if err != nil {
@@ -280,10 +280,10 @@ func TestAPlanWhoseLineageDoesNotLineUpDoesNotRun(t *testing.T) {
 		Type: "plan",
 		Ctx:  executionContext(),
 		Actions: []Action{
-			CapabilityAction{Name: "build", StepName: "build", Inputs: map[string]StepInput{}},
+			CapabilityAction{Name: "build", StepName: "build", Inputs: map[string]StepInput{}, ExpectedEffect: "the artifact is built"},
 			CapabilityAction{Name: "deploy", StepName: "deploy", Inputs: map[string]StepInput{
 				"version": BoundInput("step:build.output.commit_sha"),
-			}},
+			}, ExpectedEffect: "the artifact's version is deployed"},
 		},
 	})
 	if err == nil {

@@ -90,16 +90,22 @@ func TestRuntimeStopsAtTheFirstFailingAction(t *testing.T) {
 }
 
 // TestRuntimeExecuteWithoutActions: done / blocked / need_input decide nothing,
-// which is not an error.
+// which is not an error — with the decision's own contract satisfied (done names its
+// evidence, blocked / need_input say what is missing: src/decision_rules.go).
 func TestRuntimeExecuteWithoutActions(t *testing.T) {
 	rt := NewRuntime(NewAgentFactory())
-	for _, typ := range []string{"done", "blocked", "need_input"} {
-		result, err := rt.Execute(Decision{Type: typ})
+	decisions := []Decision{
+		{Type: "done", Evidence: []Evidence{{ID: "E1", Source: "observation", Fact: "the goal is satisfied"}}},
+		{Type: "blocked", Need: Need{Type: "capability", Description: "no capability can do this"}},
+		{Type: "need_input", Need: Need{Type: "decision", Description: "which environment?"}},
+	}
+	for _, decision := range decisions {
+		result, err := rt.Execute(decision)
 		if err != nil {
-			t.Fatalf("%s: %v", typ, err)
+			t.Fatalf("%s: %v", decision.Type, err)
 		}
-		if !strings.Contains(result.Message, typ) {
-			t.Fatalf("%s: result=%+v", typ, result)
+		if !strings.Contains(result.Message, decision.Type) {
+			t.Fatalf("%s: result=%+v", decision.Type, result)
 		}
 	}
 }

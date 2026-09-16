@@ -120,8 +120,8 @@ func Main() {
 				// A valid AGENT_V2 answer, so a test can drive the real loop — plan,
 				// execution records and all — against the fake bridge instead of only
 				// asserting what a parsed decision would do.
-				text := `{"type":"plan","reason":"the fake planner decided","plan":{"steps":[` +
-					`{"capability":"asset.change","input":{"target":"asset-1"}}]},"need":{}}`
+				text := `{"type":"plan","reason":"the fake planner decided","evidence":[{"id":"E1","source":"goal","reference":"the goal","fact":"the asset must change"}],"plan":{"steps":[` +
+					`{"capability":"asset.change","input":{"target":"asset-1"},"expected_effect":"the asset's state changes","evidence_refs":["E1"]}]},"need":{}}`
 				event(req.ID, agentID, sessionID, map[string]any{
 					"type": "content_start", "contentType": "text", "text": text, "accumulated": text,
 				})

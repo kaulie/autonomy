@@ -319,10 +319,14 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 	_autonomy = &Autonomy{CapabilityFactory: factory, Store: store}
 
 	result, err := rtu.Execute(Decision{
-		Type:    "plan",
-		Reason:  "hand the work to a coding agent",
-		Actions: []Action{CapabilityAction{Name: "code_edit", Inputs: literalInputs(map[string]string{"instruction": "do the thing"})}},
-		Ctx:     executionContext(),
+		Type:   "plan",
+		Reason: "hand the work to a coding agent",
+		Actions: []Action{CapabilityAction{
+			Name:           "code_edit",
+			Inputs:         literalInputs(map[string]string{"instruction": "do the thing"}),
+			ExpectedEffect: "the change is in the workspace and its pull request is open",
+		}},
+		Ctx: executionContext(),
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

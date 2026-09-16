@@ -417,6 +417,12 @@ For `blocked` or `need_input`, describe what is missing.
 
 ## Type-specific Requirements
 
+These are requirements, and the runtime checks them: a decision that breaks one is
+refused before anything runs, the reason names the rule it broke, and your next
+decision sees it in `previous_actions`. So they are not style advice — a `done` with
+no evidence, a `plan` with no steps, or a step that does not say what it is for costs
+a cycle, not a task.
+
 ### `plan`
 
 - `plan` MUST NOT be empty.

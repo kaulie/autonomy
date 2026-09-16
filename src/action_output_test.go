@@ -68,9 +68,13 @@ func TestCapabilityOutputReachesTheCycleResult(t *testing.T) {
 	rt := NewRuntime(NewAgentFactory())
 	task := &Task{ID: "task-1", Description: "standardise events"}
 	result, err := rt.Execute(Decision{
-		Type:    "plan",
-		Ctx:     DecisionContext{Task: task},
-		Actions: []Action{CapabilityAction{Name: "fake", Inputs: map[string]StepInput{}}},
+		Type: "plan",
+		Ctx:  DecisionContext{Task: task},
+		Actions: []Action{CapabilityAction{
+			Name:           "fake",
+			Inputs:         map[string]StepInput{},
+			ExpectedEffect: "the events are renamed",
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +134,7 @@ func TestFailedCapabilityOutputIsKept(t *testing.T) {
 
 	result, err := NewRuntime(NewAgentFactory()).Execute(Decision{
 		Type:    "plan",
-		Actions: []Action{CapabilityAction{Name: "fake"}},
+		Actions: []Action{CapabilityAction{Name: "fake", ExpectedEffect: "the thing is done"}},
 	})
 	if err == nil {
 		t.Fatal("expected the capability's error")
