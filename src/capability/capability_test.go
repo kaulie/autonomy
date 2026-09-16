@@ -190,6 +190,41 @@ func TestConstructsAreReadableJSON(t *testing.T) {
 	}
 }
 
+// TestConstructsDoNotNameProviders: the planner is told what can be done, never
+// who does it. A plan step is a capability plus its input, so a top-level provider
+// in the list would be an axis the planner cannot put in a step — and one it must
+// not schedule on. The runtime keeps that attribution on the step it recorded
+// (execution_step.provider), where it is an audit fact instead of an instruction.
+//
+// A capability may still declare a *data* field called provider among its own
+// input/output (code_edit reports the backend that ran the worker): that is a
+// value it returns, not a choice offered to the plan.
+func TestConstructsDoNotNameProviders(t *testing.T) {
+	t.Parallel()
+	f := capability.NewFactory()
+	capability.RegisterDefaults(f, capability.Deps{Assets: memAssets{"1": "alive"}})
+
+	var constructs []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
+		t.Fatalf("constructs are not JSON: %v", err)
+	}
+	if len(constructs) == 0 {
+		t.Fatal("no constructs")
+	}
+	for _, c := range constructs {
+		if _, ok := c["provider"]; ok {
+			t.Errorf("construct %s carries a provider the planner cannot use", string(c["name"]))
+		}
+	}
+	// The capability still has one: it is the runtime's own record (providerOf),
+	// not something the prompt carries.
+	for _, c := range f.GetAll() {
+		if c.Provider() == "" {
+			t.Errorf("%s declares no provider, so its step row would say nothing", c.Name())
+		}
+	}
+}
+
 // TestConstructsWithoutASignatureStillRender: declaring inputs/outputs is
 // optional — a capability that only has a description is still a construct, and
 // it renders without invented fields.
