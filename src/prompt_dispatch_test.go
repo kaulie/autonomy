@@ -61,6 +61,7 @@ func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
 		"There are exactly **three**",
 		"no fourth source",
 		"a literal you wrote",
+		"A capability's metadata is not an output",
 		"step:<name>.output.<key>",
 		"world_model:asset.<id>.<kind|state>",
 		"No implicit aggregation",

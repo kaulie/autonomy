@@ -74,9 +74,8 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 | `diagnosis` | 一句话结论（状态 + 阶段 + 信号 + 首个可疑错误行 / message） |
 | `evidence` | 日志窗口：有命中行时取其上下文，否则取最近 `tail` 行；总长有上限 |
 | `suggestions` | 每个信号对应的下一步（去查什么 / 改什么） |
-| `source` | 这次观察是谁做的：`agent`（监控 agent 看的）/ `http`（直接读 API）/ `custom`（注入的 Observer） |
-| `note` | 需要说明的例外情况（例如 agent 的答复不合格式、已回退到原始观察） |
-| `polls` / `observed_at` / `provider` | 轮询次数、观察时间、实现方 |
+
+**不回显、不带 bookkeeping、不带"谁在观察"**：`polls` / `observed_at` / `provider` / `source` / `note` 都不在输出里——"看了几次、什么时候看的、是哪个实现、有没有降级"是这次调用的元信息（agent 那次 run 与它的原文在 `llm_messages` 里可回看），观察的内容才是输出（能力只报产出，见 [capability.md](capability.md)）。
 
 ## 信号
 
@@ -102,7 +101,7 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
   `Runtime.AcquireAgent` 拿一个 worker（它有自己的 workspace 和工具），把**部署坐标**（`status_url` / `logs_url`）
   和**原始观察**一起交给它，让它自己去看、自己判断，并按要求返回结构化 JSON
   （`state` / `problem` / `signals` / `diagnosis` / `suggestions` / `logs`）。
-  agent 的判断优先于内置规则；`source=agent` 出现在输出里。提示词在仓库文件里，运行时按次读取：
+  agent 的判断优先于内置规则。提示词在仓库文件里，运行时按次读取：
   `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md`（缺失时该次观察直接失败，不会先建 agent）。
   它和别的被委托的 worker 一样，拿到的是**委托方那个 runtime 的 frame**：Agent 身份（它自己的 role / id /
   name / backend / workspace —— 不是委托方的）、World、Runtime Context、Completion /
@@ -112,12 +111,13 @@ deployment.monitor {pipeline_id, poll} → running/failed/succeeded + signals + 
 - **确定性读取**：没有 agent broker（或显式注入 `Observer`）时，`HTTPObserver` 直接读部署 API
   （`GET <status_url>`，必要时再取 `logs_url`；宽容字段 `state`/`status`、`phase`/`stage`、`healthy`/`health`、
   `logs`/`lines`、`updated_at`，以及 control plane 的 `requestId`/`serviceId`/`message`/`version`/`deployment`），
-  由内置规则给信号。`source=http`。
+  由内置规则给信号。
 - **自定义**：宿主可以注入自己的 Observer（CI API、编排器、本地部署记录）：
-  `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`；`source=custom`。
+  `capability.RegisterDefaults(f, capability.Deps{Deployments: myObserver})`。
 
-agent 返回的 JSON 读不出来时，**原始观察仍然有效**，并在 `note` 里说明这次 agent 的答复不合格式 ——
-不会因此编造一个状态；两者都没有（读取失败且 agent 也没答）才是 error。
+**"是谁在观察"不进输出**：走的是 agent 还是直接读 API，是能力的**接线**（agent 那条路在这步自己的交互行上看得见）；输出只说观察到了什么，`source` / `polls` / `observed_at` / `provider` 都不在里面。
+
+agent 返回的 JSON 读不出来时，**原始观察仍然有效** —— 不会因此编造一个状态；那次 agent 的 run 和它的原文都在 `llm_messages` 里可回看，两者都没有（读取失败且 agent 也没答）才是 error。
 
 代价：agent 监控每次观察都要跑一次 LLM；`watch=true` 会在一次调用里最多轮询 61 次。
 要控制成本时，用 `Deps.Deployments` 注入确定性 Observer，或保持默认的一次观察、由决策循环决定何时再看。

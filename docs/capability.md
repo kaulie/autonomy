@@ -81,6 +81,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 - 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空），而 `pull_request.review` 的 `pr`（别名 `pr_url`）直接吃那个 URL。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，没有任何字段能写「派给谁」—— 哪个 capability 背后有 agent（`code_edit` / `deployment.monitor` 会 acquire 一个 worker）由 runtime 决定，planner 也不需要知道（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 - **字段名是本能力的局部约定**：`output` 里的键只对**这个**能力有意义，下一个能力怎么叫、要不要它，由 planner 在计划里显式绑定（`{"source":"step:<name>.output.<key>"}`）—— runtime 从不跨能力猜名字、也不把共享 Context 当数据通道（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。所以能力声明里 `input`/`output` 的**描述**要写清语义：那是 planner 唯一能据以做映射的东西。
+- **`output` 只放本职产出**：能力这次调用**产出的东西**（结果、它创建/改动的对象与状态）。谁触发的、解析出的是哪个 ref、轮询了几次、哪个实现——都是**这次调用的元信息**，不进 `output`；下游真需要这类**世界状态**就走世界模型（`world_model:…`）。"别人要读"不是把它当输出的理由。
 
 ### `{{CONSTRAINTS}}` 从哪来
 
@@ -94,9 +95,9 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 
 - 语义：把「某个服务的某个分支」交给部署控制面（agent-control-plane），由它打包该 git ref、再部署。
 - 输入：`{"service":"<service id>","branch":"<branch/tag>"}`（`service_id` / `ref` 亦可；`branch` 留空 = 用服务契约里的默认分支）。
-- 输出：`{"pipeline_id","state","service","branch","poll","identity"}`；流水线已经有的 `deployment` / `version` 一并带上。
+- 输出：`{"pipeline_id","state","poll","deployment","version"}` —— **这次调用产出的那条流水线**，以及控制面随后报回来的归属（`deployment` / `version`）。不回显输入（`service`、`branch`：控制面对空 `branch` 的解析也是它对这个输入的解析）、不带控制面那句散文 `message`、也不带归属审计 `identity`（谁是触发者由控制面自己的面板/审计记录说了算，能力不把它当产出回传）。能力只报产出，见 [execution-step.md](execution-step.md) 的「计划的数据来源」。
 - **触发 ≠ 等待**：打包→部署要跑几分钟，所以 Run 在控制面**受理**（HTTP 202）后立刻返回 pipeline id，不占住 decision cycle；最终结果由后续观察决定（`poll` 就是 `GET /api/pipelines/<id>`）—— 触发成功不等于世界状态已达成（见[不变式](#不变式) 第 3 条）。
-- **identity 注入（每个触发都要带）**：控制面的两个写接口（`/api/deploy-notify`、`/api/deploys`）要求调用方自报身份（[第一阶段身份校验](https://github.com/kaulie/agent-control-plane-deployment)：`identity_role: user|agent` + `identity_id: user_001 / agent_002`，缺失/非法 → 401），部署才能被审计与面板归因。`service.deploy` **永远**带这两个头，不依赖控制面 `IDENTITY_ENFORCE=0` 的逃生开关：取值顺序是 **输入**（`identity_role` / `identity_id`，可选，可把某次部署归给某个身份）→ **环境**（`IDENTITY_ROLE` / `IDENTITY_ID`，与控制面自己调用方同名，改归属不用改代码）→ **默认**（`agent:autonomy`：autonomy 是 agent 不是人，默认就署它自己的名）。角色大小写不敏感，非法值在**发请求之前**就报错，而不是拿 401 回来；输出里的 `identity` 是控制面**记录下来的**触发者（`triggeredBy`），比调用方自述更权威。
+- **identity 注入（每个触发都要带）**：控制面的两个写接口（`/api/deploy-notify`、`/api/deploys`）要求调用方自报身份（[第一阶段身份校验](https://github.com/kaulie/agent-control-plane-deployment)：`identity_role: user|agent` + `identity_id: user_001 / agent_002`，缺失/非法 → 401），部署才能被审计与面板归因。`service.deploy` **永远**带这两个头，不依赖控制面 `IDENTITY_ENFORCE=0` 的逃生开关：取值顺序是 **输入**（`identity_role` / `identity_id`，可选，可把某次部署归给某个身份）→ **环境**（`IDENTITY_ROLE` / `IDENTITY_ID`，与控制面自己调用方同名，改归属不用改代码）→ **默认**（`agent:autonomy`：autonomy 是 agent 不是人，默认就署它自己的名）。角色大小写不敏感，非法值在**发请求之前**就报错，而不是拿 401 回来。**归属只走请求头**：它是这次调用的元信息，权威记录在控制面那边（`triggeredBy` / 面板审计），能力不把它当产出回传。
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`；`IDENTITY_ROLE` / `IDENTITY_ID` 覆盖署谁的名，缺省 `agent` / `autonomy`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 

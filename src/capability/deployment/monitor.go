@@ -30,13 +30,6 @@ const (
 	// Provider is who implements it.
 	Provider = "autonomy"
 
-	// sourceAgent / sourceHTTP / sourceCustom name the monitoring provider that
-	// produced a report, so the agent knows whether a monitoring agent looked or
-	// the deployment API was read directly.
-	sourceAgent  = "agent"
-	sourceHTTP   = "http"
-	sourceCustom = "custom"
-
 	// EnvAPIURL is where the deployment service listens. It is the same
 	// variable service.deploy and the gateway use, so one setting points both
 	// the trigger and the monitor at the same deployment control plane.
@@ -201,8 +194,6 @@ func (Monitor) Outputs() []spec.Field {
 		{Name: "diagnosis", Description: "one or two sentences: what is happening and why it matters"},
 		{Name: "evidence", Description: "the log lines the verdict rests on"},
 		{Name: "suggestions", Description: "concrete next steps, semicolon-joined"},
-		{Name: "source", Description: "who observed: agent (a monitoring agent), http (the API read directly) or custom (an injected observer)"},
-		{Name: "provider", Description: "the capability's provider (autonomy)"},
 		{Name: "phase", Description: "the stage the pipeline is in, when it reports one"},
 		{Name: "progress", Description: "the pipeline's own progress, e.g. 3/5, when it reports one"},
 		{Name: "healthy", Description: `"true"/"false" when the deployment reports health`},
@@ -211,34 +202,22 @@ func (Monitor) Outputs() []spec.Field {
 		{Name: "service", Description: "the service being deployed, when the pipeline names it"},
 		{Name: "version", Description: "the version being deployed, when the pipeline names it"},
 		{Name: "deployment_name", Description: "the deployment's name, when the pipeline names it"},
-		{Name: "observed_at", Description: "when this observation was taken (RFC 3339)"},
-		{Name: "polls", Description: "how many times the deployment was read in this call"},
-		{Name: "note", Description: "an exception worth knowing: an agent answer that did not parse, and what was reported instead"},
 	}
 }
 
 // observer picks the monitoring provider: an explicit one wins, then the
 // agent-backed observer when an agent broker is available, then the
-// deterministic HTTP reader.
-func (m Monitor) observer() (Observer, string) {
+// deterministic HTTP reader. Which one it was is the capability's own wiring, not
+// part of the observation (an agent-backed observation is visible in this step's
+// interaction row).
+func (m Monitor) observer() Observer {
 	if m.Observer != nil {
-		return m.Observer, sourceOf(m.Observer)
+		return m.Observer
 	}
 	if m.Agents != nil {
-		return &AgentObserver{Agents: m.Agents}, sourceAgent
+		return &AgentObserver{Agents: m.Agents}
 	}
-	return NewHTTPObserver(), sourceHTTP
-}
-
-// sourceOf names an injected observer, so a report says who monitored.
-func sourceOf(o Observer) string {
-	switch o.(type) {
-	case *AgentObserver:
-		return sourceAgent
-	case *HTTPObserver:
-		return sourceHTTP
-	}
-	return sourceCustom
+	return NewHTTPObserver()
 }
 
 // Run observes the deployment and turns that observation into a report: the
@@ -250,12 +229,12 @@ func (m Monitor) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	obs, source := m.observer()
-	snap, polls, err := observe(obs, req, m.Sleep)
+	obs := m.observer()
+	snap, _, err := observe(obs, req, m.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
-	return report(snap, req, polls, time.Now(), source), nil
+	return report(snap, req, time.Now()), nil
 }
 
 // observe takes one snapshot, or — with Watch — polls until the deployment
@@ -414,24 +393,22 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // report renders the observation for the agent: what is happening, whether it
-// is a problem, the evidence, and the next steps. source names the monitoring
-// provider that produced the observation.
-func report(snap Snapshot, req Request, polls int, now time.Time, source string) map[string]string {
+// is a problem, the evidence, and the next steps.
+//
+// What the capability *did* (when it looked, how often it polled, which provider
+// it is, who observed) is not part of the observation: the step row records when the
+// call ran, and an agent-backed look is visible as this step's interaction. The
+// observation's own facts — what the deployment reports and what they mean — are the
+// output.
+func report(snap Snapshot, req Request, now time.Time) map[string]string {
 	d := Diagnose(snap, now, req.Tail)
 	out := map[string]string{
-		"deployment":  firstNonEmpty(snap.ID, req.Deployment),
-		"state":       string(snap.state()),
-		"terminal":    strconv.FormatBool(snap.state().terminal()),
-		"problem":     strconv.FormatBool(d.Problem),
-		"diagnosis":   d.Summary,
-		"evidence":    d.Evidence,
-		"observed_at": now.Format(time.RFC3339),
-		"polls":       strconv.Itoa(polls),
-		"provider":    Provider,
-		"source":      source,
-	}
-	if snap.AgentNote != "" {
-		out["note"] = snap.AgentNote
+		"deployment": firstNonEmpty(snap.ID, req.Deployment),
+		"state":      string(snap.state()),
+		"terminal":   strconv.FormatBool(snap.state().terminal()),
+		"problem":    strconv.FormatBool(d.Problem),
+		"diagnosis":  d.Summary,
+		"evidence":   d.Evidence,
 	}
 	if snap.Phase != "" {
 		out["phase"] = snap.Phase

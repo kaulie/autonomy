@@ -83,13 +83,9 @@ func (DeployService) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "pipeline_id", Description: "the accepted pipeline's id — poll it, do not wait for this call"},
 		{Name: "state", Description: "the pipeline's state as accepted (queued)"},
-		{Name: "service", Description: "the service that was deployed"},
-		{Name: "branch", Description: "the ref that was packaged"},
 		{Name: "poll", Description: "the status path to follow, e.g. /api/pipelines/<id> (deployment.monitor takes it as poll)"},
 		{Name: "deployment", Description: "the deployment the pipeline belongs to, once the control plane reports it"},
 		{Name: "version", Description: "the version being deployed, once the control plane reports it"},
-		{Name: "message", Description: "the control plane's own line about the accepted request"},
-		{Name: "identity", Description: "who the control plane recorded as the triggerer, role:id (e.g. agent:autonomy)"},
 	}
 }
 
@@ -153,19 +149,19 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 	}
 
 	out := map[string]string{
-		"service":     firstNonEmpty(job.ServiceID, service),
-		"branch":      job.Ref,
 		"pipeline_id": job.RequestID,
 		"state":       job.State,
 		"poll":        firstNonEmpty(job.Poll, "/api/pipelines/"+job.RequestID),
-		// The control plane echoes what it recorded as the triggerer; fall back to
-		// the identity this call carried when an older control plane does not.
-		"identity": firstNonEmpty(job.TriggeredBy, identity.String()),
 	}
+	// What this call produced is the pipeline it created and what the control plane
+	// says about it. Everything else is about the call itself: the service and the
+	// ref are the step's own input (the control plane's answer to an empty ref is its
+	// resolution of that input), the attribution is the control plane's audit (its
+	// panel is where it is authoritative), and `message` is its prose about accepting
+	// the request.
 	for k, v := range map[string]string{
 		"deployment": job.Deployment,
 		"version":    job.Version,
-		"message":    job.Message,
 	} {
 		if strings.TrimSpace(v) != "" {
 			out[k] = v
