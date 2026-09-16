@@ -36,6 +36,9 @@ func Manager(self string) *clinesdk.BridgeManager {
 //
 //	first send on a session  -> reasoning + text "pong", usage in 11/out 2, cost 0.0001
 //	later sends              -> tool call + text "tool said hi", delta usage
+//	prompt containing "truncate my turn" -> the provider cuts the turn off at the
+//	                            output-token limit: the run fails with the SDK's
+//	                            own message (the runtime may retry that turn)
 //	prompt containing "never answer" -> never answers (the client must time out)
 //	prompt containing "out of balance" -> finished with no text, and the reason only
 //	                            in the run result (an exhausted account)
@@ -187,6 +190,25 @@ func Main() {
 					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "error",
 					"text": "", "finishReason": "error",
 					"lastError": map[string]any{"code": "provider_error", "message": "provider exploded"},
+				})
+			case strings.Contains(prompt, "truncate my turn"):
+				// The turn was cut off at the model's output limit before it finished:
+				// the SDK raises the turn as a failed run (no tool call, finish reason
+				// max-tokens) with this exact message, while the session stays alive.
+				event(req.ID, agentID, sessionID, map[string]any{
+					"type": "error",
+					"error": map[string]any{
+						"code":    "run_failed",
+						"message": "Model reached the maximum output token limit before completing the turn",
+					},
+				})
+				result(req.ID, map[string]any{
+					"agentId": agentID, "sessionId": sessionID, "mode": mode, "status": "error",
+					"text": "", "finishReason": "max-tokens",
+					"lastError": map[string]any{
+						"code":    "run_failed",
+						"message": "Model reached the maximum output token limit before completing the turn",
+					},
 				})
 			case started:
 				event(req.ID, agentID, sessionID, map[string]any{

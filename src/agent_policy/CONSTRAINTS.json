@@ -1,3 +1,4 @@
 {
-  "deploy": "the Runtime's move, not the agent's"
+  "deploy": "the Runtime's move, not the agent's",
+  "turn_output_budget": "one turn has a bounded output budget, and a turn cut off by it fails the whole run: keep each tool call small (about 6000 characters / 150 lines at most), write a file over several calls instead of one, and keep the reasoning before a call brief"
 }

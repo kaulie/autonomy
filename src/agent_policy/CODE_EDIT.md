@@ -54,6 +54,23 @@ The authorization is about your own work and stops at its edge:
 - Shipping the code — commit, pull request, merge — is where your job ends.
   Say what is ready to deploy and stop there.
 
+### Turn Budget Policy
+
+One turn of your model has a bounded output budget, and a turn the provider cuts
+off at that limit fails the whole run: nothing of the truncated turn runs, and
+the work of every turn before it is left half-landed.
+
+- Keep every tool call small. Roughly 6000 characters / 150 lines is the ceiling
+  worth staying under, and the editor refuses more than that outright.
+- Write a file in pieces: create it with the first piece, then extend it in later
+  calls. Never emit a whole file in a single call, and never paste one through a
+  shell heredoc — a large payload is exactly what gets truncated.
+- Keep the reasoning before a call brief. Thinking tokens come out of the same
+  budget as the tool call that follows them.
+- If a turn does come back truncated (a tool call with empty arguments is what
+  that looks like), continue from the last completed piece. Do not start the file
+  over, and do not repeat work a previous turn finished.
+
 ### Workspace Policy
 
 - Only modify files relevant to the assigned task.
