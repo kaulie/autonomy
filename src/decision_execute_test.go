@@ -148,9 +148,10 @@ func TestMaxStepsComesFromTheEnvironment(t *testing.T) {
 }
 
 // TestRunKeepsDecidingAfterAFailedCycle drives the real loop with the local
-// reasoner (whose plan names asset.change without a target, so every cycle
-// fails): with a budget of two cycles the task must decide twice instead of
-// aborting after the first failure, and end reporting the failure.
+// reasoner (whose plan names asset.change without supplying the target the
+// capability requires, so every cycle is refused before it runs): with a budget of
+// two cycles the task must decide twice instead of aborting after the first
+// failure, and end reporting the failure.
 func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
@@ -189,8 +190,8 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	if status != "error" {
 		t.Fatalf("status=%q want error", status)
 	}
-	if !strings.Contains(reason, "asset.change: missing target") {
-		t.Fatalf("tasks.error=%q, want the failing cycle's own reason", reason)
+	if !strings.Contains(reason, "asset.change") || !strings.Contains(reason, "does not supply") {
+		t.Fatalf("tasks.error=%q, want the plan refused for the input it never supplied", reason)
 	}
 }
 

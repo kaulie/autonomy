@@ -34,7 +34,7 @@ func (CodeEdit) Description() string {
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
 func (CodeEdit) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "instruction", Aliases: []string{"goal"}, Required: true, Description: "the goal or requirement to hand the coding agent; the runtime fills it from the task description when the step leaves it out"},
+		{Name: "instruction", Aliases: []string{"goal"}, Required: true, Description: "the goal or requirement to hand the coding agent; the plan must supply it (a literal, or a source binding) — the runtime does not fill it in"},
 		{Name: "task_id", Description: "the task the work belongs to (the runtime fills it); the worker's reason turns and current_task_id carry it"},
 	}
 }

@@ -17,6 +17,11 @@ type DecisionContext struct {
 	// planner sees it as previous_actions and can base its evidence on it (see
 	// AGENT_V2 evidence source previous_action).
 	History []Result
+	// StepOutputs are the steps of the plan being executed that have already run,
+	// oldest first — what this step's input bindings resolve against
+	// ("step:<name>.output.<key>", src/plan_lineage.go). It is empty outside an
+	// execution: a plan's bindings only ever read the same plan.
+	StepOutputs []ActionResult
 }
 
 type DecisionMaker struct {
@@ -136,8 +141,11 @@ type Presentation struct {
 type ActionResult struct {
 	// Capability is the capability the step named ("nothing" for a skipped step).
 	Capability string
-	// Input is the input the capability was called with, after the runtime's task
-	// defaults, verbatim.
+	// StepName is what the plan called this step, so a later step's input binding
+	// can address it ("step:<name>.output.<key>"). Empty when the plan named none.
+	StepName string
+	// Input is the input the capability was called with, verbatim: literals as the
+	// plan wrote them and bindings already resolved to their values.
 	Input map[string]string
 	// Output is what the capability returned, verbatim; a capability that failed
 	// keeps whatever it produced before failing.

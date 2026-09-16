@@ -374,6 +374,9 @@ func formatPreviousActionsJSON(history []Result) []map[string]any {
 			actions := make([]map[string]any, 0, len(result.Actions))
 			for _, a := range result.Actions {
 				item := map[string]any{"capability": a.Capability}
+				if a.StepName != "" {
+					item["step"] = a.StepName
+				}
 				if len(a.Input) > 0 {
 					item["input"] = a.Input
 				}
@@ -553,9 +556,15 @@ type agentDecisionJSON struct {
 }
 
 // planStepJSON is one entry of plan.steps (AGENT_V2 §Plan Actions).
+//
+// A step may name itself (`name`), which is what another step's input binds to:
+// "step:<name>.output.<key>". Its inputs arrive either as "inputs" (the AGENT_V2
+// shape: value or {"source": …}) or as "input" (the older shape, still read).
 type planStepJSON struct {
+	Name           string          `json:"name"`
 	Capability     string          `json:"capability"`
 	Input          json.RawMessage `json:"input"`
+	Inputs         json.RawMessage `json:"inputs"`
 	ExpectedEffect json.RawMessage `json:"expected_effect"`
 	EvidenceRefs   []string        `json:"evidence_refs"`
 }
@@ -605,7 +614,11 @@ func parseDecision(text string) (Decision, error) {
 	}
 	switch typ {
 	case "plan":
-		decision.Actions = planActions(parsePlanSteps(d.Plan))
+		actions, err := planActions(parsePlanSteps(d.Plan))
+		if err != nil {
+			return Decision{}, err
+		}
+		decision.Actions = actions
 	case "done", "blocked", "need_input":
 		// Nothing to execute: the decision's own outcome is the plan.
 	default:
@@ -614,8 +627,10 @@ func parseDecision(text string) (Decision, error) {
 	return decision, nil
 }
 
-// planActions turns every plan step into an action, preserving order.
-func planActions(steps []planStepJSON) []Action {
+// planActions turns every plan step into an action, preserving order. Inputs that
+// cannot be read (a binding that is neither of the two forms) are an error: a plan
+// the runtime cannot read is a plan it must not run (src/plan_input.go).
+func planActions(steps []planStepJSON) ([]Action, error) {
 	actions := make([]Action, 0, len(steps))
 	for _, step := range steps {
 		capName := strings.ToLower(strings.TrimSpace(step.Capability))
@@ -623,10 +638,15 @@ func planActions(steps []planStepJSON) []Action {
 		case "noop", "nothing", "none", "":
 			continue
 		}
+		inputs, err := planInputs(step)
+		if err != nil {
+			return nil, fmt.Errorf("plan step %s: %w", planStepLabel(step), err)
+		}
 		if f := activeCapabilityFactory(); f != nil && f.Has(capName) {
 			actions = append(actions, CapabilityAction{
 				Name:           capName,
-				Input:          planInputMap(step.Input),
+				StepName:       strings.TrimSpace(step.Name),
+				Inputs:         inputs,
 				ExpectedEffect: stepText(step.ExpectedEffect),
 				EvidenceRefs:   step.EvidenceRefs,
 			})
@@ -634,7 +654,43 @@ func planActions(steps []planStepJSON) []Action {
 		}
 		actions = append(actions, NothingAction{Reason: fmt.Sprintf("unknown capability %q", capName)})
 	}
-	return actions
+	return actions, nil
+}
+
+// planInputs reads a step's inputs: a literal value per key, or a binding saying
+// where the value comes from.
+func planInputs(step planStepJSON) (map[string]StepInput, error) {
+	raw := step.Inputs
+	if len(raw) == 0 || string(raw) == "null" {
+		raw = step.Input
+	}
+	out := map[string]StepInput{}
+	if len(raw) == 0 || string(raw) == "null" {
+		return out, nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("input: %w", err)
+	}
+	for key, entry := range entries {
+		var in StepInput
+		if err := json.Unmarshal(entry, &in); err != nil {
+			return nil, fmt.Errorf("input %q: %w", key, err)
+		}
+		out[key] = in
+	}
+	return out, nil
+}
+
+// planStepLabel names a step in an error about the plan itself.
+func planStepLabel(step planStepJSON) string {
+	if name := strings.TrimSpace(step.Name); name != "" {
+		return fmt.Sprintf("%q", name)
+	}
+	if cap := strings.TrimSpace(step.Capability); cap != "" {
+		return cap
+	}
+	return "(unnamed)"
 }
 
 // stepText renders a plan-step field the models fill with either a string or an
@@ -656,21 +712,6 @@ func stepText(raw json.RawMessage) string {
 		return ""
 	}
 	return string(b)
-}
-
-func planInputMap(raw json.RawMessage) map[string]string {
-	out := map[string]string{}
-	if len(raw) == 0 {
-		return out
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return out
-	}
-	for k, v := range m {
-		out[k] = fmt.Sprint(v)
-	}
-	return out
 }
 
 func extractJSONObject(text string) string {

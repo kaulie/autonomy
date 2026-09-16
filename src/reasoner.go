@@ -197,7 +197,7 @@ func (r *LocalReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reaso
 		Decision: Decision{
 			Type:    "plan",
 			Reason:  "local reason",
-			Actions: []Action{CapabilityAction{Name: "asset.change", Input: map[string]string{}}},
+			Actions: []Action{CapabilityAction{Name: "asset.change", Inputs: map[string]StepInput{}}},
 			Ctx:     ctx,
 		},
 	}, nil

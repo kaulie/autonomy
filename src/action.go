@@ -39,8 +39,14 @@ func (a NothingAction) Execute(ctx DecisionContext) (ActionResult, error) {
 
 // CapabilityAction looks up a registered capability and runs it.
 type CapabilityAction struct {
-	Name  string
-	Input map[string]string
+	// Name is the capability to call.
+	Name string
+	// StepName is what the plan calls this step, so another step's input can bind
+	// to it ("step:<name>.output.<key>"). It is empty for a plan that names none.
+	StepName string
+	// Inputs are the values the step calls the capability with: literals, or
+	// bindings to an earlier step's output / a World Model value (src/plan_input.go).
+	Inputs map[string]StepInput
 	// ExpectedEffect and EvidenceRefs come from the plan step (AGENT_V2): what the
 	// step is meant to change, and which evidence items justified it.
 	ExpectedEffect string
@@ -50,6 +56,7 @@ type CapabilityAction struct {
 func (a CapabilityAction) Execute(ctx DecisionContext) (ActionResult, error) {
 	record := ActionResult{
 		Capability:     strings.ToLower(strings.TrimSpace(a.Name)),
+		StepName:       strings.TrimSpace(a.StepName),
 		ExpectedEffect: a.ExpectedEffect,
 		EvidenceRefs:   a.EvidenceRefs,
 	}
@@ -62,22 +69,29 @@ func (a CapabilityAction) Execute(ctx DecisionContext) (ActionResult, error) {
 	if cap == nil {
 		return record, fmt.Errorf("unknown capability %q", a.Name)
 	}
-	in := copyStringMap(a.Input)
-	// The runtime deliberately does not default a workspace into the input: a
-	// capability that acts in place gets the workspace the plan gives it, and one
-	// that delegates to another agent (code_edit) must let that agent work in its
-	// own workspace instead of the caller's.
-	if ctx.Task != nil {
-		if in["task_id"] == "" && ctx.Task.ID != "" {
+	// The step's inputs are what the plan bound: literals as written, bindings
+	// resolved against the steps that already ran in this plan and the World Model.
+	// A binding that cannot be read fails the step here, before the capability is
+	// called — the report names the input and the source (src/plan_lineage.go).
+	in, err := resolveStepInputs(a.Inputs, ctx.StepOutputs)
+	if err != nil {
+		record.Input = in
+		record.Error = err.Error()
+		return record, err
+	}
+	// The runtime adds no input of its own except the task id, and only for a
+	// capability that declares it (code_edit attributes its worker's turns with
+	// it). Everything else a step takes has to be in the plan: an input no step
+	// bound is not looked up anywhere, and one the runtime would have to invent is
+	// not invented (see docs/execution-step.md, §Runtime Responsibility).
+	if ctx.Task != nil && ctx.Task.ID != "" && in["task_id"] == "" {
+		if fields, declared := declaredInputsOf(name); declared && fieldAccepts(fields, "task_id") {
 			in["task_id"] = ctx.Task.ID
-		}
-		if in["instruction"] == "" && in["goal"] == "" && ctx.Task.Description != "" {
-			in["instruction"] = ctx.Task.Description
 		}
 	}
 	// The record keeps the input the capability was actually called with, not the
-	// plan's raw step input: the task defaults the runtime added are part of what
-	// ran.
+	// plan's raw step input: a resolved binding is part of what ran, and the plan row
+	// keeps the binding (docs/execution-step.md).
 	record.Input = in
 	out, err := cap.Run(in)
 	// A failed capability may still have produced something; keep it verbatim.

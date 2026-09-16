@@ -67,6 +67,16 @@ func (r *Runtime) Execute(decision Decision) (Result, error) {
 	r.cycle = &decision.Ctx
 	defer func() { r.cycle = nil }()
 
+	// A plan's data dependencies are checked before the plan is written: every input
+	// a step binds has to name an earlier step's declared output or a World Model
+	// value, and every input the capability requires has to be supplied. A plan whose
+	// lineage does not line up does not run at all — nothing is executed against a
+	// value that was never going to arrive, and the planner gets the reason
+	// (src/plan_lineage.go, docs/execution-step.md).
+	if err := validatePlanLineage(decision.Actions); err != nil {
+		return Result{Err: err, Message: err.Error()}, err
+	}
+
 	planID, planned, err := r.recordPlan(decision)
 	if err != nil {
 		return Result{Err: err}, err
@@ -76,13 +86,18 @@ func (r *Runtime) Execute(decision Decision) (Result, error) {
 	}
 	result := Result{}
 	ran := make([]string, 0, len(decision.Actions))
+	// Each step runs with the steps before it in hand: that is what its input
+	// bindings resolve against (src/plan_lineage.go). The plan's own order is the
+	// lineage's horizon — a binding can never read a later step, nor another cycle's.
+	ctx := decision.Ctx
 	for i, action := range decision.Actions {
 		if action == nil {
 			continue
 		}
 		r.stepSessions = nil
 		started := time.Now()
-		record, err := action.Execute(decision.Ctx)
+		ctx.StepOutputs = result.Actions
+		record, err := action.Execute(ctx)
 		if err != nil {
 			record.Error = err.Error()
 		}
@@ -258,11 +273,21 @@ func plannedCapability(action Action) string {
 	return ""
 }
 
+// plannedInput renders the plan step's own input as JSON: the literals the planner
+// wrote, and its bindings as {"source":"…"} — the planner's raw input, which is what
+// the plan row keeps. What the capability was actually called with is the step's
+// record (execution_step.input), where the bindings are resolved
+// (docs/execution-step.md).
 func plannedInput(action Action) string {
-	if cap, ok := action.(CapabilityAction); ok {
-		return jsonObject(cap.Input)
+	step, ok := capabilityStep(action)
+	if !ok || len(step.Inputs) == 0 {
+		return "{}"
 	}
-	return "{}"
+	raw, err := json.Marshal(step.Inputs)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
 }
 
 func plannedExpectedEffect(action Action) string {
