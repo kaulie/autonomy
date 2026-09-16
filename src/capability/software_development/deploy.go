@@ -66,7 +66,7 @@ func (DeployService) Domain() string { return DeployDomain }
 func (DeployService) Provider() string { return DeployProvider }
 
 func (DeployService) Description() string {
-	return `trigger the deployment pipeline of a service at a specific branch: the deployment control plane packages that git ref, then deploys it. input: {"service":"<service id>","branch":"<branch/tag>"} ("ref" works too; an empty branch means the service's default branch). Returns as soon as the pipeline is accepted — it does not wait for packaging/deploying. output: {"pipeline_id":"<id>","state":"queued","service":"...","branch":"...","poll":"/api/pipelines/<id>"} (plus deployment/version once the pipeline has them)`
+	return `trigger the deployment pipeline of a service at a specific branch: the deployment control plane packages that git ref, then deploys it. input: {"service":"<service id>","branch":"<branch/tag>"} ("ref" works too; an empty branch means the service's default branch). Every call carries this runtime's deployment identity (identity_role/identity_id headers, default agent:autonomy; $IDENTITY_ROLE / $IDENTITY_ID override it) so the control plane records who triggered the deploy — no need to pass it. Returns as soon as the pipeline is accepted — it does not wait for packaging/deploying. output: {"pipeline_id":"<id>","state":"queued","service":"...","branch":"...","poll":"/api/pipelines/<id>"} (plus identity and deployment/version once the pipeline has them)`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
@@ -74,6 +74,8 @@ func (DeployService) Inputs() []spec.Field {
 	return []spec.Field{
 		{Name: "service", Aliases: []string{"service_id"}, Required: true, Description: "the service to deploy, by the id the deployment control plane knows it as"},
 		{Name: "branch", Aliases: []string{"ref"}, Description: "the git branch or tag to package; empty means the service's own default branch"},
+		{Name: "identity_role", Description: `who the deploy is attributed to, "user" or "agent" (deployment control plane phase-1 identity header). Normally leave empty: empty means $IDENTITY_ROLE, then "agent"`},
+		{Name: "identity_id", Description: `the caller's id, e.g. user_001 or agent_002 (header identity_id). Normally leave empty: empty means $IDENTITY_ID, then "autonomy" (this runtime's own identity)`},
 	}
 }
 
@@ -87,6 +89,7 @@ func (DeployService) Outputs() []spec.Field {
 		{Name: "deployment", Description: "the deployment the pipeline belongs to, once the control plane reports it"},
 		{Name: "version", Description: "the version being deployed, once the control plane reports it"},
 		{Name: "message", Description: "the control plane's own line about the accepted request"},
+		{Name: "identity", Description: "who the control plane recorded as the triggerer, role:id (e.g. agent:autonomy)"},
 	}
 }
 
@@ -99,6 +102,14 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 	// the service's own default branch. So it is passed through as-is (omitted).
 	branch := strings.TrimSpace(firstNonEmpty(in["branch"], in["ref"]))
 
+	// Who this deploy belongs to. Resolved before the request so a bad identity
+	// (a typo'd $IDENTITY_ROLE, an over-long $IDENTITY_ID) fails here with the
+	// reason, instead of the control plane's 401.
+	identity, err := resolveDeploymentIdentity(in)
+	if err != nil {
+		return nil, fmt.Errorf("service.deploy: %w", err)
+	}
+
 	body, err := json.Marshal(deployNotifyRequest{ServiceID: service, Ref: branch})
 	if err != nil {
 		return nil, fmt.Errorf("service.deploy: encode request: %w", err)
@@ -109,6 +120,9 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 		return nil, fmt.Errorf("service.deploy: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Phase-1 identity headers: every deploy-triggering call must say who
+	// triggered it, or the control plane refuses with 401.
+	identity.setHeaders(req)
 
 	client := c.HTTPClient
 	if client == nil {
@@ -144,6 +158,9 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 		"pipeline_id": job.RequestID,
 		"state":       job.State,
 		"poll":        firstNonEmpty(job.Poll, "/api/pipelines/"+job.RequestID),
+		// The control plane echoes what it recorded as the triggerer; fall back to
+		// the identity this call carried when an older control plane does not.
+		"identity": firstNonEmpty(job.TriggeredBy, identity.String()),
 	}
 	for k, v := range map[string]string{
 		"deployment": job.Deployment,
@@ -188,6 +205,10 @@ type deployPipeline struct {
 	Message         string `json:"message"`
 	Poll            string `json:"poll"`
 	DeployRequestID string `json:"deployRequestId"`
+	// TriggeredBy is the identity the control plane recorded for this pipeline
+	// ("role:id"), echoed back so the caller can see who it attributed the deploy
+	// to (phase-1 identity).
+	TriggeredBy string `json:"triggeredBy"`
 }
 
 // deployErrorDetail pulls the control plane's own error message out of a failed
