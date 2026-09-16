@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
 	"github.com/kaulie/autonomy/src/capability/deployment"
@@ -356,6 +357,49 @@ func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 	}
 	if len(srv.paths) != read {
 		t.Fatalf("the injected observer answered but the server was read: %v", srv.paths[read:])
+	}
+}
+
+// TestWatchHoldsOneAgentAndAsksItOnce: watching polls the deployment API itself and asks
+// the monitoring agent once, for the observation that settled — one deployment.monitor
+// call holds one agent, however many times it polls. task-27's watch acquired four (one
+// per poll) and threw three of their verdicts away with the snapshots they described.
+func TestWatchHoldsOneAgentAndAsksItOnce(t *testing.T) {
+	useRepoPrompt(t)
+	reads := 0
+	srv := newRecordingServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		reads++
+		state := "running"
+		if reads >= 3 {
+			state = "succeeded"
+		}
+		_, _ = io.WriteString(w, `{"state":"`+state+`"}`)
+	})
+	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
+	b := &fakeBroker{sess: sess}
+
+	out, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
+		"deployment": "p-watch", "endpoint": srv.URL,
+		"watch": "true", "interval": "1", "timeout": "30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.calls != 1 {
+		t.Fatalf("agents acquired=%d, want one agent for the whole call", b.calls)
+	}
+	if !sess.released {
+		t.Error("the agent was not released when the call ended")
+	}
+	if reads < 3 {
+		t.Fatalf("the deployment was read %d times, want the watch to have polled it", reads)
+	}
+	// The agent judged the observation that settled, not one of the polls on the way.
+	if !strings.Contains(sess.prompt, "succeeded") {
+		t.Fatalf("the agent was not shown the settled observation: %s", sess.prompt)
+	}
+	if out["state"] != "failed" {
+		t.Fatalf("state=%q, want the agent's own verdict (agentAnswerJSON says failed)", out["state"])
 	}
 }
 

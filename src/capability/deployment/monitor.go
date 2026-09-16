@@ -205,19 +205,44 @@ func (Monitor) Outputs() []spec.Field {
 	}
 }
 
-// observer picks the monitoring provider: an explicit one wins, then the
-// agent-backed observer when an agent broker is available, then the
-// deterministic HTTP reader. Which one it was is the capability's own wiring, not
-// part of the observation (an agent-backed observation is visible in this step's
-// interaction row).
-func (m Monitor) observer() Observer {
+// polling is who observes during one monitor call. poll runs every poll of a watch —
+// cheap and deterministic, with no agent behind it — and judge produces the one
+// observation the call returns and reports. judge is nil when both are the same
+// observer (the deterministic reader, or one the host injected).
+//
+// They differ only when the monitor delegates: an agent-backed monitor polls the
+// deployment API itself and asks its agent once, for the observation that settled. A
+// verdict on a poll in between would die with that snapshot — only the last one is
+// returned — and a worker agent per poll is one per poll, when one per call is what a
+// single observation is worth.
+type polling struct {
+	poll  Observer
+	judge Observer // nil: poll is the one asked for the result
+}
+
+// observation is the observer to ask for the result of this call.
+func (p polling) observation() Observer {
+	if p.judge != nil {
+		return p.judge
+	}
+	return p.poll
+}
+
+// observer picks the monitoring provider: an explicit one wins, then the agent-backed
+// observer when an agent broker is available, then the deterministic HTTP reader. Which
+// one it was is the capability's own wiring, not part of the observation (an agent-backed
+// observation shows as this step's interaction row: one row per agent, one agent per
+// call).
+func (m Monitor) observer() polling {
 	if m.Observer != nil {
-		return m.Observer
+		// The host's own observer is asked for every poll: its cost is its business.
+		return polling{poll: m.Observer}
 	}
 	if m.Agents != nil {
-		return &AgentObserver{Agents: m.Agents}
+		agent := &AgentObserver{Agents: m.Agents}
+		return polling{poll: agent.base(), judge: agent}
 	}
-	return NewHTTPObserver()
+	return polling{poll: NewHTTPObserver()}
 }
 
 // Run observes the deployment and turns that observation into a report: the
@@ -229,19 +254,23 @@ func (m Monitor) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	obs := m.observer()
-	snap, _, err := observe(obs, req, m.Sleep)
+	snap, _, err := observe(m.observer(), req, m.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
 	return report(snap, req, time.Now()), nil
 }
 
-// observe takes one snapshot, or — with Watch — polls until the deployment
-// reaches a terminal state or the window closes. The window is bounded twice
-// (poll count and wall clock) so a capability call can never block the decision
-// loop indefinitely.
-func observe(obs Observer, req Request, sleep func(context.Context, time.Duration) error) (Snapshot, int, error) {
+// observe takes one observation, or — with Watch — polls until the deployment reaches a
+// terminal state or the window closes. The window is bounded twice (poll count and wall
+// clock) so a capability call can never block the decision loop indefinitely.
+//
+// One observation asks the observer that decides (the agent, when the monitor delegates).
+// A watch polls `p.poll` — the deterministic reader, for a delegated monitor — and asks
+// `p.judge` once, when the observation is over, because the observation that settled is
+// the only one anybody sees. Either way one `deployment.monitor` call holds at most one
+// agent, and asks it once.
+func observe(p polling, req Request, sleep func(context.Context, time.Duration) error) (Snapshot, int, error) {
 	if sleep == nil {
 		sleep = defaultSleep
 	}
@@ -256,6 +285,15 @@ func observe(obs Observer, req Request, sleep func(context.Context, time.Duratio
 		timeout = 0
 	}
 	ctx := context.Background()
+
+	if !req.Watch {
+		snap, err := p.observation().Observe(ctx, req)
+		if err != nil {
+			return Snapshot{}, 1, err
+		}
+		return snap, 1, nil
+	}
+
 	deadline := time.Now().Add(timeout)
 	maxPolls := 1 + int(timeout/interval)
 	var last Snapshot
@@ -263,17 +301,17 @@ func observe(obs Observer, req Request, sleep func(context.Context, time.Duratio
 	polls := 0
 	for {
 		polls++
-		snap, err := obs.Observe(ctx, req)
+		snap, err := p.poll.Observe(ctx, req)
 		if err != nil {
 			lastErr = err
 		} else {
 			lastErr = nil
 			last = snap
-			if !req.Watch || snap.state().terminal() {
-				return snap, polls, nil
+			if snap.state().terminal() {
+				break
 			}
 		}
-		if !req.Watch || polls >= maxPolls || !time.Now().Before(deadline) {
+		if polls >= maxPolls || !time.Now().Before(deadline) {
 			break
 		}
 		if err := sleep(ctx, interval); err != nil {
@@ -283,7 +321,16 @@ func observe(obs Observer, req Request, sleep func(context.Context, time.Duratio
 	if lastErr != nil {
 		return Snapshot{}, polls, lastErr
 	}
-	return last, polls, nil
+	// The observation that settled is the one the judge is asked about: one agent per
+	// call, asked once, however many times the watch polled.
+	if p.judge == nil {
+		return last, polls, nil
+	}
+	snap, err := p.judge.Observe(ctx, req)
+	if err != nil {
+		return Snapshot{}, polls, err
+	}
+	return snap, polls, nil
 }
 
 func defaultSleep(ctx context.Context, d time.Duration) error {
