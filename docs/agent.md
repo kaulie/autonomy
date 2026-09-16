@@ -42,7 +42,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 
 每个 agent 自己的身份是提示词里**单独一节**（`{{AGENT}}`）：`## Agent` 先把"你是谁"说清楚，再附上结构化的一条记录 ——
 `role`（`planner` / `worker`）、worker 的 `purpose`、`id`、`name`、`backend`、`llm_provider`、`model`、`lifecycle`、`workspace`。
-三个 policy 文件（`AGENT_V2.md` / `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md`）都用这一节，取的值永远是**读到它的那个 agent 自己**的：
+四个 policy 文件（`AGENT_V2.md` / `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md` / `TURN_TRUNCATED.md`）都用这一节，取的值永远是**读到它的那个 agent 自己**的：
 planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方只以 `delegated_by` 出现在 Runtime Context 里
 （见 [delegation.md](delegation.md)）。
 

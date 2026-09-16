@@ -43,9 +43,11 @@ Capability Gap 时的政策分支示例：寻找现有 Provider / 安装 Skill /
   policy 不能重新定义 Task 或沙箱。
 - **读不出来要看得见**：文件不存在 = 这个 runtime 没有额外规则（不是错误）；文件存在但读不出来 =
   在 stderr 报出来且不生效 —— 提示词总得渲染，而读不到的规则必须可见，不能被悄悄执行或悄悄丢掉。
-- 示例：`{"deploy": "the Runtime's move, not the agent's"}`。coding worker 那一侧更具体的禁令
+- 示例：`{"deploy": "the Runtime's move, not the agent's"}` 与
+  `{"turn_output_budget": "one turn has a bounded output budget, …"}`。coding worker 那一侧更具体的禁令
   （不许 `bin/deploy.sh`、不许 `service.deploy`、不许 rollout restart）写在 `src/agent_policy/CODE_EDIT.md`
-  的 `### Deploy Policy` —— 一句话的边界给所有人，具体动作清单给有手的那个人。
+  的 `### Deploy Policy`，而"一个 tool 调用别写太大、文件分几次写"写在它的 `### Turn Budget Policy`
+  —— 一句话的边界给所有人，具体动作清单给有手的那个人。
 
 ## 不变式
 

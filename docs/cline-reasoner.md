@@ -64,6 +64,7 @@ runtime → bridge
 | `AUTONOMY_CLINE_NODE_BIN` | `node` | Node 可执行文件 |
 | `AUTONOMY_CLINE_BRIDGE_SCRIPT` | `src/clinesdk/bridge/bridge.mjs` | 桥脚本路径 |
 | `AUTONOMY_LLM_TIMEOUT` | `3m` | **run 空闲预算**：有事件就续期，静默超过它才中断 |
+| `AUTONOMY_LLM_TURN_RETRIES` | `1` | **被输出上限截断的 round 的重试次数**：worker 的 run 因 `Model reached the maximum output token limit…` 失败时，在**同一个 session** 上再发一轮 `src/agent_policy/TURN_TRUNCATED.md`（"从上一个完成的片段继续、这一轮小一点"）；`0` 关闭。turn 级的失败不该赔掉整次委派 —— 见"排查「输出被截断」" |
 
 **provider/model 的解析顺序**（SDK 两者都必填，缺了会内部 `undefined.trim()` 崩）：
 
@@ -211,6 +212,53 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
    事件持续流动不会打断长 run。
 4. 报错信息已经带提示：零事件时会是 `… (no SDK events arrived at all: check the provider status/quota
    for deepseek/deepseek-v4-pro; AUTONOMY_CLINE_TRACE=1 traces provider events)`。
+
+## 排查「Model reached the maximum output token limit before completing the turn」
+
+这条消息**不是 provider 的报错，而是 Cline SDK 自己的判定**：一个 turn 的 finish reason 是
+`max-tokens`、且这一轮**没有产出任何 tool call** 时，`@cline/agents` 把整个 run 判为失败
+（`node_modules/@cline/agents/dist/index.js` 里 `finishReason==="max-tokens" && toolCalls.length===0`
+那一句抛的就是这条消息）。也就是说：**这一轮的输出被输出上限截断了** —— 模型正在写的东西（多半是一个
+很大的 tool 调用）没写完，参数成了残 JSON，这一轮等于什么都没做，而 run 到此为止。
+
+一个真实例子（task-93989469290b4c4e，deepseek-v4-flash，54 次模型调用后失败）：
+
+| 观测 | 说明 |
+|---|---|
+| 同一轮里 `thinking` 13.5k 字符 + `editor` 入参 12.7k 字符 | 一轮里同时写了长思考和"整个文件一次写完"的编辑 |
+| 之后连续几轮 `tool_call_started` 的 `args` 是 `{}` | 入参被截成残 JSON，SDK 报 `emitted invalid JSON arguments` |
+| 最后一轮只有 178 字符的 thinking 就被切断 | 这一轮没有 tool call → SDK 抛错、run 结束 |
+
+**为什么会被截断**：SDK 给每次请求算的输出预算是
+`min(请求的 maxTokens 或模型 maxOutputTokens、contextWindow − 估算输入 − 1024)`（`@cline/llms` 的
+`bT()`；什么都没声明时默认 32000），所以有三类诱因：
+
+1. **一轮里塞太多**：整文件写入、把整个文件塞进 heredoc、或 pre-tool 思考太长 —— 本例就是这一类；
+2. **会话太长**：上下文逼近 `contextWindow` 时剩余输出预算被压到很小（SDK 会打
+   `Estimated prompt tokens exceed model context window`）；
+3. **模型/路由声明的输出很小**，或 provider 收不到 `max_tokens` 而用它自己的默认值。
+
+**怎么优化**（按性价比）：
+
+1. **让它分块写**：`src/agent_policy/CODE_EDIT.md` 的 *Turn Budget Policy* 和
+   `src/agent_policy/CONSTRAINTS.json` 的 `turn_output_budget` 把"一个 tool 调用约 ≤ 6000 字符 /
+   150 行、文件分几次写、pre-tool 思考保持短、被截断就从上一个完成的片段继续"写进 prompt。这两个
+   文件是渲染 prompt 时读的 policy 文件（planner 的 frame 与每个 worker 的 prompt 都带
+   `{{CONSTRAINTS}}`），改完不需要重新编译。
+2. **别让一次截断赔掉整次委派**：被截断是 **turn 级**的失败，session 是好的。`AUTONOMY_LLM_TURN_RETRIES`
+   （默认 `1`，`0` 关闭）会在 worker 的 run 因此失败时，在同一个 session 上再发一轮
+   `src/agent_policy/TURN_TRUNCATED.md`（"上一轮被截断、它什么都没跑、从上一个完成的片段继续、
+   这一轮小一点"）。失败的原始轮与重试各自一行 `reason_turns`（失败的 `status=error` +
+   `error_message` 保留），stderr 有 `[autonomy] truncated turn on <agent> (retry 1/1): …`；
+   其它失败（provider 报错、余额不足、会话丢了）不重试（`src/llm_turn_retry.go`）。
+3. **会话别拖太长**：一轮的输入越大，剩余输出预算越小。真跑到接近 `contextWindow` 时，换一次委派
+   （新的 `code_edit` 会拿到新的 worker session）比继续撑更划算。
+4. **模型/路由**：需要一次写大文件的任务换声明输出更大的模型（如 `deepseek-v4-pro`）。SDK 有
+   `maxTokensPerTurn` 这个参数，但桥目前不传 —— 要显式压/抬每轮上限时，就落在 bridge 的
+   `createAgent` 参数上（`src/clinesdk/bridge/bridge.mjs`）。
+
+**已知边界**：planner（`LLMReasoner` 的决策轮）目前**不**吃这个重试 —— 它的一轮要重出的是决策
+JSON，恢复方式与 worker 的"继续写代码"不同，留给后续。
 
 ## 已知边界（后续可做）
 

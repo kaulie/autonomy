@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -472,15 +473,34 @@ func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string
 	wd := llmrun.NewIdleWatchdog(ctx, idle)
 	defer wd.Stop()
 	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
-	trace := s.beginDelegatedTrace(prompt)
-	text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, ReasonModeAgent, trace.Emit)
-	if err != nil {
+
+	retries := turnRetryBudget()
+	for attempt := 0; ; attempt++ {
+		trace := s.beginDelegatedTrace(prompt)
+		text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, ReasonModeAgent, trace.Emit)
+		if err == nil {
+			runRes.RawOutput = text
+			trace.Finish(runRes)
+			return text, nil
+		}
 		trace.Finish(runRes)
-		return "", err
+		// A turn the model's output limit cut off is the one failed run worth
+		// another turn: the session is intact, nothing of the truncated turn ran,
+		// and the model can be told to finish the rest in smaller steps. Every
+		// other failure (a dead session, a provider error, an exhausted account)
+		// is reported as it always was.
+		if attempt >= retries || !isTruncatedTurn(err) {
+			return "", err
+		}
+		reminder, rerr := turnTruncatedPrompt(broker.WorkerFrame(s))
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] truncated turn on %s, no retry: %v\n", s.agent.Name, rerr)
+			return "", err
+		}
+		fmt.Fprintf(os.Stderr, "[autonomy] truncated turn on %s (retry %d/%d): %v — asking for the rest in smaller steps\n",
+			s.agent.Name, attempt+1, retries, err)
+		prompt = reminder
 	}
-	runRes.RawOutput = text
-	trace.Finish(runRes)
-	return text, nil
 }
 
 // recordAgentPrompt persists a complete agent-mode interaction in one shot. It
