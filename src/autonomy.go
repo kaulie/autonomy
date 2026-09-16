@@ -122,17 +122,17 @@ func (r *Autonomy) Run(task *Task) error {
 	agent.Start()
 	persistAgent(agent)
 
-	steps := 0
+	cycles := 0
 	var err error
 	var decision Decision
 	var result Result
 	var history []Result
 	for r.ShouldContinue(agent) {
-		steps++
-		if steps > r.maxSteps() {
+		cycles++
+		if cycles > r.maxSteps() {
 			break
 		}
-		decision, err = agent.DecideAtStep(steps, history)
+		decision, err = agent.DecideAtCycle(cycles, history)
 		if err != nil {
 			// Nothing was planned, so nothing else can explain it: the reason it
 			// could not decide is the whole failure.

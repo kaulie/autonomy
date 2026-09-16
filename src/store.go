@@ -69,7 +69,7 @@ const (
 type ReasonTurn struct {
 	TaskID      string
 	AgentID     int64
-	Step        int
+	Cycle       int
 	Mode        ReasonMode
 	LLMProvider LLMProvider
 	Model       string
@@ -136,7 +136,7 @@ type LLMMessage struct {
 	TurnID  int64
 	TaskID  string
 	AgentID int64
-	Step    int
+	Cycle   int
 	// Seq orders messages within one turn (user input = 0, assistant = 1).
 	Seq  int
 	Role LLMMessageRole
@@ -208,10 +208,10 @@ func persistReasonTurn(turn ReasonTurn) {
 // conversation turn. Both the decision reasoner and capability agent sessions
 // funnel through here so field handling stays consistent. rawOutput is the
 // model's verbatim response; the normalized form is derived at insert time.
-func recordReasonTurn(agent *Agent, taskID string, step int, mode ReasonMode, input, rawOutput string) {
+func recordReasonTurn(agent *Agent, taskID string, cycle int, mode ReasonMode, input, rawOutput string) {
 	turn := ReasonTurn{
 		TaskID:    taskID,
-		Step:      step,
+		Cycle:     cycle,
 		Mode:      mode,
 		Input:     input,
 		RawOutput: rawOutput,

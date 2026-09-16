@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS reason_turns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL DEFAULT '',
   agent_id INTEGER NOT NULL DEFAULT 0,
-  step INTEGER NOT NULL DEFAULT 0,
+  cycle INTEGER NOT NULL DEFAULT 0,
   mode TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS llm_messages (
   turn_id INTEGER NOT NULL DEFAULT 0,
   task_id TEXT NOT NULL DEFAULT '',
   agent_id INTEGER NOT NULL DEFAULT 0,
-  step INTEGER NOT NULL DEFAULT 0,
+  cycle INTEGER NOT NULL DEFAULT 0,
   seq INTEGER NOT NULL DEFAULT 0,
   role TEXT NOT NULL DEFAULT '',
   parent_id INTEGER,
@@ -154,19 +154,24 @@ CREATE TABLE IF NOT EXISTS llm_messages (
   created_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, step);
-CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, step);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(current_task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_events_turn_seq ON llm_events(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_run ON llm_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_events_kind ON llm_events(turn_id, channel, event_type);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_messages_turn_seq ON llm_messages(turn_id, seq);
 CREATE INDEX IF NOT EXISTS idx_llm_messages_parent ON llm_messages(parent_id);
-CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, step);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Indexes on the columns that older databases still call step: they are built
+	// after the rename below, or a legacy table would fail here ("no such column:
+	// cycle") before it ever got the chance to be migrated.
+	const ddlIndexedAfterRename = `
+CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, cycle);
+CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, cycle);
+CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle);
+`
 	if err := s.ensureAgentsIDSequence(); err != nil {
 		return fmt.Errorf("migrate agents.id sequence: %w", err)
 	}
@@ -174,6 +179,20 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, step);
 	// column (every task row until now) get it empty, which is what they know.
 	if err := s.ensureColumn("tasks", "error", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate tasks.error: %w", err)
+	}
+	// reason_turns.step / llm_messages.step counted decision cycles and are called
+	// cycle now: a step is one execution step of a plan (see docs/execution-step.md),
+	// and one word should not mean two things. Older databases are renamed in place
+	// — A SQLite RENAME COLUMN carries the data and rewrites the indexes that
+	// reference it, so nothing has to be copied.
+	for _, table := range []string{"reason_turns", "llm_messages"} {
+		if err := s.renameColumnIfPresent(table, "step", "cycle"); err != nil {
+			return fmt.Errorf("migrate %s.step→cycle: %w", table, err)
+		}
+	}
+	// Now that every database — migrated or fresh — has cycle, index it.
+	if _, err := s.db.Exec(ddlIndexedAfterRename); err != nil {
+		return fmt.Errorf("migrate cycle indexes: %w", err)
 	}
 
 	// reason_turns additions for databases that predate these columns. Fresh
@@ -333,6 +352,29 @@ func (s *SQLiteStore) ensureColumn(table, column, decl string) error {
 		return nil
 	}
 	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
+}
+
+// renameColumnIfPresent renames oldCol to newCol when the table still has the old
+// name and not the new one. SQLite rewrites the column's references (indexes,
+// triggers, views) as part of the rename, so the data and the indexes survive
+// without a copy. A fresh database already has newCol and skips this.
+func (s *SQLiteStore) renameColumnIfPresent(table, oldCol, newCol string) error {
+	hasOld, err := s.columnExists(table, oldCol)
+	if err != nil {
+		return err
+	}
+	if !hasOld {
+		return nil
+	}
+	hasNew, err := s.columnExists(table, newCol)
+	if err != nil {
+		return err
+	}
+	if hasNew {
+		return nil
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", table, oldCol, newCol))
 	return err
 }
 
@@ -515,14 +557,14 @@ WHERE id = ? AND deleted_at IS NULL
 
 // reasonTurnColumns lists the insertable reason_turns columns in the order
 // used by reasonTurnInsertArgs.
-const reasonTurnColumns = "task_id, agent_id, step, mode, llm_provider, model, llm_agent_id, " +
+const reasonTurnColumns = "task_id, agent_id, cycle, mode, llm_provider, model, llm_agent_id, " +
 	"input, raw_output, normalized_output, run_id, status, error_code, error_message, " +
 	"duration_ms, event_count, input_tokens, output_tokens, cache_read_tokens, " +
 	"cache_write_tokens, reasoning_tokens, total_tokens, cost_cents, started_at, ended_at, created_at"
 
 func reasonTurnInsertArgs(turn ReasonTurn) []any {
 	return []any{
-		turn.TaskID, turn.AgentID, turn.Step, string(turn.Mode), string(turn.LLMProvider), turn.Model,
+		turn.TaskID, turn.AgentID, turn.Cycle, string(turn.Mode), string(turn.LLMProvider), turn.Model,
 		turn.LLMAgentID, turn.Input, turn.RawOutput, turn.NormalizedOutput,
 		turn.RunID, turn.Status, turn.ErrorCode, turn.ErrorMessage,
 		turn.DurationMS, turn.EventCount, turn.InputTokens, turn.OutputTokens,
@@ -565,9 +607,9 @@ func insertMessageTx(tx *sql.Tx, msg LLMMessage) (int64, error) {
 		parent = msg.ParentID
 	}
 	res, err := tx.Exec(`INSERT OR IGNORE INTO llm_messages
-(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+(turn_id, task_id, agent_id, cycle, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.TurnID, msg.TaskID, msg.AgentID, msg.Step, msg.Seq, string(msg.Role), parent,
+		msg.TurnID, msg.TaskID, msg.AgentID, msg.Cycle, msg.Seq, string(msg.Role), parent,
 		msg.Content, msg.NormalizedContent, string(msg.LLMProvider), msg.Model, msg.RunID,
 		msg.Status, formatTime(msg.CreatedAt))
 	if err != nil {
@@ -604,7 +646,7 @@ func inputMessage(turnID int64, turn ReasonTurn) LLMMessage {
 		TurnID:      turnID,
 		TaskID:      turn.TaskID,
 		AgentID:     turn.AgentID,
-		Step:        turn.Step,
+		Cycle:       turn.Cycle,
 		Seq:         llmMessageSeqUser,
 		Role:        role,
 		Content:     turn.Input,
@@ -652,7 +694,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		TurnID:            turnID,
 		TaskID:            turn.TaskID,
 		AgentID:           turn.AgentID,
-		Step:              turn.Step,
+		Cycle:             turn.Cycle,
 		Seq:               llmMessageSeqAssistant,
 		Role:              LLMMessageRoleAssistant,
 		ParentID:          inputID,
@@ -814,8 +856,8 @@ func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res LLMRunResul
 	}
 	_, err := s.db.Exec(`
 INSERT OR IGNORE INTO llm_messages
-(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
-SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, ?, ?, ?
+(turn_id, task_id, agent_id, cycle, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+SELECT id, task_id, agent_id, cycle, ?, ?, ?, ?, ?, llm_provider, model, ?, ?, ?
 FROM reason_turns WHERE id = ?
 `, seq, string(LLMMessageRoleAssistant), parent,
 		res.RawOutput, normalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
@@ -849,8 +891,8 @@ func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []
 // stays one row with its original id.
 const upsertDerivedMessageSQL = `
 INSERT INTO llm_messages
-(turn_id, task_id, agent_id, step, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
-SELECT id, task_id, agent_id, step, ?, ?, ?, ?, ?, llm_provider, model, run_id, status, ?
+(turn_id, task_id, agent_id, cycle, seq, role, parent_id, content, normalized_content, llm_provider, model, run_id, status, created_at)
+SELECT id, task_id, agent_id, cycle, ?, ?, ?, ?, ?, llm_provider, model, run_id, status, ?
 FROM reason_turns WHERE id = ?
 ON CONFLICT(turn_id, seq) DO UPDATE SET
   role = excluded.role,
@@ -977,7 +1019,7 @@ FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 // Seq order. An assistant row's ParentID is the id of the user row it answers,
 // so a return can be traced back to its specific input.
 func (s *SQLiteStore) ListLLMMessages(turnID int64) ([]LLMMessage, error) {
-	rows, err := s.db.Query(`SELECT id, turn_id, task_id, agent_id, step, seq, role, parent_id,
+	rows, err := s.db.Query(`SELECT id, turn_id, task_id, agent_id, cycle, seq, role, parent_id,
 content, normalized_content, llm_provider, model, run_id, status, created_at
 FROM llm_messages WHERE turn_id = ? ORDER BY seq, id`, turnID)
 	if err != nil {
@@ -993,7 +1035,7 @@ FROM llm_messages WHERE turn_id = ? ORDER BY seq, id`, turnID)
 			parentID  sql.NullInt64
 			createdAt string
 		)
-		if err := rows.Scan(&m.ID, &m.TurnID, &m.TaskID, &m.AgentID, &m.Step, &m.Seq, &role,
+		if err := rows.Scan(&m.ID, &m.TurnID, &m.TaskID, &m.AgentID, &m.Cycle, &m.Seq, &role,
 			&parentID, &m.Content, &m.NormalizedContent, &provider, &m.Model, &m.RunID, &m.Status,
 			&createdAt); err != nil {
 			return nil, fmt.Errorf("scan llm message: %w", err)
@@ -1017,7 +1059,7 @@ FROM llm_messages WHERE turn_id = ? ORDER BY seq, id`, turnID)
 // becomes the assistant message linked to it. It is idempotent (only turns with
 // no messages yet are touched) and skips fully empty turns.
 func (s *SQLiteStore) backfillLLMMessages() error {
-	rows, err := s.db.Query(`SELECT t.id, t.task_id, CAST(t.agent_id AS INTEGER), t.step, t.llm_provider, t.model,
+	rows, err := s.db.Query(`SELECT t.id, t.task_id, CAST(t.agent_id AS INTEGER), t.cycle, t.llm_provider, t.model,
 t.input, t.raw_output, t.normalized_output, t.run_id, t.status, t.created_at
 FROM reason_turns t
 WHERE (t.input <> '' OR t.raw_output <> '')
@@ -1033,14 +1075,14 @@ WHERE (t.input <> '' OR t.raw_output <> '')
 	for rows.Next() {
 		var (
 			id, agentID            int64
-			step                   int
+			cycle                  int
 			taskID, provider       string
 			model                  string
 			input, raw, normalized string
 			runID, status          string
 			createdAt              string
 		)
-		if err := rows.Scan(&id, &taskID, &agentID, &step, &provider, &model, &input, &raw,
+		if err := rows.Scan(&id, &taskID, &agentID, &cycle, &provider, &model, &input, &raw,
 			&normalized, &runID, &status, &createdAt); err != nil {
 			rows.Close()
 			return err
@@ -1049,7 +1091,7 @@ WHERE (t.input <> '' OR t.raw_output <> '')
 			normalized = normalizeReasonOutput(raw)
 		}
 		pending = append(pending, pendingTurn{id: id, turn: ReasonTurn{
-			TaskID: taskID, AgentID: agentID, Step: step, LLMProvider: LLMProvider(provider), Model: model,
+			TaskID: taskID, AgentID: agentID, Cycle: cycle, LLMProvider: LLMProvider(provider), Model: model,
 			Input: input, RawOutput: raw, NormalizedOutput: normalized, RunID: runID, Status: status,
 			CreatedAt: parseTime(createdAt),
 		}})
@@ -1082,7 +1124,7 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 		derived[i].TurnID = turnID
 		derived[i].TaskID = turn.TaskID
 		derived[i].AgentID = turn.AgentID
-		derived[i].Step = turn.Step
+		derived[i].Cycle = turn.Cycle
 		derived[i].LLMProvider = turn.LLMProvider
 		derived[i].Model = turn.Model
 		derived[i].RunID = turn.RunID
@@ -1108,7 +1150,7 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 		TurnID:            turnID,
 		TaskID:            turn.TaskID,
 		AgentID:           turn.AgentID,
-		Step:              turn.Step,
+		Cycle:             turn.Cycle,
 		Seq:               len(derived) + 1,
 		Role:              LLMMessageRoleAssistant,
 		ParentID:          inputID,

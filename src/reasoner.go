@@ -108,7 +108,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("prompt_run", "begin session=%s", session)
 	tSend := time.Now()
-	trace := BeginLLMTrace(ctx.Agent, reasonTaskID(ctx), ctx.Step, ReasonModePlan, prompt)
+	trace := BeginLLMTrace(ctx.Agent, reasonTaskID(ctx), ctx.Cycle, ReasonModePlan, prompt)
 	text, runRes, err := ctx.Agent.PromptLLMStream(goCtx, prompt, ReasonModePlan, trace.Emit)
 	if err != nil {
 		trace.Finish(runRes)
@@ -167,7 +167,7 @@ func recordReasonIO(ctx DecisionContext, input, output string) {
 	// One-shot (non-streaming) recording: top-level decisions run in plan mode,
 	// while runtime capability prompts (recordAgentPrompt) run in agent mode.
 	// Streamed provider runs use BeginLLMTrace instead.
-	recordReasonTurn(agent, taskID, ctx.Step, ReasonModePlan, input, output)
+	recordReasonTurn(agent, taskID, ctx.Cycle, ReasonModePlan, input, output)
 }
 
 type LocalReasoner struct {

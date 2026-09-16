@@ -192,14 +192,14 @@ func (a *Agent) Observe(result Result) {
 }
 
 func (a *Agent) Decide() (Decision, error) {
-	return a.DecideAtStep(0, nil)
+	return a.DecideAtCycle(0, nil)
 }
 
-func (a *Agent) DecideAtStep(step int, history []Result) (Decision, error) {
+func (a *Agent) DecideAtCycle(cycle int, history []Result) (Decision, error) {
 	decision, err := a.DecideMaker.Decide(DecisionContext{
 		Task:    a.CurrentTask,
 		Agent:   a,
-		Step:    step,
+		Cycle:   cycle,
 		History: history,
 	})
 	if err != nil {

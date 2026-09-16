@@ -16,7 +16,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	defer store.Close()
 
 	handle, err := store.BeginReasonTurn(ReasonTurn{
-		TaskID: "t-msg", AgentID: 11, Step: 2, Mode: ReasonModeAgent,
+		TaskID: "t-msg", AgentID: 11, Cycle: 2, Mode: ReasonModeAgent,
 		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "what is 2+2?",
 	})
 	if err != nil {
@@ -42,7 +42,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	if in.Role != LLMMessageRoleUser || in.Content != "what is 2+2?" || in.Seq != llmMessageSeqUser {
 		t.Fatalf("input message=%+v", in)
 	}
-	if in.AgentID != 11 || in.TaskID != "t-msg" || in.Step != 2 || in.LLMProvider != LLMProviderCursor {
+	if in.AgentID != 11 || in.TaskID != "t-msg" || in.Cycle != 2 || in.LLMProvider != LLMProviderCursor {
 		t.Fatalf("input message metadata=%+v", in)
 	}
 	if in.ParentID != 0 {
@@ -97,7 +97,7 @@ func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
 
 	fenced := "```json\n{\"a\":1}\n```"
 	if err := store.InsertReasonTurn(ReasonTurn{
-		TaskID: "t-one", AgentID: 12, Step: 1, Mode: ReasonModePlan,
+		TaskID: "t-one", AgentID: 12, Cycle: 1, Mode: ReasonModePlan,
 		LLMProvider: LLMProviderCursor, Model: "composer-2",
 		Input: "plan it", RawOutput: fenced,
 	}); err != nil {
@@ -177,7 +177,7 @@ func TestBackfillLLMMessagesFromExistingTurns(t *testing.T) {
 	}
 	// Simulate a row written by the pre-message-table code path.
 	if _, err := store.db.Exec(`INSERT INTO reason_turns
-(task_id, agent_id, step, mode, llm_provider, model, input, raw_output, normalized_output, run_id, status, created_at)
+(task_id, agent_id, cycle, mode, llm_provider, model, input, raw_output, normalized_output, run_id, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"t-old", 3, 2, string(ReasonModeAgent), string(LLMProviderCursor), "composer-2",
 		"legacy in", "legacy out", "", "run-old", string(LLMStatusFinished), "2026-01-01T00:00:00Z"); err != nil {
@@ -246,7 +246,7 @@ func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
 	defer store.Close()
 
 	handle, err := store.BeginReasonTurn(ReasonTurn{
-		TaskID: "t-agg", AgentID: 7, Step: 1, Mode: ReasonModeAgent,
+		TaskID: "t-agg", AgentID: 7, Cycle: 1, Mode: ReasonModeAgent,
 		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "do it",
 	})
 	if err != nil {

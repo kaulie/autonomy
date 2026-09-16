@@ -43,7 +43,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		ID: 10001, Name: "agent-10001", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral,
 		Backend: AgentBackendCursor, Workspace: "/tmp/ws/",
 	}
-	ctx := DecisionContext{Task: task, Agent: agent, Step: 2}
+	ctx := DecisionContext{Task: task, Agent: agent, Cycle: 2}
 	prompt, err := buildReasoningPrompt(ctx, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		}
 	}
 	// What does change per cycle — which cycle this is — stays in the delta.
-	if !strings.Contains(delta, `"step": 2`) {
+	if !strings.Contains(delta, `"cycle": 2`) {
 		t.Fatalf("delta missing this cycle's step\n%s", delta)
 	}
 	if !strings.Contains(frame, reasoningDeltaMarker) {
