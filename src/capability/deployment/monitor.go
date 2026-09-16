@@ -42,8 +42,13 @@ const (
 	maxTail         = 500
 	defaultInterval = 5 * time.Second
 	minInterval     = time.Second
-	defaultTimeout  = 60 * time.Second
-	maxTimeout      = 10 * time.Minute
+	// trailMaxChanges / trailEvidenceLines bound what a watch hands its judge: the most
+	// recent changes are kept (older ones are counted), and a change that looks wrong
+	// carries at most this many log lines of evidence.
+	trailMaxChanges    = 24
+	trailEvidenceLines = 3
+	defaultTimeout     = 60 * time.Second
+	maxTimeout         = 10 * time.Minute
 	// stallAfter is how long a running deployment may go without its source
 	// reporting an update before the monitor calls it stalled.
 	stallAfter = 10 * time.Minute
@@ -228,11 +233,59 @@ func (p polling) observation() Observer {
 	return p.poll
 }
 
-// observerWithHistory is an Observer that can be told what the polls before it saw:
-// the agent-backed observer renders that as a timeline in its prompt, so the agent knows
-// the states in between without being asked about every poll.
+// observerWithHistory is an Observer that can be told what the polls before it saw, already
+// rendered as a timeline (pollTrail.render): the agent-backed observer puts it in its
+// prompt, so one question carries the changes in between instead of one question per poll.
 type observerWithHistory interface {
-	ObserveWithHistory(ctx context.Context, req Request, history []Snapshot) (Snapshot, error)
+	ObserveWithHistory(ctx context.Context, req Request, timeline string) (Snapshot, error)
+}
+
+// pollTrail is what a watch saw, as changes rather than as polls: one entry per poll that
+// differed materially from the one before it — a different state, phase, progress, message
+// or health, or a different local diagnosis. A watch may poll a hundred times while nothing
+// changes, and a hundred identical lines is not information; what a monitoring agent is
+// asked about is what changed, and the evidence around it.
+type pollTrail struct {
+	polls   int
+	changes []trailChange
+	dropped int
+	last    string
+}
+
+// trailChange is one material change: the observation, the local rules' signals for it, and
+// — when they found a problem — the log lines at the end of it.
+type trailChange struct {
+	Snapshot Snapshot
+	Signals  []string
+	Evidence []string
+}
+
+// observe records one poll, keeping it only when it changed something.
+func (t *pollTrail) observe(snap Snapshot, req Request, now time.Time) {
+	t.polls++
+	d := Diagnose(snap, now, req.Tail)
+	key := strings.Join([]string{string(snap.state()), snap.Phase, snap.Progress, snap.Message, fmt.Sprint(snap.Healthy), strings.Join(d.Signals, ",")}, "\x00")
+	if key == t.last {
+		return
+	}
+	t.last = key
+	change := trailChange{Snapshot: snap, Signals: d.Signals}
+	if d.Problem {
+		// The evidence a change rests on: the tail of that observation's logs, so a
+		// failure that appeared and went away is still in front of the agent.
+		change.Evidence = lastLines(snap.Logs, trailEvidenceLines)
+	}
+	t.changes = append(t.changes, change)
+	if len(t.changes) > trailMaxChanges {
+		t.changes = t.changes[1:]
+		t.dropped++
+	}
+}
+
+// render is the timeline that travels to the judge: how often the deployment was read, what
+// changed, and the evidence around the changes that looked wrong.
+func (t pollTrail) render(polls int) string {
+	return renderTrail(polls, t.changes, t.dropped)
 }
 
 // observer picks the monitoring provider: an explicit one wins, then the agent-backed
@@ -304,7 +357,7 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 	deadline := time.Now().Add(timeout)
 	maxPolls := 1 + int(timeout/interval)
 	var last Snapshot
-	var history []Snapshot
+	trail := pollTrail{}
 	var lastErr error
 	polls := 0
 	for {
@@ -318,9 +371,10 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 			if snap.state().terminal() {
 				break
 			}
-			// What this poll saw is kept for the judge, not discarded: the states a
-			// watch passed through are what a monitoring agent is being asked about.
-			history = append(history, snap)
+			// What the polls on the way saw is kept as *changes* — one entry per
+			// material difference, with the evidence around it — not as a poll log:
+			// a watch may poll a hundred times while nothing happens.
+			trail.observe(snap, req, time.Now())
 		}
 		if polls >= maxPolls || !time.Now().Before(deadline) {
 			break
@@ -335,7 +389,7 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 	// One judge, one question: the observation that settled, told what came before.
 	judge := p.observation()
 	if withHistory, ok := judge.(observerWithHistory); ok {
-		snap, err := withHistory.ObserveWithHistory(ctx, req, history)
+		snap, err := withHistory.ObserveWithHistory(ctx, req, trail.render(polls))
 		if err != nil {
 			return Snapshot{}, polls, err
 		}
@@ -349,6 +403,18 @@ func observe(p polling, req Request, sleep func(context.Context, time.Duration) 
 		return Snapshot{}, polls, err
 	}
 	return snap, polls, nil
+}
+
+// lastLines is the end of a log window: the evidence nearest the observation, bounded so
+// one long log cannot fill the prompt.
+func lastLines(logs []string, n int) []string {
+	if n <= 0 || len(logs) == 0 {
+		return nil
+	}
+	if len(logs) > n {
+		logs = logs[len(logs)-n:]
+	}
+	return logs
 }
 
 func defaultSleep(ctx context.Context, d time.Duration) error {

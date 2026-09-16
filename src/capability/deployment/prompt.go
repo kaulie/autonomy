@@ -63,12 +63,12 @@ func renderPrompt(tmpl string, own, frame map[string]string) string {
 // renderObservation renders the raw observation for the prompt: what the
 // deterministic reader saw (or why it saw nothing), what the polls before it saw when the
 // caller watched, and the log window.
-func renderObservation(req Request, snap Snapshot, err error, history []Snapshot) string {
+func renderObservation(req Request, snap Snapshot, err error, timeline string) string {
 	var b strings.Builder
 	if err != nil {
 		fmt.Fprintf(&b, "the raw reader failed: %v\n", err)
 	}
-	if timeline := renderTimeline(history); timeline != "" {
+	if timeline != "" {
 		b.WriteString(timeline)
 	}
 	fmt.Fprintf(&b, "deployment: %s\n", firstNonEmpty(snap.ID, req.Deployment))
@@ -105,29 +105,29 @@ func renderObservation(req Request, snap Snapshot, err error, history []Snapshot
 	return b.String()
 }
 
-// renderTimeline renders what a watch saw before the observation it is reporting: the
-// states it passed through, oldest first, with consecutive repeats collapsed into one line
-// — a watch may poll a hundred times, and a hundred identical lines is not information.
-//
-// It is how a monitoring agent is told what happened in between without being asked about
-// every poll: the polls are the deterministic reader's, and the agent is asked once.
-func renderTimeline(history []Snapshot) string {
-	if len(history) == 0 {
+// renderTrail renders what a watch hands its judge: how often the deployment was read, what
+// changed since the poll before it, and — for the changes that looked wrong — the log lines
+// the local rules found. It is what makes one question enough: the agent is not asked about
+// every poll, and the change that a hundred identical polls would have hidden is in front of
+// it, with the evidence that made it a change.
+func renderTrail(polls int, changes []trailChange, dropped int) string {
+	if len(changes) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("earlier observations (oldest first, repeats collapsed):\n")
-	for i := 0; i < len(history); {
-		run := 1
-		for i+run < len(history) && observationKey(history[i]) == observationKey(history[i+run]) {
-			run++
-		}
-		fmt.Fprintf(&b, "  - %s", observationLine(history[i]))
-		if run > 1 {
-			fmt.Fprintf(&b, " x%d until %s", run, observationStamp(history[i+run-1]))
+	fmt.Fprintf(&b, "the deployment was watched (%d poll(s), %d change(s), oldest first):\n", polls, len(changes)+dropped)
+	for _, change := range changes {
+		fmt.Fprintf(&b, "  - %s", observationLine(change.Snapshot))
+		if len(change.Signals) > 0 {
+			fmt.Fprintf(&b, " — signals: %s", strings.Join(change.Signals, ", "))
 		}
 		b.WriteString("\n")
-		i += run
+		for _, line := range change.Evidence {
+			fmt.Fprintf(&b, "      %s\n", line)
+		}
+	}
+	if dropped > 0 {
+		fmt.Fprintf(&b, "  (%d earlier change(s) not shown)\n", dropped)
 	}
 	return b.String()
 }
@@ -148,16 +148,10 @@ func observationLine(snap Snapshot) string {
 	return strings.Join(parts, " ")
 }
 
-// observationStamp is when a poll was taken, or "" when the reader did not say.
+// observationStamp is when a poll was taken, or a placeholder when the reader did not say.
 func observationStamp(snap Snapshot) string {
 	if snap.UpdatedAt.IsZero() {
 		return "(no timestamp)"
 	}
 	return snap.UpdatedAt.Format("15:04:05")
-}
-
-// observationKey is what makes two polls the same observation: the state and what the
-// deployment said about it, without the time (a repeat is a repeat however long it took).
-func observationKey(snap Snapshot) string {
-	return strings.Join([]string{string(snap.state()), snap.Phase, snap.Progress, snap.Message}, "\x00")
 }

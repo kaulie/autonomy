@@ -364,7 +364,7 @@ func TestMonitorObservesThroughTheReaderItHas(t *testing.T) {
 
 // TestWatchAsksTheAgentOnceAndTellsItWhatHappened: a watch polls the deployment API every
 // round (cheap, deterministic) and asks the monitoring agent **once**, when the observation
-// is over — handing it the states it passed through, because asking a model every five
+// is over — handing it the changes it passed through, because asking a model every five
 // seconds is one model call per five seconds. One deployment.monitor call holds one agent.
 func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
 	useRepoPrompt(t)
@@ -378,7 +378,7 @@ func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
 		if reads >= 3 {
 			state = "succeeded"
 		}
-		_, _ = io.WriteString(w, `{"state":"`+state+`","phase":"deploy","progress":"1/3"}`)
+		_, _ = io.WriteString(w, `{"state":"`+state+`","phase":"deploy"}`)
 	})
 	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
 	b := &fakeBroker{sess: sess}
@@ -397,10 +397,10 @@ func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
 		t.Fatalf("the agent was asked %d time(s), want once for the whole watch", len(sess.prompts))
 	}
 	prompt := sess.prompts[0]
-	// Asked once, and told what the polls on the way saw (the two running polls collapsed
-	// into one line), then asked about the observation that settled.
-	if !strings.Contains(prompt, "earlier observations") || !strings.Contains(prompt, "running") || !strings.Contains(prompt, "x2") {
-		t.Fatalf("the observation does not carry the states in between: %s", prompt)
+	// Asked once, told how often it was read and what changed (the two polls where nothing
+	// changed are not two lines), and asked about the observation that settled.
+	if !strings.Contains(prompt, "watched (3 poll(s), 1 change(s)") {
+		t.Fatalf("the observation does not say what the watch saw: %s", prompt)
 	}
 	if !strings.Contains(prompt, "state: succeeded") {
 		t.Fatalf("the observation is not the one that settled: %s", prompt)
@@ -410,6 +410,55 @@ func TestWatchAsksTheAgentOnceAndTellsItWhatHappened(t *testing.T) {
 	}
 	if out["state"] != "failed" {
 		t.Fatalf("state=%q, want the agent's own verdict (agentAnswerJSON says failed)", out["state"])
+	}
+}
+
+// TestWatchHandsItsJudgeWhatChangedAndItsEvidence: the polls where nothing changed are one
+// line — a change is what a monitoring agent is asked about — and a change that looked
+// wrong carries its evidence, so a failure that appeared mid-rollout and went away is still
+// in front of the agent when the deployment ends up succeeding.
+func TestWatchHandsItsJudgeWhatChangedAndItsEvidence(t *testing.T) {
+	useRepoPrompt(t)
+	reads := 0
+	srv := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			if reads < 3 {
+				_, _ = io.WriteString(w, `{"lines":["applying revision 2","container terminated: OOMKilled (limit 512Mi)"]}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"lines":[]}`)
+			return
+		}
+		reads++
+		state := "running"
+		if reads >= 3 {
+			state = "succeeded"
+		}
+		_, _ = io.WriteString(w, `{"state":"`+state+`"}`)
+	})
+	sess := &fakeSession{id: "agent-deployment.monitor-1", answer: agentAnswerJSON}
+	b := &fakeBroker{sess: sess}
+
+	if _, err := (deployment.Monitor{Agents: b, Sleep: func(context.Context, time.Duration) error { return nil }}).Run(map[string]string{
+		"deployment": "p-flap", "endpoint": srv.URL,
+		"watch": "true", "interval": "1", "timeout": "30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.prompts) != 1 {
+		t.Fatalf("the agent was asked %d time(s), want once", len(sess.prompts))
+	}
+	prompt := sess.prompts[0]
+	if !strings.Contains(prompt, "signals: oom") {
+		t.Fatalf("the change the local rules found was not handed on: %s", prompt)
+	}
+	// The evidence of that change: the logs it rested on are gone from the settled
+	// observation, so this can only have come from the trail.
+	if !strings.Contains(prompt, "OOMKilled") {
+		t.Fatalf("the evidence around the change was not handed on: %s", prompt)
+	}
+	if !strings.Contains(prompt, "state: succeeded") {
+		t.Fatalf("the observation is not the one that settled: %s", prompt)
 	}
 }
 
