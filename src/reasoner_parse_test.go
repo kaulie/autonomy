@@ -710,9 +710,20 @@ func TestParseDecisionReadsStepNamesAndBindings(t *testing.T) {
 		t.Fatalf("method=%+v, want the literal", land.Inputs["method"])
 	}
 
-	// A binding that is neither form is a plan the runtime refuses to read.
-	broken := "```json\n" + `{"type":"plan","plan":{"steps":[{"capability":"code_edit","inputs":{"instruction":{"value":"rename"}}}]}}` + "\n```"
-	if _, err := parseDecision(broken); err == nil || !strings.Contains(err.Error(), "names no source") {
+	// An input that is neither a value nor a binding is a plan the runtime refuses to
+	// read — and a scalar is a value (a model writing `300` means 300).
+	broken := "```json\n" + `{"type":"plan","plan":{"steps":[{"capability":"code_edit","inputs":{"instruction":{"spec":"rename"}}}]}}` + "\n```"
+	if _, err := parseDecision(broken); err == nil || !strings.Contains(err.Error(), "names neither a source nor a value") {
 		t.Fatalf("err=%v, want the malformed input refused", err)
+	}
+
+	scalar := "```json\n" + `{"type":"plan","plan":{"steps":[{"name":"monitor","capability":"deployment.monitor","inputs":{"deployment":"p-1","timeout":300}}]}}` + "\n```"
+	parsed, err := parseDecision(scalar)
+	if err != nil {
+		t.Fatalf("a numeric input was refused: %v", err)
+	}
+	monitor, _ := parsed.Actions[0].(CapabilityAction)
+	if monitor.Inputs["timeout"].Literal != "300" {
+		t.Fatalf("timeout=%+v, want the value as text", monitor.Inputs["timeout"])
 	}
 }

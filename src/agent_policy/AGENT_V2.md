@@ -282,7 +282,9 @@ sources, and nothing else is one:
 
 - `"branch": "main"` — **a literal you wrote**. You are its source: write one for
   text that is yours (an instruction, a value the task or the user gave you), never
-  as a stand-in for a value you have not got.
+  as a stand-in for a value you have not got. A literal is any JSON scalar — a string,
+  a number (`300`), `true` / `false` — and the capability reads it as text; an object
+  is a binding (or `{"value": 300}` when you mean a value), not a literal.
 - `{"source": "step:<name>.output.<key>"}` — an output of a step **earlier in this
   same plan**, under a key that step's capability declares (Constructs → `output`).
 - `{"source": "world_model:asset.<id>.<kind|state>"}` — a value the World Model
