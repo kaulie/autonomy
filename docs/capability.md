@@ -41,12 +41,23 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 | 文件 | 占位符 | 说明 |
 |---|---|---|
 | `$PROJECT_ROOT/src/agent_policy/AGENT_V2.md` | `{{TASK}}` / `{{RUNTIME_CONTEXT}}` … | planner 的 policy（见 [agent.md](agent.md)） |
-| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
-| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
+| `$PROJECT_ROOT/src/agent_policy/CODE_EDIT.md` | `{{WORKSPACE}}` / `{{GOAL}}` + 整套 frame：`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` | `code_edit` 委托给 worker 的提示词（见 [delegation.md](delegation.md)） |
+| `$PROJECT_ROOT/src/agent_policy/DEPLOYMENT_MONITOR.md` | `{{DEPLOYMENT}}` / `{{STATUS_URL}}` / `{{OBSERVATION}}` … + `{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` | `deployment.monitor` 委托给监控 agent 的提示词（见 [deployment-monitor.md](deployment-monitor.md)） |
 
 改措辞只要改文件、重跑即生效（不用重新编译）；文件缺失时该次委托直接失败（不会先建 agent 再没法 prompt）。
 
-**worker 和 planner 共用一套占位符词表**：`{{WORLD}}` / `{{RUNTIME_CONTEXT}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}` / `{{COMPLETION_PRINCIPLES}}`（以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）由同一个渲染器出（`src/prompt.go`），所以被委托的 worker 看到的世界、构造、完成原则和 planner 看到的是同一份。差别只有视角：worker 那份按**它自己**渲染 —— agent 身份 / workspace / backend 是 worker 的（委托方的沙箱永远不会被说成 worker 的，委托方以 `delegated_by` 出现），Task 与 `previous_actions` 是它被委托的那条 Task。取值经由 `broker.WorkerPromptContext`（`Runtime.AcquireAgent` 发出的 session 实现它，`Runtime.WorkerPlaceholders`）传下去；取不到的 host（测试替身）则该节渲染成 `(not provided by this runtime)`，而不是把 `{{NAME}}` 原样丢给模型。
+**凡是「需要 agent」的能力，交给这个 agent 的提示词都注入委托方 runtime 的 frame**：`{{WORLD}}` /
+`{{RUNTIME_CONTEXT}}` / `{{COMPLETION_PRINCIPLES}}` / `{{CONSTRAINTS}}` / `{{CONSTRUCTS}}`
+（以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）—— `code_edit` 与 `deployment.monitor`
+都一样。词表、取值与渲染规则只有一份，在 `src/capability/broker`（`WorkerFramePlaceholders` /
+`WorkerFrame` / `RenderWorkerPrompt`）：取值来自 planner 用的同一个渲染器（`src/prompt.go`，
+`broker.WorkerPromptContext` 由 `Runtime.AcquireAgent` 发出的 session 实现，见 `Runtime.WorkerPlaceholders`），
+所以被委托的 agent 看到的世界、完成原则和 planner 看到的是同一份。差别只有视角：worker 那份按**它自己**渲染
+—— agent 身份 / workspace / backend 是 worker 的（委托方的沙箱永远不会被说成 worker 的，委托方以
+`delegated_by` 出现），Task 与 `previous_actions` 是它被委托的那条 Task。host 取不到（测试替身）则该节渲染成
+`(not provided by this runtime)`，而不是把 `{{NAME}}` 原样丢给模型；能力自己的占位符（`{{WORKSPACE}}` /
+`{{GOAL}}`、监控用的 URL）永远由该能力自己填。不拿 agent 的能力（`pull_request.review` /
+`service.deploy`）没有 frame：它们是确定性调用，值只走输入与环境。
 
 ## `service.deploy`（触发指定服务、指定分支的流水线部署）
 
@@ -57,16 +68,20 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 
-## `pull_request.review`（按分支对合入 PR）
+## `pull_request.review`（按 PR 本身或分支对合入 PR）
 
-- 语义：把「`from` 分支开向 `to` 分支的那个 PR」**合入**。合入 ≠ 写代码：`code_edit` 负责产出 PR（也可以合自己开的那条，见 `src/agent_policy/CODE_EDIT.md`），而这个能力是通用的那一个 —— 谁来开的 PR 都合。
-- 输入：`{"from":"<head/topic 分支>","to":"<base 分支>"}`（`from_branch`/`head`、`to_branch`/`base` 亦可；`to` 留空 = 主干：`PR_BASE_BRANCH` → 仓库自己的 `default_branch` → `main`）。可选 `method`：`merge`（默认）/ `squash` / `rebase`。
+- 语义：把**指定的那个 PR** 合入它的 base 分支。合入 ≠ 写代码：`code_edit` 负责产出 PR（也可以合自己开的那条，见 `src/agent_policy/CODE_EDIT.md`），而这个能力是通用的那一个 —— 谁来开的 PR 都合。
+- 指名方式有两种，**给 PR 自己的引用最直接**（`code_edit` 的报告里就有这个 URL）：
+  - `{"pr":"https://github.com/owner/name/pull/43"}`（`pr_url` / `pull_request` 亦可）：按编号直接读这个 PR，**不做分支对查询**，head/base 以 PR 自己为准。认得的写法：`https://<host>/owner/name/pull/43`（任意 host；`/pulls/43`、结尾 `/`、`?query`、`#discussion_r1` 都认）、`owner/name#43`、以及 `43` / `#43`（仓库另有出处时）。
+  - `{"from":"<head/topic 分支>","to":"<base 分支>"}`（`from_branch`/`head`、`to_branch`/`base` 亦可；`to` 留空 = 主干：`PR_BASE_BRANCH` → 仓库自己的 `default_branch` → `main`）。
+- 可选 `method`：`merge`（默认）/ `squash` / `rebase`。
 - 输出：`{"from","to","number","pr","merged":"true","method","sha","checks"}`；`sha` 是主干上那个合并提交，`checks` 是 `passed` / `none`。
 - **是代码，不是 agent**：合入是确定性动作（触发已知、结果可验证），所以直接走 GitHub REST API，不拿 worker（对比 `code_edit` / `deployment.monitor` 的委托）。
-- **拒绝也是契约**（绝不硬合，原因原样返回）：`not_found`（该分支对没有开着的 PR）、`draft`、`conflict`（`mergeable_state=dirty`）、`checks_failed`（点名失败的 check）、`checks_pending`（还没跑完，下一轮再问）、`blocked`（branch protection 不满足）。
+- **拒绝也是契约**（绝不硬合，原因原样返回）：`not_found`（该分支对没有开着的 PR，或该编号的 PR 已经不在）、`draft`、`conflict`（`mergeable_state=dirty`）、`checks_failed`（点名失败的 check）、`checks_pending`（还没跑完，下一轮再问）、`blocked`（branch protection 不满足）。
+- **读不懂的引用是失败，不是猜**：给了 `pr` 但解析不出 PR（例如只给了仓库 URL、`owner/name`、`#abc`、没有编号）在**发出任何请求之前**就报 `cannot read a pull request from ...`；给了 `pr` 又给了互相矛盾的 `repo` / `from` / `to`（同一个调用点了两件不同的东西）也一样拒绝 —— 静默合掉其中一个正是这个能力不该有的行为。
 - 合入时把**刚检查过的那个 head commit** 一并交给 GitHub（`sha`）：期间分支被人推了新提交，GitHub 会拒（409），而不是把没人看过的提交合进去。
 - 没配 CI 的仓库视为通过（报 `checks: none`）—— 不是失败，只是没有东西要等。
-- 配置：`GITHUB_TOKEN`（或 `GH_TOKEN`）必需；仓库取 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
+- 配置：`GITHUB_TOKEN`（或 `GH_TOKEN`）必需；仓库取 PR 引用 → 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
 
 ## 不变式
 

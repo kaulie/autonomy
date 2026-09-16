@@ -22,6 +22,8 @@ type ghStub struct {
 	repoBody        string
 	pullsStatus     int
 	pullsBody       string
+	pullStatus      int
+	pullBody        string
 	checkRunsStatus int
 	checkRunsBody   string
 	statusStatus    int
@@ -43,11 +45,14 @@ type ghRequest struct {
 }
 
 // newGitHubStub answers like a healthy repository: one open, mergeable pull
-// request whose single check passed and whose merge succeeds.
+// request whose single check passed and whose merge succeeds. The branch-pair
+// path finds it through the list endpoint and the pull-request path through the
+// one-pull-request endpoint, so both read the same state.
 func newGitHubStub() *ghStub {
 	return &ghStub{
 		repoBody:      `{"full_name":"kaulie/autonomy","default_branch":"main"}`,
 		pullsBody:     `[{"number":70,"html_url":"https://github.com/kaulie/autonomy/pull/70","title":"a change","draft":false,"mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/x","sha":"head1sha"},"base":{"ref":"main"}}]`,
+		pullBody:      `{"number":70,"html_url":"https://github.com/kaulie/autonomy/pull/70","title":"a change","draft":false,"mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/x","sha":"head1sha"},"base":{"ref":"main"}}`,
 		checkRunsBody: `{"total_count":1,"check_runs":[{"name":"ci","status":"completed","conclusion":"success"}]}`,
 		statusBody:    `{"state":"success","total_count":0}`,
 		mergeBody:     `{"sha":"merge1sha","merged":true,"message":"Pull request successfully merged"}`,
@@ -83,11 +88,37 @@ func (s *ghStub) answer(path string) (int, string) {
 		return statusOr(s.statusStatus), bodyOr(s.statusBody)
 	case strings.HasSuffix(path, "/merge"):
 		return statusOr(s.mergeStatus), bodyOr(s.mergeBody)
+	case onePullPath(path):
+		return statusOr(s.pullStatus), bodyOr(s.pullBody)
 	case strings.HasSuffix(path, "/pulls"):
 		return statusOr(s.pullsStatus), bodyOr(s.pullsBody)
 	default:
 		return statusOr(s.repoStatus), bodyOr(s.repoBody)
 	}
+}
+
+// onePullPath reports whether path is the one-pull-request endpoint
+// (/repos/<owner>/<name>/pulls/<number>) — what a caller that named the pull
+// request outright reads, instead of listing by branch pair.
+func onePullPath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 3 || parts[len(parts)-2] != "pulls" {
+		return false
+	}
+	return pullNumber(parts[len(parts)-1])
+}
+
+// pullNumber reports whether s is a pull request number: digits only, never zero.
+func pullNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != "0"
 }
 
 func statusOr(status int) int {
@@ -186,6 +217,214 @@ func TestPullRequestReviewMergesTheBranchPair(t *testing.T) {
 	}
 }
 
+// TestPullRequestReviewMergesThePullRequestTheURLNames: the pull request URL
+// everyone already has — the one a code_edit report names — is enough to land it.
+// No branch pair is involved and no list lookup is made: the pull request is read
+// by number, and its own branches are what the gates and the answer use.
+func TestPullRequestReviewMergesThePullRequestTheURLNames(t *testing.T) {
+	stub := newGitHubStub()
+	out, err := review(t, stub, map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/70"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if looks := stub.calls(http.MethodGet, "/pulls"); len(looks) != 0 {
+		t.Errorf("looked the pull request up by branch pair anyway: %+v", looks)
+	}
+	reads := stub.calls(http.MethodGet, "/repos/kaulie/autonomy/pulls/70")
+	if len(reads) != 1 {
+		t.Fatalf("by-number reads=%d want 1 (%+v)", len(reads), stub.requests)
+	}
+	merges := stub.calls(http.MethodPut, "/merge")
+	if len(merges) != 1 || merges[0].path != "/repos/kaulie/autonomy/pulls/70/merge" {
+		t.Fatalf("merge calls=%+v want one at /repos/kaulie/autonomy/pulls/70/merge", merges)
+	}
+	if got := merges[0].body["sha"]; got != "head1sha" {
+		t.Errorf("merge sha=%q want the checked head commit head1sha", got)
+	}
+	want := map[string]string{
+		"from":   "feature/x",
+		"to":     "main",
+		"number": "70",
+		"pr":     "https://github.com/kaulie/autonomy/pull/70",
+		"merged": "true",
+		"sha":    "merge1sha",
+		"checks": "passed",
+	}
+	for k, v := range want {
+		if out[k] != v {
+			t.Errorf("out[%q]=%q want %q", k, out[k], v)
+		}
+	}
+}
+
+// TestPullRequestReviewReadsThePullReferencesItAccepts: the shapes a caller
+// reasonably has for a pull request all name the same one; a reference that does
+// not carry a repository takes the one the caller is working in ("repo" /
+// GITHUB_REPOSITORY / GIT_REPO_URL).
+func TestPullRequestReviewReadsThePullReferencesItAccepts(t *testing.T) {
+	for _, ref := range []string{
+		"https://github.com/kaulie/autonomy/pull/70",
+		"https://github.com/kaulie/autonomy/pull/70/",
+		"https://github.com/kaulie/autonomy/pull/70#discussion_r1",
+		"https://github.com/kaulie/autonomy/pull/70/files?diff=split",
+		"https://github.example.com/kaulie/autonomy/pulls/70",
+		"kaulie/autonomy#70",
+		// Without a repository in the reference, the one the caller is working
+		// in is used (the test helper sets GITHUB_REPOSITORY).
+		"70",
+		"#70",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			stub := newGitHubStub()
+			out, err := review(t, stub, map[string]string{"pr": ref})
+			if err != nil {
+				t.Fatalf("Run(%q): %v", ref, err)
+			}
+			if reads := stub.calls(http.MethodGet, "/repos/kaulie/autonomy/pulls/70"); len(reads) != 1 {
+				t.Fatalf("by-number reads=%+v want one at /repos/kaulie/autonomy/pulls/70 (%+v)", reads, stub.requests)
+			}
+			if merges := stub.calls(http.MethodPut, "/repos/kaulie/autonomy/pulls/70/merge"); len(merges) != 1 {
+				t.Fatalf("merge calls=%+v want one for pull request 70 in kaulie/autonomy", merges)
+			}
+			if out["number"] != "70" {
+				t.Errorf("number=%q want 70", out["number"])
+			}
+		})
+	}
+}
+
+// TestPullRequestReviewAlsoTakesThePullRequestURLUnderItsOwnName: "pr_url" and
+// "pull_request" are the same input as "pr".
+func TestPullRequestReviewAlsoTakesThePullRequestURLUnderItsOwnName(t *testing.T) {
+	for _, key := range []string{"pr", "pr_url", "pull_request"} {
+		t.Run(key, func(t *testing.T) {
+			stub := newGitHubStub()
+			if _, err := review(t, stub, map[string]string{key: "https://github.com/kaulie/autonomy/pull/70"}); err != nil {
+				t.Fatalf("Run with %s: %v", key, err)
+			}
+			if merges := stub.calls(http.MethodPut, "/merge"); len(merges) != 1 {
+				t.Fatalf("merge calls=%+v want one", merges)
+			}
+		})
+	}
+}
+
+// TestPullRequestReviewRefusesAnUnreadablePullReference: a reference that is
+// there but is not a pull request is a failure, not something to guess at — and
+// nothing at all is called while deciding that.
+func TestPullRequestReviewRefusesAnUnreadablePullReference(t *testing.T) {
+	for _, ref := range []string{
+		"https://github.com/kaulie/autonomy",        // a repository, not a pull request
+		"kaulie/autonomy",                           // nor this
+		"kaulie/autonomy#abc",                       // a fragment that is not a number
+		"github.com/kaulie/autonomy/pull/70",        // a host without a scheme cannot be read as owner/name
+		"https://github.com/kaulie/autonomy/pull/",  // no number
+		"https://github.com/kaulie/autonomy/pull/0", // pull requests are numbered from one
+	} {
+		t.Run(ref, func(t *testing.T) {
+			stub := newGitHubStub()
+			_, err := review(t, stub, map[string]string{"pr": ref})
+			if err == nil || !strings.Contains(err.Error(), "cannot read a pull request") {
+				t.Fatalf("err=%v want an unreadable pull request reference", err)
+			}
+			if len(stub.requests) != 0 {
+				t.Errorf("called GitHub while reading a reference it cannot use: %+v", stub.requests)
+			}
+		})
+	}
+}
+
+// TestPullRequestReviewRefusesWhenTheReferenceAndTheInputsDisagree: a call that
+// names two different things must not land one of them silently.
+func TestPullRequestReviewRefusesWhenTheReferenceAndTheInputsDisagree(t *testing.T) {
+	const ref = "https://github.com/kaulie/autonomy/pull/70"
+	cases := []struct {
+		name string
+		in   map[string]string
+		want string
+	}{
+		{"another repository", map[string]string{"pr": ref, "repo": "kaulie/other"}, `the pull request url names kaulie/autonomy but "repo" says kaulie/other`},
+		{"another head branch", map[string]string{"pr": ref, "from": "feature/y"}, "is from feature/x, not from feature/y"},
+		{"another base branch", map[string]string{"pr": ref, "to": "release"}, "targets main, not release"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newGitHubStub()
+			_, err := review(t, stub, tc.in)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want it to mention %q", err, tc.want)
+			}
+			if merges := stub.calls(http.MethodPut, "/merge"); len(merges) != 0 {
+				t.Errorf("merged despite a disagreement: %+v", merges)
+			}
+		})
+	}
+}
+
+// TestPullRequestReviewAgreesWithThePullRequestItNamed: passing the branches the
+// pull request really has is not a disagreement — the repository matches
+// whatever its case — and the merge still happens.
+func TestPullRequestReviewAgreesWithThePullRequestItNamed(t *testing.T) {
+	stub := newGitHubStub()
+	if _, err := review(t, stub, map[string]string{
+		"pr":   "https://github.com/kaulie/autonomy/pull/70",
+		"repo": "KAULIE/autonomy",
+		"from": "feature/x",
+		"to":   "main",
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if merges := stub.calls(http.MethodPut, "/merge"); len(merges) != 1 {
+		t.Fatalf("merge calls=%+v want one", merges)
+	}
+}
+
+// TestPullRequestReviewReportsAPullRequestThatIsNotThere: a pull request that is
+// gone (already merged, or never there) comes back as not_found — the planner's
+// cue that there is nothing left to land — instead of as an HTTP status.
+func TestPullRequestReviewReportsAPullRequestThatIsNotThere(t *testing.T) {
+	stub := newGitHubStub()
+	stub.pullStatus = http.StatusNotFound
+	stub.pullBody = `{"message":"Not Found"}`
+	_, err := review(t, stub, map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/70"})
+	if err == nil || !strings.Contains(err.Error(), "not_found") {
+		t.Fatalf("err=%v want not_found", err)
+	}
+	if merges := stub.calls(http.MethodPut, "/merge"); len(merges) != 0 {
+		t.Errorf("merged a pull request that is not there: %+v", merges)
+	}
+}
+
+// TestPullRequestReviewGatesTheNamedPullRequestToo: naming the pull request by
+// its URL is another way to find it, not a way around the gates.
+func TestPullRequestReviewGatesTheNamedPullRequestToo(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"a draft", pullObject(true, `true`, "clean"), "draft"},
+		{"a conflict", pullObject(false, `false`, "dirty"), "conflict"},
+		{"branch protection", pullObject(false, `true`, "blocked"), "blocked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newGitHubStub()
+			stub.pullBody = tc.body
+			out, err := review(t, stub, map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/70"})
+			if err == nil {
+				t.Fatalf("Run merged (%v); want a refusal", out)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not mention %q", err.Error(), tc.want)
+			}
+			if merges := stub.calls(http.MethodPut, "/merge"); len(merges) != 0 {
+				t.Errorf("a pull request that failed a gate was merged anyway: %+v", merges)
+			}
+		})
+	}
+}
+
 // TestPullRequestReviewDefaultsToTheTrunk: an empty `to` means the trunk, and the
 // trunk is what the repository says it is — not a branch name hard-coded here.
 func TestPullRequestReviewDefaultsToTheTrunk(t *testing.T) {
@@ -252,12 +491,19 @@ func TestPullRequestReviewHonoursTheMergeMethod(t *testing.T) {
 	}
 }
 
-// pullJSON renders a one-pull-request list payload with the state under test.
-// `mergeable` is raw JSON so a test can pass the null GitHub returns while it is
-// still computing mergeability.
-func pullJSON(draft bool, mergeable, mergeableState string) string {
-	return fmt.Sprintf(`[{"number":70,"html_url":"https://github.com/kaulie/autonomy/pull/70","title":"a change","draft":%t,"mergeable":%s,"mergeable_state":%q,"head":{"ref":"feature/x","sha":"head1sha"},"base":{"ref":"main"}}]`,
+// pullObject renders a one-pull-request payload with the state under test — the
+// shape the one-pull-request endpoint answers with. `mergeable` is raw JSON so a
+// test can pass the null GitHub returns while it is still computing
+// mergeability.
+func pullObject(draft bool, mergeable, mergeableState string) string {
+	return fmt.Sprintf(`{"number":70,"html_url":"https://github.com/kaulie/autonomy/pull/70","title":"a change","draft":%t,"mergeable":%s,"mergeable_state":%q,"head":{"ref":"feature/x","sha":"head1sha"},"base":{"ref":"main"}}`,
 		draft, mergeable, mergeableState)
+}
+
+// pullJSON renders a one-pull-request list payload with the state under test —
+// the shape the branch-pair lookup answers with.
+func pullJSON(draft bool, mergeable, mergeableState string) string {
+	return "[" + pullObject(draft, mergeable, mergeableState) + "]"
 }
 
 // refuses runs the capability expecting a refusal, and insists that a refusal is
@@ -439,7 +685,9 @@ func TestPullRequestReviewNeedsWhatItCannotGuess(t *testing.T) {
 		want  string
 	}{
 		{"no from", map[string]string{"to": "main"}, "kaulie/autonomy", "t", "missing from"},
+		{"no from and no pull request", map[string]string{"to": "main"}, "kaulie/autonomy", "t", "no pull request was named"},
 		{"no repo", map[string]string{"from": "feature/x"}, "", "t", "missing repository"},
+		{"no repo for a bare number", map[string]string{"pr": "70"}, "", "t", "missing repository"},
 		{"no credential", map[string]string{"from": "feature/x"}, "kaulie/autonomy", "", "no credential"},
 		{"unknown method", map[string]string{"from": "feature/x", "method": "fast-forward"}, "kaulie/autonomy", "t", "unknown method"},
 	}

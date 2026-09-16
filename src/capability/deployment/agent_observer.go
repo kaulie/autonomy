@@ -58,6 +58,12 @@ func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, err
 	}
 	defer func() { _ = sess.Release(ctx) }()
 
+	// The monitoring agent is a delegated worker like any other, so its prompt
+	// carries the frame of the runtime that delegated: the World and Runtime
+	// Context of the cycle, the Completion Principles of this task's goal type and
+	// the Constraints (never act — observe). Which of those DEPLOYMENT_MONITOR.md
+	// actually shows is the template's business; the values reach the agent
+	// through the session it was acquired with (broker.WorkerFrame).
 	prompt := renderPrompt(tmpl, map[string]string{
 		promptDeployment:  req.Deployment,
 		promptEndpoint:    req.Endpoint,
@@ -65,7 +71,7 @@ func (o *AgentObserver) Observe(ctx context.Context, req Request) (Snapshot, err
 		promptLogsURL:     firstNonEmpty(req.LogsURL, derivedLogsURL(req)),
 		promptTail:        fmt.Sprintf("%d", req.Tail),
 		promptObservation: renderObservation(req, base, baseErr),
-	})
+	}, broker.WorkerFrame(sess))
 	answer, err := sess.Prompt(ctx, prompt)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("agent observer: %w", err)

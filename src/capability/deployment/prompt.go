@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/capability/broker"
 )
 
 // The prompt the monitoring agent receives is a repository file, not Go source,
@@ -16,6 +18,8 @@ const (
 	// DefaultPromptRel is the monitoring prompt, relative to PROJECT_ROOT.
 	DefaultPromptRel = "src/agent_policy/DEPLOYMENT_MONITOR.md"
 
+	// promptDeployment … are this capability's own placeholders: what to watch,
+	// where it lives and what has already been read.
 	promptDeployment  = "{{DEPLOYMENT}}"
 	promptEndpoint    = "{{ENDPOINT}}"
 	promptStatusURL   = "{{STATUS_URL}}"
@@ -38,18 +42,22 @@ func readPromptTemplate() (string, error) {
 	return string(b), nil
 }
 
-// renderPrompt fills the template for one observation. A placeholder with no
-// value renders as "(none)" so a missing URL is visible in the trace instead of
-// silently dropping the line.
-func renderPrompt(tmpl string, values map[string]string) string {
-	out := tmpl
-	for k, v := range values {
+// renderPrompt fills the template for one observation. `own` are this
+// capability's values (the deployment, its URLs, the raw observation) and a
+// missing one renders as "(none)" so a gap is visible in the trace rather than
+// silently dropping the line; `frame` is the runtime frame of the delegation
+// (broker.WorkerFrame) — the same rendering rules as every other delegation
+// (broker.RenderWorkerPrompt), so a section the runtime did not fill reads as
+// such instead of reaching the agent as a raw {{NAME}}.
+func renderPrompt(tmpl string, own, frame map[string]string) string {
+	filled := make(map[string]string, len(own))
+	for k, v := range own {
 		if strings.TrimSpace(v) == "" {
 			v = "(none)"
 		}
-		out = strings.ReplaceAll(out, k, v)
+		filled[k] = v
 	}
-	return out
+	return broker.RenderWorkerPrompt(tmpl, filled, frame)
 }
 
 // renderObservation renders the raw observation for the prompt: what the
