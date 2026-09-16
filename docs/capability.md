@@ -81,6 +81,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 - 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空），而 `pull_request.review` 的 `pr`（别名 `pr_url`）直接吃那个 URL。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，没有任何字段能写「派给谁」—— 哪个 capability 背后有 agent（`code_edit` / `deployment.monitor` 会 acquire 一个 worker）由 runtime 决定，planner 也不需要知道（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 - **字段名是本能力的局部约定**：`output` 里的键只对**这个**能力有意义，下一个能力怎么叫、要不要它，由 planner 在计划里显式绑定（`{"source":"step:<name>.output.<key>"}`）—— runtime 从不跨能力猜名字、也不把共享 Context 当数据通道（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。所以能力声明里 `input`/`output` 的**描述**要写清语义：那是 planner 唯一能据以做映射的东西。
+- **`output` 只放本职产出**：能力这次调用**产出的东西**（结果、它创建/改动的对象与状态）。谁触发的、解析出的是哪个 ref、轮询了几次、哪个实现——都是**这次调用的元信息**，不进 `output`；下游真需要这类**世界状态**就走世界模型（`world_model:…`）。"别人要读"不是把它当输出的理由。
 
 ### `{{CONSTRAINTS}}` 从哪来
 

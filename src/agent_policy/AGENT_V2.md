@@ -296,6 +296,12 @@ sentence written into an input.
 
 What follows:
 
+- **A capability's metadata is not an output.** Which ref it resolved, who triggered
+  it, how often it looked, which backend ran it — that describes the call, not what
+  the call produced. When a step needs such state, the route is the World Model
+  (`world_model:…`, what the runtime observed) or that step's own input; being useful
+  to a later step does not make a field an output, and a capability is not asked to
+  hand its own bookkeeping on.
 - **Field names are local to a capability.** One capability reporting
   `artifact_version` and the next taking `version` is not a problem to solve in the
   World — it is a mapping you make, because you are the one who knows both meanings.
