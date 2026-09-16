@@ -3,6 +3,7 @@ package software_development
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
@@ -42,6 +43,7 @@ func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "status", Description: `"ok" when the delegation ran`},
 		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
+		{Name: "pr_url", Description: "the pull request the worker opened, when its report names one — the URL to hand to pull_request.review; empty when the report names none"},
 		{Name: "workspace", Description: "the worker's sandbox — its own, never the caller's"},
 		{Name: "provider", Description: "the backend that ran the worker (cursor / cline)"},
 		{Name: "agent_id", Description: "the worker agent's name, as recorded in agents"},
@@ -97,11 +99,36 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	return map[string]string{
 		"status":      "ok",
 		"summary":     summary,
+		"pr_url":      pullRequestIn(summary),
 		"workspace":   workspace,
 		"provider":    Provider,
 		"agent_id":    sess.ID(),
 		"instruction": instruction,
 	}, nil
+}
+
+// pullRequestURLPattern finds a pull request URL as a worker reports it. Only the
+// URL form counts: it names the pull request outright (its repository included),
+// while a bare number or an owner/name#43 in prose would have to be guessed
+// against whichever repository the worker happened to be in.
+var pullRequestURLPattern = regexp.MustCompile(`https?://[^\s<>()\[\]"'#]+/pulls?/[0-9]+`)
+
+// pullRequestIn reads the pull request out of a worker's report, if it named one:
+// the URL the worker was asked to report is a fact the next step can be given
+// (pull_request.review takes it as "pr"), and reading it here is what makes it an
+// output instead of a sentence someone has to re-read.
+//
+// A report that names no pull request yields nothing: not every delegation opens
+// one, and a guess about which pull request was meant is exactly what this must
+// not produce. Every candidate URL is checked with the same parser that capability
+// uses, so what comes back is a pull request that can actually be read.
+func pullRequestIn(report string) string {
+	for _, candidate := range pullRequestURLPattern.FindAllString(report, -1) {
+		if ref, err := parsePullReference(candidate); err == nil && ref.repo != "" {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func firstNonEmpty(vals ...string) string {
