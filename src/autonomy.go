@@ -30,7 +30,7 @@ type Autonomy struct {
 var bootstrapFlag bool
 var _autonomy *Autonomy
 
-const DefaultMaxSteps = 1
+const DefaultMaxSteps = 4
 
 func GetAutonomy() *Autonomy {
 	if _autonomy == nil {

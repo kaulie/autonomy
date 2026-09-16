@@ -85,6 +85,22 @@ func main() {
 			MainBranch: "main",
 		},
 	}
+	serviceEntity := autonomy.ServiceEntity{
+		Meta: autonomy.Entity{
+			ID:          "service-1",
+			Name:        "service",
+			Description: "service description",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+		ServiceId:   "agent-control-plane-deployment",
+		ServiceName: "agent-control-plane-deployment",
+	}
+	err = autonomy.RegisterDomainEntity(serviceEntity)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	err = autonomy.RegisterDomainEntity(sourceCodeEntity)
 	if err != nil {
@@ -98,9 +114,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = autonomy.BindEntityToContextContainer(serviceEntity.Entity(), projectContextContainer)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	task := &autonomy.Task{
-		ID:          "task-8",
-		Description: "把部署流水线中的事件名称标准化，只提交commit，改完提PR",
+		ID:          "task-28",
+		Description: "开放服务契约的前端入口，提交commit，提PR,merge代码后部署上线",
 		Status:      "pending",
 		GoalType:    autonomy.GoalType_FEATURE,
 		CreatedAt:   time.Now(),

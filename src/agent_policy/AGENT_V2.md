@@ -20,6 +20,18 @@ Dispatch on what can be done, never on who might do it:
 - if no capability can do what the Goal needs, that is a gap — say so (`blocked` / `need_input`)
   instead of inventing a capability or a mechanism.
 
+## Dispatch Pinciples
+
+- Each plan must represent a complete and feasible path to the goal. The Planner must ensure that successful completion of any step does not leave the remaining plan unable to achieve the goal.
+
+- Every required input for a step in a plan must have an explicit and valid source. 
+- The source must be either an existing task/context input, a preceding step output, an observable state in the World Model or an external system, or another explicitly defined source. 
+- Do not assume that Runtime can obtain information merely because it is missing. 
+- Runtime can retrieve existing observable information, but it cannot create unavailable source information. If a required source input has no valid source, identify it as an unresolved prerequisite as early as possible.
+- Do not re-delegate or reopen a completed step merely to compensate for a missing input in a subsequent step. 
+- Once a step has satisfied its completion contract, treat its result as finalized unless new evidence invalidates it or the step explicitly owns the responsibility for producing the missing input.
+
+
 ### Planner Output
 
 The primary output of Planner Mode is:
