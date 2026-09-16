@@ -1,7 +1,9 @@
 package software_development_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,12 @@ import (
 
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
+
+// noGitHubCLI is the gh source for a test that means "there is no credential
+// anywhere". The capability's default asks the machine's gh CLI — which on a
+// developer machine is usually signed in — so a test about the refusal has to say
+// so itself instead of depending on whose gh is logged in.
+func noGitHubCLI(context.Context) (string, error) { return "", errors.New("no gh CLI") }
 
 // ghStub stands in for GitHub's REST API: it records every call the capability
 // makes and answers each route with what the test configured, so a test can
@@ -698,7 +706,7 @@ func TestPullRequestReviewNeedsWhatItCannotGuess(t *testing.T) {
 			t.Setenv("GITHUB_TOKEN", "")
 			t.Setenv("GH_TOKEN", "")
 			t.Setenv("PR_BASE_BRANCH", "")
-			_, err := (sd.PullRequestReview{APIURL: "http://127.0.0.1:1", Token: tc.token, Repo: tc.repo}).Run(tc.in)
+			_, err := (sd.PullRequestReview{APIURL: "http://127.0.0.1:1", Token: tc.token, Repo: tc.repo, GhAuthToken: noGitHubCLI}).Run(tc.in)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err=%v want it to mention %q", err, tc.want)
 			}

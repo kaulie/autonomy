@@ -112,7 +112,7 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 - **读不懂的引用是失败，不是猜**：给了 `pr` 但解析不出 PR（例如只给了仓库 URL、`owner/name`、`#abc`、没有编号）在**发出任何请求之前**就报 `cannot read a pull request from ...`；给了 `pr` 又给了互相矛盾的 `repo` / `from` / `to`（同一个调用点了两件不同的东西）也一样拒绝 —— 静默合掉其中一个正是这个能力不该有的行为。
 - 合入时把**刚检查过的那个 head commit** 一并交给 GitHub（`sha`）：期间分支被人推了新提交，GitHub 会拒（409），而不是把没人看过的提交合进去。
 - 没配 CI 的仓库视为通过（报 `checks: none`）—— 不是失败，只是没有东西要等。
-- 配置：`GITHUB_TOKEN`（或 `GH_TOKEN`）必需；仓库取 PR 引用 → 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
+- 配置：凭据**按顺序**取 —— capability 自己的 `Token` → `GITHUB_TOKEN` → `GH_TOKEN` → **`gh` CLI 自己的凭据（`gh auth token`）**；四处都没有才拒绝，且拒绝信息点名这几处（`src/capability/software_development/github_credential.go`）。最后一档是有意加的：这台机器上 worker 开 PR 就是跑 `gh`（web-cursor 的 GitHub 动作也全是 `gh`），所以"已经 `gh auth login` 的机器"不该因为 runtime 进程环境里没有 `GITHUB_TOKEN` 就走不通。仓库取 PR 引用 → 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
 
 ## 不变式
 
