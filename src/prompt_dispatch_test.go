@@ -58,6 +58,9 @@ func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
 
 	for _, want := range []string{
 		"## Plan Data Lineage",
+		"There are exactly **three**",
+		"no fourth source",
+		"a literal you wrote",
 		"step:<name>.output.<key>",
 		"world_model:asset.<id>.<kind|state>",
 		"No implicit aggregation",
