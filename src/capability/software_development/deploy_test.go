@@ -24,6 +24,8 @@ type pipelineStub struct {
 	contentType string
 	rawBody     string
 	body        map[string]string
+	identityRol string
+	identityID  string
 }
 
 func newPipelineStub(t *testing.T, status int, response string) *pipelineStub {
@@ -40,6 +42,8 @@ func (s *pipelineStub) start() *httptest.Server {
 		s.contentType = r.Header.Get("Content-Type")
 		raw, _ := io.ReadAll(r.Body)
 		s.rawBody = string(raw)
+		s.identityRol = r.Header.Get("identity_role")
+		s.identityID = r.Header.Get("identity_id")
 		_ = json.Unmarshal(raw, &s.body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(s.status)
@@ -203,6 +207,109 @@ func TestServiceDeployUsesDeploymentAPIURL(t *testing.T) {
 	}
 }
 
+// TestServiceDeployAlwaysCarriesItsIdentityHeaders: every deploy-triggering call
+// names who triggered it, in the deployment control plane's phase-1 identity
+// headers (see agent-control-plane-deployment README) — by default the
+// runtime's own agent identity, so a deploy is attributable even when nobody
+// configured anything.
+func TestServiceDeployAlwaysCarriesItsIdentityHeaders(t *testing.T) {
+	t.Setenv(sd.EnvIdentityRole, "")
+	t.Setenv(sd.EnvIdentityID, "")
+	stub := newPipelineStub(t, http.StatusAccepted, `{"requestId":"pipeline-5","state":"queued"}`)
+	srv := stub.start()
+
+	out, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stub.identityRol != sd.DefaultIdentityRole || stub.identityID != sd.DefaultIdentityID {
+		t.Fatalf("headers identity_role=%q identity_id=%q, want %q / %q",
+			stub.identityRol, stub.identityID, sd.DefaultIdentityRole, sd.DefaultIdentityID)
+	}
+	if want := sd.DefaultIdentityRole + ":" + sd.DefaultIdentityID; out["identity"] != want {
+		t.Errorf("out[identity]=%q, want %q (out=%v)", out["identity"], want, out)
+	}
+}
+
+// TestServiceDeployIdentityComesFromTheEnvironment: an operator can decide who
+// autonomy's deploys are attributed to (IDENTITY_ROLE / IDENTITY_ID), the same
+// variables the deployment repo's own callers read — no code change.
+func TestServiceDeployIdentityComesFromTheEnvironment(t *testing.T) {
+	t.Setenv(sd.EnvIdentityRole, "user")
+	t.Setenv(sd.EnvIdentityID, "user_001")
+	stub := newPipelineStub(t, http.StatusAccepted, `{"requestId":"pipeline-6","state":"queued"}`)
+	srv := stub.start()
+
+	out, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stub.identityRol != "user" || stub.identityID != "user_001" {
+		t.Fatalf("headers identity_role=%q identity_id=%q, want user / user_001", stub.identityRol, stub.identityID)
+	}
+	if out["identity"] != "user:user_001" {
+		t.Errorf("out[identity]=%q, want user:user_001", out["identity"])
+	}
+}
+
+// TestServiceDeployIdentityInputBeatsTheEnvironment: a plan step (or a task) can
+// attribute one deploy to a specific identity, and it wins over the process-wide
+// default. The role is read case-insensitively, like the control plane does.
+func TestServiceDeployIdentityInputBeatsTheEnvironment(t *testing.T) {
+	t.Setenv(sd.EnvIdentityRole, "user")
+	t.Setenv(sd.EnvIdentityID, "user_001")
+	stub := newPipelineStub(t, http.StatusAccepted, `{"requestId":"pipeline-7","state":"queued"}`)
+	srv := stub.start()
+
+	_, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{
+		"service":       "web-cursor",
+		"identity_role": " Agent ",
+		"identity_id":   "agent_002",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stub.identityRol != "agent" || stub.identityID != "agent_002" {
+		t.Fatalf("headers identity_role=%q identity_id=%q, want agent / agent_002", stub.identityRol, stub.identityID)
+	}
+}
+
+// TestServiceDeployRejectsAnUnusableIdentityBeforeCalling: a misconfigured
+// identity (a role phase 1 does not know) fails where it is set, rather than
+// going out and coming back as the control plane's 401.
+func TestServiceDeployRejectsAnUnusableIdentityBeforeCalling(t *testing.T) {
+	t.Setenv(sd.EnvIdentityRole, "robot")
+	stub := newPipelineStub(t, http.StatusAccepted, `{"requestId":"pipeline-8","state":"queued"}`)
+	srv := stub.start()
+
+	_, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
+	if err == nil || !strings.Contains(err.Error(), "identity_role") {
+		t.Fatalf("err=%v, want it to name the bad identity_role", err)
+	}
+	if stub.callCount() != 0 {
+		t.Fatalf("called the control plane %d time(s) with an unusable identity", stub.callCount())
+	}
+}
+
+// TestServiceDeployIdentityIsWhatTheControlPlaneRecorded: when the control plane
+// echoes back the triggerer it stored, that is what the planner is told — the
+// authoritative attribution, not merely what this call intended.
+func TestServiceDeployIdentityIsWhatTheControlPlaneRecorded(t *testing.T) {
+	t.Setenv(sd.EnvIdentityRole, "")
+	t.Setenv(sd.EnvIdentityID, "")
+	stub := newPipelineStub(t, http.StatusAccepted,
+		`{"requestId":"pipeline-9","state":"queued","triggeredBy":"user:user_007"}`)
+	srv := stub.start()
+
+	out, err := (sd.DeployService{APIURL: srv.URL}).Run(map[string]string{"service": "web-cursor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["identity"] != "user:user_007" {
+		t.Errorf("out[identity]=%q, want the control plane's recorded triggerer", out["identity"])
+	}
+}
+
 // TestServiceDeployMetadataPinsTheSemantics: the name/domain/provider the
 // planner sees, and the one thing the description must not leave ambiguous —
 // that Run returns as soon as the pipeline is accepted instead of waiting for
@@ -222,7 +329,7 @@ func TestServiceDeployMetadataPinsTheSemantics(t *testing.T) {
 	if sd.DefaultDeploymentAPIURL != "http://127.0.0.1:4220" {
 		t.Errorf("default deployment API=%q", sd.DefaultDeploymentAPIURL)
 	}
-	for _, want := range []string{"service", "branch", "pipeline_id", "does not wait"} {
+	for _, want := range []string{"service", "branch", "pipeline_id", "does not wait", "identity"} {
 		if !strings.Contains(c.Description(), want) {
 			t.Errorf("description missing %q: %s", want, c.Description())
 		}
