@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -42,31 +43,101 @@ func literalInputs(m map[string]string) map[string]StepInput {
 	return out
 }
 
-// UnmarshalJSON reads both shapes a plan may write: a bare value is a literal
-// ("method":"squash"), and {"source":"…"} is a binding.
+// UnmarshalJSON reads the shapes a plan may write for one input:
 //
-// Anything else is an error rather than a literal. A malformed binding silently
-// passed on as text is precisely the failure this model exists to stop: a plan that
-// said "the pr_url of step 1" in prose reached the capability as that sentence and
-// failed there, far from the mistake.
+//	"main"                            a literal value
+//	300 / 1.5 / true / false / null   any scalar is a literal too — a capability's
+//	                                  inputs are strings, and a number is a value
+//	{"source": "…"}                   a binding to where the value comes from
+//	{"value": 300}                    a literal written as an object
+//
+// An object that names neither a source nor a value is an error, never a literal:
+// that is the shape a broken binding has, and passing it on as text is precisely the
+// failure the binding model exists to stop (a plan that said "the pr_url of step 1"
+// reached the capability as that sentence).
 func (in *StepInput) UnmarshalJSON(raw []byte) error {
-	var literal string
-	if err := json.Unmarshal(raw, &literal); err == nil {
-		*in = StepInput{Literal: literal}
-		return nil
+	trimmed := strings.TrimSpace(string(raw))
+	// UseNumber keeps 300 as the text "300": the capability reads text, and a
+	// float64 would turn it into 300 or 3e+02.
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return fmt.Errorf("input must be a value or {\"source\":\"…\"}: %s", trimmed)
 	}
-	var obj struct {
-		Source string `json:"source"`
+	if object, ok := value.(map[string]any); ok {
+		return in.fromObject(object, trimmed)
 	}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return fmt.Errorf("input must be a value or {\"source\":\"…\"}: %s", strings.TrimSpace(string(raw)))
+	if err := in.setLiteral(value, trimmed); err != nil {
+		return err
 	}
-	source := strings.TrimSpace(obj.Source)
-	if source == "" {
-		return fmt.Errorf("input %s names no source (want {\"source\":\"step:<name>.output.<key>\"} or {\"source\":\"world_model:<path>\"})", strings.TrimSpace(string(raw)))
-	}
-	*in = StepInput{Source: source}
 	return nil
+}
+
+// fromObject reads the object forms a plan may write: a binding, or a literal under
+// "value". Anything else is refused — an object with no source and no value is what a
+// broken binding looks like, and a broken binding must not travel as text.
+func (in *StepInput) fromObject(object map[string]any, raw string) error {
+	source, hasSource := object["source"]
+	if !hasSource {
+		spec, hasValue := object["value"]
+		if !hasValue {
+			return fmt.Errorf("input %s names neither a source nor a value (want a plain value, {\"source\":\"step:<name>.output.<key>\"} or {\"source\":\"world_model:<path>\"})", raw)
+		}
+		return in.setLiteral(spec, raw)
+	}
+	text, ok := source.(string)
+	if !ok {
+		return fmt.Errorf("input %s: \"source\" must be a string, not %s", raw, jsonValueKind(source))
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("input %s names no source (want {\"source\":\"step:<name>.output.<key>\"} or {\"source\":\"world_model:<path>\"})", raw)
+	}
+	*in = StepInput{Source: strings.TrimSpace(text)}
+	return nil
+}
+
+// setLiteral turns a JSON scalar — or a structured value, which travels as the JSON
+// text it is — into the text a capability reads.
+func (in *StepInput) setLiteral(value any, raw string) error {
+	switch v := value.(type) {
+	case nil:
+		*in = StepInput{}
+	case string:
+		*in = StepInput{Literal: v}
+	case json.Number:
+		*in = StepInput{Literal: v.String()}
+	case bool:
+		*in = StepInput{Literal: strconv.FormatBool(v)}
+	case map[string]any, []any:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("input %s: %w", raw, err)
+		}
+		*in = StepInput{Literal: string(encoded)}
+	default:
+		return fmt.Errorf("input must be a value or {\"source\":\"…\"}: %s", raw)
+	}
+	return nil
+}
+
+// jsonValueKind names a JSON value's type for an error message.
+func jsonValueKind(value any) string {
+	switch value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "a string"
+	case json.Number:
+		return "a number"
+	case bool:
+		return "a boolean"
+	case map[string]any:
+		return "an object"
+	case []any:
+		return "an array"
+	}
+	return "an unknown value"
 }
 
 // MarshalJSON writes back what the plan wrote: a binding stays a binding (the plan

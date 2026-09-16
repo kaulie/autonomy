@@ -38,7 +38,8 @@ execution_step_interaction(id, step_id, seq, kind, provider, reason_turn_id, cre
 step 的每个入参都写清**来源**，而且只有三种（没有第四种）：
 
 - **planner 自己写的字面量**（`"branch":"main"`）—— 他自己就是来源：只用来写属于他自己的文本（instruction、任务或用户给他的值），
-  **绝不**当作"还没有拿到手"的值的占位。
+  **绝不**当作"还没有拿到手"的值的占位。字面量可以是任意 JSON **标量**（字符串、数字 `300`、`true`/`false`）—— 能力入参都是字符串，
+  数字按原样转成文本（`300` → `"300"`）；**对象**是绑定，或者写 `{"value": 300}` 明确表示"这就是个值"。
 - `{"source":"step:<name>.output.<key>"}` —— 同一计划里更早那个 step 的输出，`key` 必须是它声明过的 output。
 - `{"source":"world_model:asset.<id>.<kind|state>"}` —— World Model 里的值（就是 `## World` 里看到的那个资产）。
 
@@ -57,7 +58,7 @@ step 的每个入参都写清**来源**，而且只有三种（没有第四种�
 
 | 行 | `name` | `input` 存什么 |
 |---|---|---|
-| `execution_step_plan`（计划，执行前写） | planner 给这一步起的名字 | **planner 原始入参**：字面量按原样，绑定按 `{"source":"…"}` 原样 |
+| `execution_step_plan`（计划，执行前写） | planner 给这一步起的名字 | **planner 原始入参**：绑定按 `{"source":"…"}` 原样；字面量按**能力读到的文本**（数字 `300` 记成 `"300"`，逐字回复在 `reason_turns.raw_output` 里） |
 | `execution_step`（执行记录） | 同上（执行行自己也带名字） | **实际调用入参**：绑定已解析成真值 |
 
 `name` 必须落库：绑定写的是 `step:<name>.output.<key>`，没有这一列，**库里存下来的血缘就指向不了任何一行**（`execution_step_plan` 里那条 `{"source":"step:implement.output.pr_url"}` 就找不到 `implement` 是谁）。
