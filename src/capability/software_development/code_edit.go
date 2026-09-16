@@ -41,13 +41,10 @@ func (CodeEdit) Inputs() []spec.Field {
 
 func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "status", Description: `"ok" when the delegation ran`},
 		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
 		{Name: "pr_url", Description: "the pull request the worker opened, when its report names one — the URL to hand to pull_request.review; empty when the report names none"},
 		{Name: "workspace", Description: "the worker's sandbox — its own, never the caller's"},
-		{Name: "provider", Description: "the backend that ran the worker (cursor / cline)"},
-		{Name: "agent_id", Description: "the worker agent's name, as recorded in agents"},
-		{Name: "instruction", Description: "the instruction the worker was actually given"},
+		{Name: "agent_id", Description: "the worker agent that did the work, as recorded in agents (the step's own agent_id is the agent that delegated)"},
 	}
 }
 
@@ -96,14 +93,16 @@ func (c CodeEdit) Run(in map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("code_edit: %w", err)
 	}
+	// The output is what the delegation *produced*, and nothing the step row already
+	// says: no echo of the input (`instruction`), no restatement of the run's own
+	// bookkeeping (`status`, `provider` — execution_step records both). What is left
+	// is the worker's report, the pull request it opened, and which worker did it
+	// where. A copy of a row is not an output.
 	return map[string]string{
-		"status":      "ok",
-		"summary":     summary,
-		"pr_url":      pullRequestIn(summary),
-		"workspace":   workspace,
-		"provider":    Provider,
-		"agent_id":    sess.ID(),
-		"instruction": instruction,
+		"summary":   summary,
+		"pr_url":    pullRequestIn(summary),
+		"workspace": workspace,
+		"agent_id":  sess.ID(),
 	}, nil
 }
 

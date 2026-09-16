@@ -24,9 +24,9 @@ execution_plan(id, task_id, agent_id, cycle, decision_type, reason, evidence, ne
                step_count, plan_hash,
                reply_message_id, input_message_id, task_input_message_id, reason_turn_id,
                created_at, UNIQUE(reply_message_id))
-execution_step_plan(id, plan_id, idx, capability, input, expected_effect, evidence_refs, created_at,
+execution_step_plan(id, plan_id, idx, name, capability, input, expected_effect, evidence_refs, created_at,
                     UNIQUE(plan_id, idx))
-execution_step(id, plan_id, plan_step_id, task_id, agent_id, cycle, idx,
+execution_step(id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, name,
                capability, provider, status, input, output, error,
                started_at, ended_at, duration_ms, created_at)
 execution_step_interaction(id, step_id, seq, kind, provider, reason_turn_id, created_at,
@@ -54,10 +54,12 @@ step 的每个入参都写清**来源**，而且只有三种（没有第四种�
 
 **两类行各存一半**（这正是 plan 行与 step 行分工的用处）：
 
-| 行 | `input` 存什么 |
-|---|---|
-| `execution_step_plan`（计划，执行前写） | **planner 原始入参**：字面量按原样，绑定按 `{"source":"…"}` 原样 |
-| `execution_step`（执行记录） | **实际调用入参**：绑定已解析成真值 |
+| 行 | `name` | `input` 存什么 |
+|---|---|---|
+| `execution_step_plan`（计划，执行前写） | planner 给这一步起的名字 | **planner 原始入参**：字面量按原样，绑定按 `{"source":"…"}` 原样 |
+| `execution_step`（执行记录） | 同上（执行行自己也带名字） | **实际调用入参**：绑定已解析成真值 |
+
+`name` 必须落库：绑定写的是 `step:<name>.output.<key>`，没有这一列，**库里存下来的血缘就指向不了任何一行**（`execution_step_plan` 里那条 `{"source":"step:implement.output.pr_url"}` 就找不到 `implement` 是谁）。
 
 **校验在计划写之前**（`src/plan_lineage.go`，`Runtime.Execute` 第一件事）：
 

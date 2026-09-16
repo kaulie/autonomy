@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS execution_step_plan (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   plan_id         INTEGER NOT NULL, -- execution_plan.id
   idx             INTEGER NOT NULL, -- position in the plan (1-based)
+  name            TEXT NOT NULL DEFAULT '', -- what the plan calls this step; a binding addresses it as step:<name>.output.<key>
   capability      TEXT NOT NULL DEFAULT '',
   input           TEXT NOT NULL DEFAULT '{}', -- the input the plan asked for, verbatim
   expected_effect TEXT NOT NULL DEFAULT '',
@@ -215,6 +216,7 @@ CREATE TABLE IF NOT EXISTS execution_step (
   agent_id     INTEGER NOT NULL DEFAULT 0, -- the agent that ran the step (its planner)
   cycle        INTEGER NOT NULL DEFAULT 0,
   idx          INTEGER NOT NULL DEFAULT 0, -- execution order within the plan
+  name         TEXT NOT NULL DEFAULT '', -- what the plan called this step (execution_step_plan.name)
   capability   TEXT NOT NULL DEFAULT '',
   provider     TEXT NOT NULL DEFAULT '', -- github / agent-control-plane / cursor / cline / autonomy
   status       TEXT NOT NULL DEFAULT '', -- ok | failed
@@ -342,6 +344,14 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle)
 	// databases without run_id migrate cleanly.
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_reason_turns_run ON reason_turns(run_id)`); err != nil {
 		return fmt.Errorf("migrate reason_turns run index: %w", err)
+	}
+	// The execution tables gained the step's name: a plan's input bindings address a
+	// step by name, so without it a stored plan's lineage points at nothing
+	// (docs/execution-step.md, "Plan Data Lineage").
+	for _, table := range []string{"execution_step_plan", "execution_step"} {
+		if err := s.ensureColumn(table, "name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate %s.name: %w", table, err)
+		}
 	}
 	if err := s.backfillReasonTurnNormalizedOutputs(); err != nil {
 		return fmt.Errorf("normalize reason_turns.normalized_output: %w", err)

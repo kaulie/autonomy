@@ -54,8 +54,8 @@ func (s *SQLiteStore) AppendExecutionStepPlans(steps []ExecutionStepPlan) error 
 		return fmt.Errorf("begin execution step plan tx: %w", err)
 	}
 	stmt, err := tx.Prepare(`
-INSERT INTO execution_step_plan (plan_id, idx, capability, input, expected_effect, evidence_refs, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`)
+INSERT INTO execution_step_plan (plan_id, idx, name, capability, input, expected_effect, evidence_refs, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("prepare execution step plan insert: %w", err)
@@ -66,7 +66,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`)
 		if created.IsZero() {
 			created = time.Now()
 		}
-		if _, err := stmt.Exec(step.PlanID, step.Idx, step.Capability, orJSONObject(step.Input),
+		if _, err := stmt.Exec(step.PlanID, step.Idx, step.Name, step.Capability, orJSONObject(step.Input),
 			step.ExpectedEffect, orJSONArray(step.EvidenceRefs), formatTime(created)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("append execution step plan: %w", err)
@@ -87,11 +87,11 @@ func (s *SQLiteStore) AppendExecutionStep(step ExecutionStep) (int64, error) {
 	}
 	res, err := s.db.Exec(`
 INSERT INTO execution_step
-  (plan_id, plan_step_id, task_id, agent_id, cycle, idx, capability, provider, status,
+  (plan_id, plan_step_id, task_id, agent_id, cycle, idx, name, capability, provider, status,
    input, output, error, started_at, ended_at, duration_ms, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.PlanID, step.PlanStepID, step.TaskID, step.AgentID, step.Cycle, step.Idx,
-		step.Capability, step.Provider, step.Status,
+		step.Name, step.Capability, step.Provider, step.Status,
 		orJSONObject(step.Input), orJSONObject(step.Output), step.Error,
 		formatTime(step.StartedAt), nullTimeArg(step.EndedAt), step.DurationMS, formatTime(created))
 	if err != nil {
@@ -198,7 +198,7 @@ SELECT id, task_id, agent_id, cycle, decision_type, reason, evidence, need, step
 // ListExecutionStepPlan reads a plan's planned steps in plan order.
 func (s *SQLiteStore) ListExecutionStepPlan(planID int64) ([]ExecutionStepPlan, error) {
 	rows, err := s.db.Query(`
-SELECT id, plan_id, idx, capability, input, expected_effect, evidence_refs, created_at
+SELECT id, plan_id, idx, name, capability, input, expected_effect, evidence_refs, created_at
   FROM execution_step_plan WHERE plan_id = ? ORDER BY idx`, planID)
 	if err != nil {
 		return nil, fmt.Errorf("list execution step plan: %w", err)
@@ -208,7 +208,7 @@ SELECT id, plan_id, idx, capability, input, expected_effect, evidence_refs, crea
 	for rows.Next() {
 		var step ExecutionStepPlan
 		var createdAt string
-		if err := rows.Scan(&step.ID, &step.PlanID, &step.Idx, &step.Capability, &step.Input,
+		if err := rows.Scan(&step.ID, &step.PlanID, &step.Idx, &step.Name, &step.Capability, &step.Input,
 			&step.ExpectedEffect, &step.EvidenceRefs, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan execution step plan: %w", err)
 		}
@@ -224,7 +224,7 @@ SELECT id, plan_id, idx, capability, input, expected_effect, evidence_refs, crea
 // ListExecutionSteps reads a plan's executed steps in execution order.
 func (s *SQLiteStore) ListExecutionSteps(planID int64) ([]ExecutionStep, error) {
 	rows, err := s.db.Query(`
-SELECT id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, capability, provider, status,
+SELECT id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, name, capability, provider, status,
        input, output, error, started_at, ended_at, duration_ms, created_at
   FROM execution_step WHERE plan_id = ? ORDER BY idx, id`, planID)
 	if err != nil {
@@ -240,7 +240,7 @@ SELECT id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, capability, pro
 			createdAt string
 		)
 		if err := rows.Scan(&step.ID, &step.PlanID, &step.PlanStepID, &step.TaskID, &step.AgentID,
-			&step.Cycle, &step.Idx, &step.Capability, &step.Provider, &step.Status,
+			&step.Cycle, &step.Idx, &step.Name, &step.Capability, &step.Provider, &step.Status,
 			&step.Input, &step.Output, &step.Error, &startedAt, &endedAt, &step.DurationMS,
 			&createdAt); err != nil {
 			return nil, fmt.Errorf("scan execution step: %w", err)

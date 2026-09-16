@@ -327,7 +327,7 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(result.Actions) != 1 || result.Actions[0].Output["status"] != "ok" {
+	if len(result.Actions) != 1 || result.Actions[0].Output["summary"] == "" {
 		t.Fatalf("result=%+v, want the delegated step to have run", result.Actions)
 	}
 
