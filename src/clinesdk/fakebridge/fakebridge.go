@@ -23,24 +23,37 @@ const EnvVar = "CLINE_FAKE_BRIDGE"
 // Enabled reports whether this process was started as the fake bridge.
 func Enabled() bool { return os.Getenv(EnvVar) == "1" }
 
-// decisionAnswers are the concluding decisions a test drives the loop with, one per
-// type and each a whole valid answer: `done` carries the evidence that proves it, and
-// `blocked` / `need_input` say what is missing. A run must stop on any of them.
-var decisionAnswers = map[string]string{
-	"answer done": `{"type":"done","reason":"the fake planner found the goal satisfied","evidence":[` +
-		`{"id":"E1","source":"observation","reference":"asset-1","fact":"the asset is healthy"}]}`,
-	"answer blocked": `{"type":"blocked","reason":"nothing here can do this",` +
-		`"need":{"type":"capability","description":"no capability in this runtime can change that service"}}`,
-	"answer need_input": `{"type":"need_input","reason":"the target is ambiguous",` +
-		`"need":{"type":"decision","description":"which environment should this deploy to?"}}`,
+// decisionAnswer is one canned reply a test drives the loop with: the phrase its task
+// description carries, and the whole decision JSON the fake planner answers with.
+type decisionAnswer struct {
+	phrase string
+	answer string
+}
+
+// decisionAnswers are the concluding decisions a test drives the loop with, each a
+// whole answer: the first three are valid (`done` carries the evidence that proves it,
+// `blocked` / `need_input` say what is missing) and a run must stop on any of them.
+// The last one is the opposite case — a `done` that proves nothing, which breaks
+// `done.evidence_present` (src/decision_rules.go) and must not end a run at all.
+//
+// A slice, not a map: which phrase matched must not depend on iteration order, since
+// one phrase may be a substring of another.
+var decisionAnswers = []decisionAnswer{
+	{"answer done", `{"type":"done","reason":"the fake planner found the goal satisfied","evidence":[` +
+		`{"id":"E1","source":"observation","reference":"asset-1","fact":"the asset is healthy"}]}`},
+	{"answer blocked", `{"type":"blocked","reason":"nothing here can do this",` +
+		`"need":{"type":"capability","description":"no capability in this runtime can change that service"}}`},
+	{"answer need_input", `{"type":"need_input","reason":"the target is ambiguous",` +
+		`"need":{"type":"decision","description":"which environment should this deploy to?"}}`},
+	{"unproven answer", `{"type":"done","reason":"the fake planner says it is done, and proves nothing"}`},
 }
 
 // cannedDecisionAnswer is the reply for one of the decision phrases, or "" when the
 // prompt asks for none of them.
 func cannedDecisionAnswer(prompt string) string {
-	for phrase, answer := range decisionAnswers {
-		if strings.Contains(prompt, phrase) {
-			return answer
+	for _, canned := range decisionAnswers {
+		if strings.Contains(prompt, canned.phrase) {
+			return canned.answer
 		}
 	}
 	return ""
@@ -65,6 +78,8 @@ func Manager(self string) *clinesdk.BridgeManager {
 //	prompt containing "answer done" / "answer blocked" / "answer need_input" -> that
 //	                            concluding decision, validly written (evidence for `done`,
 //	                            a described need for the other two), and no steps
+//	prompt containing "unproven answer" -> a `done` that proves nothing, which the
+//	                            runtime refuses (done.evidence_present)
 //	prompt containing "never answer" -> never answers (the client must time out)
 //	prompt containing "out of balance" -> finished with no text, and the reason only
 //	                            in the run result (an exhausted account)
@@ -164,9 +179,10 @@ func Main() {
 					"usage": map[string]any{"inputTokens": 11, "outputTokens": 2, "totalTokens": 13, "costUsd": 0.0001},
 				})
 			case cannedDecisionAnswer(prompt) != "":
-				// A concluding decision, written the way the planner writes one: `done` with the
+				// A canned decision, written the way the planner writes one: `done` with the
 				// evidence that proves it, `blocked` / `need_input` with the need that says what
-				// is missing. None of them executes anything, and each is what a run stops on
+				// is missing, or — for the "unproven answer" phrase — a `done` the runtime has to
+				// refuse. None of them executes anything, and a valid one is what a run stops on
 				// (Decision.Concludes).
 				text := cannedDecisionAnswer(prompt)
 				event(req.ID, agentID, sessionID, map[string]any{
