@@ -322,6 +322,14 @@ func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any
 		m["additional_input"] = map[string]string{"text": text}
 	}
 	m["context"] = json.RawMessage(formatRuntimeContextContainersJSON(ctx))
+	// completion_contract is the contract this task is judged by, as the planner wrote
+	// it: the first answer of the run declares it and the runtime pins it there, so a
+	// re-plan is made against the same facts the `done` will be verified against.
+	if ctx.Task != nil {
+		if contract := completionContractJSON(ctx.Task.ID); len(contract) > 0 {
+			m["completion_contract"] = contract
+		}
+	}
 	// previous_actions is what this task already did: the planner's own plan from
 	// an earlier cycle and how it went, so re-planning is not blind (AGENT_V2
 	// names previous_action as an evidence source).
@@ -540,9 +548,10 @@ func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {
 //	 "deliverable": [{"type","concrete_type","detail"}],
 //	 "presentation": [{"type","content"}]}
 //
-// goal_type / completion_contracts are the planner echoing the contract back;
-// they are modelled so the shape is complete, but the decision itself does not
-// depend on them.
+// goal_type is the planner echoing its classification back; completion_contracts is the
+// submission of the contract itself — the facts that must hold for the task to be done,
+// each with its evidence slot (src/completion_contract.go). The runtime pins the first
+// contract of a run and verifies every `done` against it; see docs/verification.md.
 type agentDecisionJSON struct {
 	GoalType           string          `json:"goal_type"`
 	CompletionContract json.RawMessage `json:"completion_contracts"`
@@ -604,10 +613,15 @@ func parseDecision(text string) (Decision, error) {
 		return Decision{}, fmt.Errorf("parse agent decision JSON: %w", err)
 	}
 	typ := strings.ToLower(strings.TrimSpace(d.Type))
+	contract, err := parseCompletionContract(d.CompletionContract)
+	if err != nil {
+		return Decision{}, err
+	}
 	decision := Decision{
 		Type:         typ,
 		Reason:       firstNonEmptyString(strings.TrimSpace(d.Reason), typ),
 		Evidence:     d.Evidence,
+		Contract:     contract,
 		Need:         d.Need,
 		Deliverables: d.Deliverables,
 		Presentation: d.Presentation,

@@ -49,6 +49,14 @@ func (fakeStore) ListExecutionStepInteractions(int64) ([]ExecutionStepInteractio
 func (fakeStore) ExecutionPlanOutcome(int64) (ExecutionPlanOutcome, bool, error) {
 	return ExecutionPlanOutcome{}, false, nil
 }
+func (fakeStore) AppendCompletionContract(ContractCriterion) error { return nil }
+func (fakeStore) ListCompletionContract(string) ([]ContractCriterion, error) {
+	return nil, nil
+}
+func (fakeStore) AppendVerification(Verification) (int64, error) { return 0, nil }
+func (fakeStore) ListVerifications(string) ([]Verification, error) {
+	return nil, nil
+}
 func (fakeStore) Close() error { return nil }
 
 // fakeEngine records the DSN it was opened with so tests can assert dispatch to

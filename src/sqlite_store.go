@@ -249,6 +249,43 @@ CREATE TABLE IF NOT EXISTS execution_step_interaction (
 );
 CREATE INDEX IF NOT EXISTS idx_execution_step_interaction_step ON execution_step_interaction(step_id);
 CREATE INDEX IF NOT EXISTS idx_execution_step_interaction_turn ON execution_step_interaction(reason_turn_id);
+
+-- completion_contract is the contract a task is judged by: the facts that must hold
+-- for it to be done (docs/verification.md). It is written once, by the run's first
+-- answer, and never rewritten -- a (task_id, idx) that is already there keeps its
+-- criterion, which is what makes the standard a done cannot weaken on the way out.
+CREATE TABLE IF NOT EXISTS completion_contract (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    TEXT NOT NULL DEFAULT '',
+  idx        INTEGER NOT NULL DEFAULT 0, -- position in the contract (1-based)
+  plan_id    INTEGER NOT NULL DEFAULT 0, -- the plan it arrived with (execution_plan.id)
+  name       TEXT NOT NULL DEFAULT '',   -- what the criterion is called
+  criterion  TEXT NOT NULL DEFAULT '{}', -- the criterion's JSON, verbatim
+  created_at TEXT NOT NULL,
+  UNIQUE(task_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_completion_contract_task ON completion_contract(task_id, idx);
+
+-- verification is one verdict on one criterion: what the contract said must hold, what
+-- the authoritative source answered, and where that answer came from. Appended, never
+-- updated (docs/verification.md).
+CREATE TABLE IF NOT EXISTS verification (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      TEXT NOT NULL DEFAULT '',
+  plan_id      INTEGER NOT NULL DEFAULT 0,
+  cycle        INTEGER NOT NULL DEFAULT 0,
+  criterion    TEXT NOT NULL DEFAULT '',
+  requirement  TEXT NOT NULL DEFAULT '',
+  method       TEXT NOT NULL DEFAULT '', -- world_model | registry:<cap> | declared:<cap> | -
+  evidence     TEXT NOT NULL DEFAULT '{}', -- {"slot": "…", "reference": "…"}
+  expected     TEXT NOT NULL DEFAULT '',
+  observed     TEXT NOT NULL DEFAULT '',
+  result       TEXT NOT NULL DEFAULT '', -- pass | fail | inconclusive
+  reason       TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_verification_task ON verification(task_id, id);
+CREATE INDEX IF NOT EXISTS idx_verification_plan ON verification(plan_id);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("migrate: %w", err)

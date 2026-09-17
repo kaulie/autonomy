@@ -89,13 +89,14 @@ func TestRuntimeStopsAtTheFirstFailingAction(t *testing.T) {
 	}
 }
 
-// TestRuntimeExecuteWithoutActions: done / blocked / need_input decide nothing,
-// which is not an error — with the decision's own contract satisfied (done names its
-// evidence, blocked / need_input say what is missing: src/decision_rules.go).
+// TestRuntimeExecuteWithoutActions: blocked / need_input decide nothing, which is not
+// an error — with the decision's own contract satisfied (they say what is missing:
+// src/decision_rules.go). A `done` is the one answer the runtime verifies, so with no
+// Completion Contract pinned there is nothing to verify it against and it is refused
+// rather than taken on the model's word (src/verification.go).
 func TestRuntimeExecuteWithoutActions(t *testing.T) {
 	rt := NewRuntime(NewAgentFactory())
 	decisions := []Decision{
-		{Type: "done", Evidence: []Evidence{{ID: "E1", Source: "observation", Fact: "the goal is satisfied"}}},
 		{Type: "blocked", Need: Need{Type: "capability", Description: "no capability can do this"}},
 		{Type: "need_input", Need: Need{Type: "decision", Description: "which environment?"}},
 	}
@@ -107,6 +108,17 @@ func TestRuntimeExecuteWithoutActions(t *testing.T) {
 		if !strings.Contains(result.Message, decision.Type) {
 			t.Fatalf("%s: result=%+v", decision.Type, result)
 		}
+	}
+
+	result, err := rt.Execute(Decision{
+		Type:     "done",
+		Evidence: []Evidence{{ID: "E1", Source: "observation", Fact: "the goal is satisfied"}},
+	})
+	if err == nil {
+		t.Fatalf("a done with no pinned contract was accepted: result=%+v", result)
+	}
+	if !strings.Contains(err.Error(), "no completion contract") {
+		t.Fatalf("err=%v, want the missing contract", err)
 	}
 }
 

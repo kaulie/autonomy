@@ -13,6 +13,12 @@ const (
 	decisionNeedInput = "need_input"
 )
 
+// isDone reports whether a decision is the completion claim — the one decision the
+// runtime verifies against the task's Completion Contract (src/verification.go).
+func isDone(decision Decision) bool {
+	return strings.EqualFold(strings.TrimSpace(decision.Type), decisionDone)
+}
+
 // The type-specific requirements AGENT_V2 states for each decision type, enforced by
 // the runtime.
 //

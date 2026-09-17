@@ -33,6 +33,27 @@ execution_step_interaction(id, step_id, seq, kind, provider, reason_turn_id, cre
                            UNIQUE(step_id, seq))
 ```
 
+## 另外两张表（完成契约与验证）
+
+[Verification](verification.md) 的记录也在这个家族里：写一次、不改、按 id 关联。
+
+| 表 | 一行是什么 | 写法 |
+|---|---|---|
+| `completion_contract` | 任务的一条 Completion Criterion | 首轮 `INSERT OR IGNORE`（`UNIQUE(task_id, idx)`）——先写下的那条就是任务的标准 |
+| `verification` | 一条判据的一次判定 | 只 INSERT |
+
+```sql
+completion_contract(id, task_id, idx, plan_id, name, criterion, created_at,
+                    UNIQUE(task_id, idx))
+verification(id, task_id, plan_id, cycle, criterion, requirement, method, evidence,
+             expected, observed, result, reason, created_at)
+```
+
+`criterion` 是 planner 写的那段 JSON 原文（`requirement` / `evidence` 槽 / `expect` / 可选的 `check`）；
+`evidence` 是 `{"slot": "…", "reference": "…"}` —— 槽是 planner 绑的，reference 是运行时**填**进去的；
+`method` 说这个真相是从哪问来的（`world_model` / `registry:<能力>` / `declared:<能力>` / `-`）。
+
+
 ## 计划的数据来源（Plan Data Lineage）
 
 step 的每个入参都写清**来源**，而且只有三种（没有第四种）：

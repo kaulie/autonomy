@@ -27,10 +27,12 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 其中 **Goal** 与 **Completion Contract** 构成 Task 的核心。
 
 **运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点，取值就是**收束这次运行的
-那个决策**：`running`（还在跑）→ `completed`（`done`：目标满足，且按 §Type-specific Requirements 带证据）／
-`blocked`／`need_input`（任务在等东西，不是跑完了）／`error`（失败）。`error` 是**为什么**——这一轮 decide
-失败（`decide: ...`），或最后一个 cycle 里失败的 action 及其原因；`blocked` / `need_input` 的"为什么"是那次决策
-自己的 `need`（在 `execution_plan.need` 与那条回复里），不写进 `error`。两者都只在「记下结果」时写，不在
+那个决策**：`running`（还在跑）→ `completed`（`done` **且验证通过**：完成契约的每条判据都被权威来源证实，
+见 [verification.md](verification.md)）／`unverified`（运行结束时最后一个答复是 `done`，而它始终没通过验证 ——
+被类型规则拒、被验证拒、或世界不满足）／`blocked`／`need_input`（任务在等东西，不是跑完了）／`error`（失败）。
+`error` 是**为什么**——这一轮 decide 失败（`decide: ...`），或最后一个 cycle 里失败的 action 及其原因；`unverified`
+这一行的 `error` 写的是**为什么没验过**（哪条判据、期望什么、权威来源答了什么）；`blocked` / `need_input` 的"为什么"
+是那次决策自己的 `need`（在 `execution_plan.need` 与那条回复里），不写进 `error`。两者都只在「记下结果」时写，不在
 起跑时写：一行只在真的有结果时才改口。这样一次失败不会随进程退出而消失（此前只有终端上那行，库里只留一个
 `status=error`）。
 

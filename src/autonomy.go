@@ -177,6 +177,16 @@ func (r *Autonomy) Run(task *Task) error {
 	// fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 	if task.Status == TaskStatusRunning || task.Status == TaskStatusPending {
 		switch {
+		case err != nil && isDone(decision):
+			// The last answer was `done` and it did not hold up — verification refused
+			// it, or the type's own requirements did. The run ends without the goal
+			// ever being verified, which is its own outcome: not `completed` (that is
+			// for a `done` verification passed) and not `error` (this is not a failed
+			// action or a failed decide). Why it did not hold up is on the task, and in
+			// the `verification` rows of its plans (docs/verification.md).
+			task.Status = TaskStatusUnverified
+			task.Error = err.Error()
+			persistTask(task)
 		case err != nil:
 			failTask(task, err)
 		case decision.Concludes():
