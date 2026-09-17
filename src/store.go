@@ -76,6 +76,16 @@ type Store interface {
 	// ExecutionPlanOutcome derives a plan's result from its steps: the last one's
 	// status. Nothing stores it, so none of it can drift.
 	ExecutionPlanOutcome(planID int64) (ExecutionPlanOutcome, bool, error)
+	// AppendCompletionContract pins one criterion of a task's Completion Contract.
+	// The first row for a (task, idx) is the one kept: a task's contract is written
+	// once, and a later cycle restating it changes nothing (src/completion_contract.go).
+	AppendCompletionContract(criterion ContractCriterion) error
+	// ListCompletionContract reads a task's pinned contract in criterion order.
+	ListCompletionContract(taskID string) ([]ContractCriterion, error)
+	// AppendVerification records one verdict of one criterion (src/verification.go).
+	AppendVerification(v Verification) (int64, error)
+	// ListVerifications reads a task's verdicts in creation order.
+	ListVerifications(taskID string) ([]Verification, error)
 	Close() error
 }
 
@@ -243,6 +253,18 @@ func saveExecutionStepInteraction(in ExecutionStepInteraction) {
 	}
 	if _, err := s.AppendExecutionStepInteraction(in); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] append execution step interaction: %v\n", err)
+	}
+}
+
+// saveVerification records one verdict. Like the execution records it is best effort:
+// the verdict is what the run acts on, and losing the row must not change it.
+func saveVerification(v Verification) {
+	s := activeStore()
+	if s == nil {
+		return
+	}
+	if _, err := s.AppendVerification(v); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] append verification: %v\n", err)
 	}
 }
 

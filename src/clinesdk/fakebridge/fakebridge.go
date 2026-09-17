@@ -31,21 +31,35 @@ type decisionAnswer struct {
 }
 
 // decisionAnswers are the concluding decisions a test drives the loop with, each a
-// whole answer: the first three are valid (`done` carries the evidence that proves it,
-// `blocked` / `need_input` say what is missing) and a run must stop on any of them.
-// The last one is the opposite case — a `done` that proves nothing, which breaks
-// `done.evidence_present` (src/decision_rules.go) and must not end a run at all.
+// whole answer: the first three are valid (`done` carries the evidence that proves it
+// and the contract it must be verified against, `blocked` / `need_input` say what is
+// missing) and a run must stop on any of them. The last two are the opposite case — a
+// `done` that proves nothing, which breaks `done.evidence_present`
+// (src/decision_rules.go) and must not end a run at all, and a `done` whose own
+// contract the world does not satisfy, which verification refuses (src/verification.go).
 //
 // A slice, not a map: which phrase matched must not depend on iteration order, since
 // one phrase may be a substring of another.
 var decisionAnswers = []decisionAnswer{
-	{"answer done", `{"type":"done","reason":"the fake planner found the goal satisfied","evidence":[` +
+	{"answer done", `{"type":"done","reason":"the fake planner found the goal satisfied",` +
+		`"completion_contracts":{"steps":[{"name":"asset_healthy",` +
+		`"requirement":"asset-1 is healthy",` +
+		`"evidence":{"source":"world_model:asset.asset-1.state"},` +
+		`"expect":{"equals":"healthy"}}]},` +
+		`"evidence":[` +
 		`{"id":"E1","source":"observation","reference":"asset-1","fact":"the asset is healthy"}]}`},
 	{"answer blocked", `{"type":"blocked","reason":"nothing here can do this",` +
 		`"need":{"type":"capability","description":"no capability in this runtime can change that service"}}`},
 	{"answer need_input", `{"type":"need_input","reason":"the target is ambiguous",` +
 		`"need":{"type":"decision","description":"which environment should this deploy to?"}}`},
 	{"unproven answer", `{"type":"done","reason":"the fake planner says it is done, and proves nothing"}`},
+	{"unverified answer", `{"type":"done","reason":"the fake planner says the asset is degraded",` +
+		`"completion_contracts":{"steps":[{"name":"asset_degraded",` +
+		`"requirement":"asset-1 is degraded",` +
+		`"evidence":{"source":"world_model:asset.asset-1.state"},` +
+		`"expect":{"equals":"degraded"}}]},` +
+		`"evidence":[` +
+		`{"id":"E1","source":"observation","reference":"asset-1","fact":"the asset is degraded"}]}`},
 }
 
 // cannedDecisionAnswer is the reply for one of the decision phrases, or "" when the
@@ -76,10 +90,14 @@ func Manager(self string) *clinesdk.BridgeManager {
 //	                            output-token limit: the run fails with the SDK's
 //	                            own message (the runtime may retry that turn)
 //	prompt containing "answer done" / "answer blocked" / "answer need_input" -> that
-//	                            concluding decision, validly written (evidence for `done`,
-//	                            a described need for the other two), and no steps
+//	                            concluding decision, validly written (evidence and the
+//	                            completion contract for `done`, a described need for
+//	                            the other two), and no steps
 //	prompt containing "unproven answer" -> a `done` that proves nothing, which the
 //	                            runtime refuses (done.evidence_present)
+//	prompt containing "unverified answer" -> a `done` whose contract the world does not
+//	                            satisfy, which verification refuses (and the run ends
+//	                            `unverified`, never `completed`)
 //	prompt containing "never answer" -> never answers (the client must time out)
 //	prompt containing "out of balance" -> finished with no text, and the reason only
 //	                            in the run result (an exhausted account)

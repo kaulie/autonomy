@@ -78,12 +78,35 @@ func (r *Runtime) Execute(decision Decision) (Result, error) {
 	if err := validatePlanLineage(decision.Actions); err != nil {
 		return Result{Err: err, Message: err.Error()}, err
 	}
+	// The contract this run will be judged by arrives with its first answer, and is
+	// checked before it is pinned: a contract the runtime could never evaluate must not
+	// become the standard the task ends up being held to (src/verification.go).
+	if decision.Ctx.Cycle == 1 {
+		if err := validateCompletionContract(decision.Contract, decision.Actions); err != nil {
+			return Result{Err: err, Message: err.Error()}, err
+		}
+	}
 
 	planID, planned, err := r.recordPlan(decision)
 	if err != nil {
 		return Result{Err: err}, err
 	}
+	// Pinned after the plan row is written — the contract belongs to the task, and the
+	// row it came in with is what makes it traceable. Only the first answer pins one:
+	// a later cycle restating its contract changes nothing (src/completion_contract.go).
+	if decision.Ctx.Cycle == 1 {
+		pinCompletionContract(decision, planID)
+	}
 	if len(decision.Actions) == 0 {
+		// A `done` is the one decision that claims the task is over, so it is the one
+		// decision the runtime verifies: the contract's criteria, judged against the
+		// world by the authoritative sources (src/verification.go). A claim that did not
+		// hold up is this cycle's failure — the planner re-plans from the verdict.
+		if isDone(decision) {
+			if err := r.verifyDone(decision.Ctx, planID); err != nil {
+				return Result{Err: err, Message: err.Error()}, err
+			}
+		}
 		return Result{Message: fmt.Sprintf("decision %s: nothing to execute", decision.Type)}, nil
 	}
 	result := Result{}

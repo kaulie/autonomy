@@ -240,6 +240,84 @@ func plannerRun(t *testing.T, description string) (*SQLiteStore, *Autonomy) {
 	return store, &Autonomy{AgentFactory: NewAgentFactory(), Runtime: rtu, Store: store}
 }
 
+// TestRunVerifiesADoneAgainstTheCompletionContract drives the whole chain: the planner
+// answers `done` with the contract it declared, the runtime pins that contract, and the
+// verdict is recorded against the world — so the task is `completed` with something
+// behind it, not on the model's word (docs/verification.md).
+func TestRunVerifiesADoneAgainstTheCompletionContract(t *testing.T) {
+	store, rt := plannerRun(t, "answer done")
+
+	task := &Task{ID: "task-verifiable", Description: "answer done", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	if err := rt.Run(task); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var status string
+	if err := store.db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, task.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != TaskStatusCompleted {
+		t.Fatalf("status=%q, want %q", status, TaskStatusCompleted)
+	}
+	contract, err := store.ListCompletionContract(task.ID)
+	if err != nil || len(contract) != 1 {
+		t.Fatalf("completion_contract=%v err=%v, want the criterion the first answer declared", contract, err)
+	}
+	verdicts, err := store.ListVerifications(task.ID)
+	if err != nil || len(verdicts) != 1 {
+		t.Fatalf("verification=%v err=%v, want one verdict", verdicts, err)
+	}
+	verdict := verdicts[0]
+	if verdict.Result != verificationPass || verdict.Method != "world_model" {
+		t.Fatalf("verdict=%+v, want the World Model to have passed it", verdict)
+	}
+	if !strings.Contains(verdict.Observed, "healthy") {
+		t.Fatalf("verdict=%+v, want what the world said", verdict)
+	}
+}
+
+// TestRunEndsUnverifiedWhenTheContractDoesNotHold: the world does not satisfy the
+// contract the planner declared, so every `done` is refused, the planner re-plans, and
+// the run ends `unverified` — never `completed`. The refusals are on record: one plan row
+// and one verdict per cycle (docs/verification.md).
+func TestRunEndsUnverifiedWhenTheContractDoesNotHold(t *testing.T) {
+	store, rt := plannerRun(t, "unverified answer")
+	t.Setenv("AUTONOMY_MAX_STEPS", "4")
+
+	task := &Task{ID: "task-unverified", Description: "unverified answer", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	err := rt.Run(task)
+	if err == nil {
+		t.Fatal("Run succeeded; the world never satisfied the contract")
+	}
+	if !strings.Contains(err.Error(), "verification refused the done") {
+		t.Fatalf("err=%v, want the refusal", err)
+	}
+
+	verdicts, err := store.ListVerifications(task.ID)
+	if err != nil || len(verdicts) != 4 {
+		t.Fatalf("verification=%v err=%v, want one verdict per refused done (budget was 4)", verdicts, err)
+	}
+	for _, verdict := range verdicts {
+		if verdict.Result != verificationFail {
+			t.Fatalf("verdict=%+v, want every one of them failed", verdict)
+		}
+		if !strings.Contains(verdict.Reason, "healthy") {
+			t.Fatalf("verdict=%+v, want what the world actually said", verdict)
+		}
+	}
+
+	var status, taskError string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &taskError); err != nil {
+		t.Fatal(err)
+	}
+	if status != TaskStatusUnverified {
+		t.Fatalf("status=%q, want %q: the run ended on a done that never held up", status, TaskStatusUnverified)
+	}
+	if !strings.Contains(taskError, "asset_degraded") {
+		t.Fatalf("tasks.error=%q, want why the done did not hold up", taskError)
+	}
+}
+
 // TestRunStopsWhenTheDecisionConcludesTheTask: done / blocked / need_input are answers,
 // not plans — the run ends on them instead of spending the rest of its budget asking the
 // planner the same question again (task-26 asked three times after its four steps had all
@@ -303,7 +381,9 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 // answer, but only once it holds up. A `done` that proves nothing breaks
 // done.evidence_present, which is the type's requirement, so that cycle fails like any
 // other: nothing is written for it, nothing is executed, and the planner re-plans from
-// the reason — the task is never completed on the model's word (docs/execution-loop.md).
+// the reason — the task is never completed on the model's word, and a run that ends with
+// an answer that never held up ends `unverified`, not `completed`
+// (docs/execution-loop.md, docs/verification.md).
 func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	store, rt := plannerRun(t, "unproven answer")
 	t.Setenv("AUTONOMY_MAX_STEPS", "4")
@@ -336,11 +416,11 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &taskError); err != nil {
 		t.Fatal(err)
 	}
-	if status != TaskStatusError {
-		t.Fatalf("status=%q, want %q: the run ended on a failed cycle, not on an answer", status, TaskStatusError)
+	if status != TaskStatusUnverified {
+		t.Fatalf("status=%q, want %q: the run ended on a `done` that never held up", status, TaskStatusUnverified)
 	}
 	if !strings.Contains(taskError, "done.evidence_present") {
-		t.Fatalf("tasks.error=%q, want why the runtime gave up on the task", taskError)
+		t.Fatalf("tasks.error=%q, want why the answer did not hold up", taskError)
 	}
 }
 

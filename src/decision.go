@@ -91,6 +91,12 @@ type Decision struct {
 	// Evidence are the facts the decision rests on; plan steps reference them by
 	// ID via the step's evidence_refs.
 	Evidence []Evidence
+	// Contract is the completion contract the planner declares with its first answer
+	// of a run: the facts that must hold for the task to be done, each with the
+	// evidence slot it is about (src/completion_contract.go). The runtime pins the
+	// first contract it is given and verifies every `done` against it — what executing
+	// the decision did never changes the standard it is judged by.
+	Contract []Criterion
 	// Actions are the plan's steps in execution order (empty for
 	// done/blocked/need_input).
 	Actions []Action
