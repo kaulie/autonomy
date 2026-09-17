@@ -18,10 +18,10 @@ type Runtime struct {
 	caps   map[string]capability.Capability
 	world  *World
 	agents *AgentFactory
-	// cycle is the decision cycle Execute is running, so a capability can ask
-	// what cycle it is delegating from (see WorkerPlaceholders). Execution is
-	// synchronous — one cycle at a time on the calling goroutine — so this is
-	// that cycle while its actions run, and nil outside one.
+	// cycle is the decision cycle the in-flight Execute is running, so a capability
+	// can ask what cycle it is delegating from (see WorkerPlaceholders). Execute may
+	// run on a worker goroutine (Autonomy.dispatchExecute); one Execute at a time
+	// still owns this field for the duration of that call, and nil outside one.
 	cycle *DecisionContext
 	// stepSessions collects the agents acquired while the current step runs, so the
 	// step can record which providers it talked to (see recordStep). Reset per step.

@@ -107,6 +107,13 @@ func (r *Autonomy) Close() error {
 	return first
 }
 
+// cycleDone is the event the runtime worker sends when a dispatched decision has
+// finished. The planner event loop observes it and decides whether to plan again.
+type cycleDone struct {
+	decision Decision
+	result   Result
+}
+
 func (r *Autonomy) Run(task *Task) error {
 	if task == nil {
 		return fmt.Errorf("nil task")
@@ -127,41 +134,55 @@ func (r *Autonomy) Run(task *Task) error {
 	agent.Start()
 	persistAgent(agent)
 
+	// Event-driven loop (docs/principles.md §Event Driven; docs/runtime.md): Decide
+	// runs on this goroutine; Runtime.Execute runs on a worker. After a decision is
+	// dispatched the planner parks on events — it is not locked inside Execute.
+	// Per task, decide → execute → observe stays ordered: the next Decide waits for
+	// this cycle's Result so previous_actions stay coherent.
+	events := make(chan cycleDone, 1)
 	cycles := 0
 	var err error
 	var decision Decision
 	var result Result
 	var history []Result
-	for r.ShouldContinue(agent) {
-		cycles++
-		if cycles > r.maxSteps() {
-			break
+	needDecide := true
+	for {
+		if needDecide {
+			if !r.ShouldContinue(agent) {
+				break
+			}
+			cycles++
+			if cycles > r.maxSteps() {
+				break
+			}
+			decision, err = agent.DecideAtCycle(cycles, history)
+			if err != nil {
+				// Nothing was planned, so nothing else can explain it: the reason it
+				// could not decide is the whole failure.
+				err = fmt.Errorf("decide: %w", err)
+				failTask(task, err)
+				return err
+			}
+			// Whether this decision concludes the task is the decision's own answer to
+			// give — its type — and nothing the cycle does can change it.
+			//
+			// The cycle still runs: Runtime.Execute is where the decision's contract is
+			// checked (a done that proves nothing does not get to complete anything)
+			// and where its plan row is written. A concluding decision carries no steps,
+			// so running it *is* that check and that row — still on the worker, so the
+			// planner loop is free while it happens.
+			r.dispatchExecute(events, decision)
+			needDecide = false
+			continue
 		}
-		decision, err = agent.DecideAtCycle(cycles, history)
-		if err != nil {
-			// Nothing was planned, so nothing else can explain it: the reason it
-			// could not decide is the whole failure.
-			err = fmt.Errorf("decide: %w", err)
-			failTask(task, err)
-			return err
-		}
-		// Whether this decision concludes the task is the decision's own answer to
-		// give — its type — and nothing the cycle does can change it. It is read
-		// here, before the cycle runs, so that is not left to the reader to infer
-		// from where the break sits below.
-		//
-		// The cycle still runs, though: Runtime.Execute is where the decision's
-		// contract is checked (a done that proves nothing does not get to complete
-		// anything) and where its plan row is written — the record of the answer,
-		// with the evidence it rests on and, for blocked / need_input, the need.
-		// A concluding decision carries no steps, so running it *is* that check and
-		// that row.
-		concludes := decision.Concludes()
 
-		// A failed action stops this cycle, not the task: the failure is observed
-		// and handed to the next decision (see executeDecision).
-		result = r.executeDecision(agent, decision)
+		ev := <-events
+		decision = ev.decision
+		result = ev.result
 		err = result.Err
+		if agent != nil {
+			agent.Observe(result)
+		}
 		history = append(history, result)
 		// A decision that concludes the task ends the run here: done / blocked /
 		// need_input are answers, not plans, so another cycle would only ask the same
@@ -173,13 +194,12 @@ func (r *Autonomy) Run(task *Task) error {
 		// failed cycle and the planner re-plans from the reason it carries — the
 		// promise docs/execution-loop.md makes. Only an answer that held up ends the
 		// run. Either way the loop stays bounded by maxSteps.
-		if concludes && result.Err == nil {
+		if decision.Concludes() && result.Err == nil {
 			break
 		}
+		needDecide = true
 	}
 
-	// ret, err := agent.Result()
-	// fmt.Printf("Agent result: %v, error: %v\n", ret, err)
 	if task.Status == TaskStatusRunning || task.Status == TaskStatusPending {
 		switch {
 		case err != nil && isDone(decision):
@@ -213,6 +233,30 @@ func (r *Autonomy) Run(task *Task) error {
 	return err
 }
 
+// dispatchExecute runs Runtime.Execute on a worker goroutine and delivers the
+// Result as a cycleDone event. Observe stays on the planner event loop so the
+// next Decide sees previous_actions in order.
+func (r *Autonomy) dispatchExecute(events chan<- cycleDone, decision Decision) {
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				events <- cycleDone{
+					decision: decision,
+					result: Result{
+						Err:     fmt.Errorf("execute panic: %v", rec),
+						Message: fmt.Sprintf("execute panic: %v", rec),
+					},
+				}
+			}
+		}()
+		result, execErr := r.Runtime.Execute(decision)
+		if execErr != nil {
+			result.Err = execErr
+		}
+		events <- cycleDone{decision: decision, result: result}
+	}()
+}
+
 // failTask ends the task in error, with the reason the runtime gave up on it —
 // the decide that failed, or the last cycle's failing action. Both used to be
 // printed and thrown away: a task row said "error" and nothing said why, so the
@@ -241,6 +285,9 @@ func (r *Autonomy) finishAgent(agent *Agent) {
 }
 
 // executeDecision runs one decision's plan and tells the agent what happened.
+// Tests call this synchronously; Autonomy.Run dispatches Execute on a worker and
+// Observes on the planner event loop instead (see dispatchExecute).
+//
 // A failed action (see Runtime.Execute: the plan stops at its first failure)
 // ends the cycle without failing the task: the result carries the error, the
 // next decision sees it in previous_actions, and the task ends as error only if
