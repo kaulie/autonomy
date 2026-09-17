@@ -257,8 +257,7 @@ properties of undefined (reading 'trim')`），所以桥会兜底一个通用 pr
    `maxTokensPerTurn` 这个参数，但桥目前不传 —— 要显式压/抬每轮上限时，就落在 bridge 的
    `createAgent` 参数上（`src/clinesdk/bridge/bridge.mjs`）。
 
-**已知边界**：planner（`LLMReasoner` 的决策轮）目前**不**吃这个重试 —— 它的一轮要重出的是决策
-JSON，恢复方式与 worker 的"继续写代码"不同，留给后续。
+**已知边界**：planner 的决策轮**现在也吃**这个重试 —— 重试是**会话的**（`LLMSession.Say`），不是 worker 的：一轮被输出上限掐断时，谁的一轮都值得在同一个会话上再问一次。要重出的是决策 JSON 还是"继续写代码"，由那一轮自己的 prompt 与 policy 决定（planner 收到的是同一份 `TURN_TRUNCATED.md`），失败的原始轮与重试都记在**同一个 cycle**（重试不是新的决策轮）。
 
 ## 已知边界（后续可做）
 

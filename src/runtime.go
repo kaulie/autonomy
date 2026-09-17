@@ -6,13 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/capability/broker"
-	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // Runtime reliably executes actions and exposes agent acquisition to capabilities.
@@ -27,7 +25,7 @@ type Runtime struct {
 	cycle *DecisionContext
 	// stepSessions collects the agents acquired while the current step runs, so the
 	// step can record which providers it talked to (see recordStep). Reset per step.
-	stepSessions []*runtimeAgentSession
+	stepSessions []*LLMSession
 }
 
 func NewRuntime(agents *AgentFactory, caps ...capability.Capability) *Runtime {
@@ -236,7 +234,7 @@ func (r *Runtime) recordStep(decision Decision, planID int64, planned []Executio
 	// and that interaction detail is not recorded yet (docs/execution-step.md).
 	seq := 0
 	for _, sess := range r.stepSessions {
-		for _, turnID := range sess.turns {
+		for _, turnID := range sess.Turns() {
 			seq++
 			saveExecutionStepInteraction(ExecutionStepInteraction{
 				StepID:       stepID,
@@ -427,7 +425,16 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		return nil, fmt.Errorf("unknown agent backend %q", opts.Backend)
 	}
 	agent.Start()
-	sess := &runtimeAgentSession{rt: r, agent: agent, taskID: opts.TaskID, providerName: string(backend)}
+	// The worker's session: the same session a task's own agent runs on, with a
+	// worker identity on the agent. What makes its turns delegated turns is that
+	// identity (see LLMSession.turnShape) — not a different session type — and it is
+	// why the worker's runs are attributed to the task the capability delegated from.
+	sess := NewLLMSession(r, agent, SessionOpts{
+		TaskID:   strings.TrimSpace(opts.TaskID),
+		Model:    opts.Model,
+		Provider: backend,
+	})
+	agent.Session = sess
 	// Inside a cycle, this acquisition belongs to the step that made it; the step
 	// records it as one of its interactions (see recordStep).
 	if r.cycle != nil {
@@ -445,126 +452,6 @@ func (r *Runtime) releaseRegistered(agent *Agent) {
 	r.agents.Delete(agent.Name)
 }
 
-type runtimeAgentSession struct {
-	rt     *Runtime
-	agent  *Agent
-	taskID string
-	// round counts the prompts this session has sent. cycle is always *this
-	// agent's own* round number, starting at 1: an agent's cycles are its own,
-	// whether it is planning a task or working through a delegated job (and a
-	// delegated agent may well have decision cycles of its own). Nothing here
-	// compares two agents' cycles. A session is prompted sequentially — a
-	// capability asks and waits — so a plain counter is enough.
-	round int
-	// turns are the runs this session recorded, in order: what a step that used
-	// this session talked to (see recordStep).
-	turns []int64
-	// providerName is the backend this session runs on, remembered at acquisition
-	// because Release detaches the agent and the step is recorded after that.
-	providerName string
-}
-
-// provider is the LLM backend behind this session, which is who the interaction
-// was with.
-func (s *runtimeAgentSession) provider() string {
-	if s == nil {
-		return ""
-	}
-	if s.providerName != "" {
-		return s.providerName
-	}
-	if s.agent == nil {
-		return ""
-	}
-	return string(s.agent.effectiveBackend())
-}
-
-func (s *runtimeAgentSession) ID() string {
-	if s == nil || s.agent == nil {
-		return ""
-	}
-	return s.agent.Name
-}
-
-// Workspace is the sandbox this agent works in. It is the agent's own
-// AGENT_WORKSPACE unless AcquireAgent was asked to override it.
-func (s *runtimeAgentSession) Workspace() string {
-	if s == nil || s.agent == nil {
-		return ""
-	}
-	return s.agent.Workspace
-}
-
-// WorkerPlaceholders lets a capability ask this session's host for the runtime
-// context of the delegation it was acquired for (see
-// broker.WorkerPromptContext): the session speaks for this worker agent.
-func (s *runtimeAgentSession) WorkerPlaceholders() map[string]string {
-	if s == nil || s.rt == nil {
-		return nil
-	}
-	return s.rt.WorkerPlaceholders(s.agent)
-}
-
-// beginDelegatedTrace opens the run header for a prompt this agent received from
-// another agent (a capability delegating a sub-task to it), so the recorded input
-// row is attributed to the agent that delegated rather than to the user: the user
-// only authors the top-level task.
-//
-// Its cycle is this agent's own round number, from 1 — not the delegating agent's
-// cycle: every cycle is relative to the agent it belongs to, and the delegating
-// agent's cycle appears as delegated_by.cycle in the prompt's Runtime Context.
-func (s *runtimeAgentSession) beginDelegatedTrace(prompt string) *LLMTrace {
-	s.round++
-	trace := BeginLLMTraceFrom(s.agent, LLMMessageRoleAgent, s.taskID, s.round, ReasonModeAgent, prompt)
-	if trace != nil && trace.handle.TurnID != 0 {
-		s.turns = append(s.turns, trace.handle.TurnID)
-	}
-	return trace
-}
-
-func (s *runtimeAgentSession) Prompt(ctx context.Context, prompt string) (string, error) {
-	if s == nil || s.agent == nil {
-		return "", fmt.Errorf("nil agent session")
-	}
-	switch s.agent.effectiveBackend() {
-	case AgentBackendCursor, AgentBackendCline:
-	default:
-		return "", fmt.Errorf("prompt unsupported for backend %q", s.agent.Backend)
-	}
-	idle := llmrun.IdleTimeout()
-	wd := llmrun.NewIdleWatchdog(ctx, idle)
-	defer wd.Stop()
-	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
-
-	retries := turnRetryBudget()
-	for attempt := 0; ; attempt++ {
-		trace := s.beginDelegatedTrace(prompt)
-		text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, ReasonModeAgent, trace.Emit)
-		if err == nil {
-			runRes.RawOutput = text
-			trace.Finish(runRes)
-			return text, nil
-		}
-		trace.Finish(runRes)
-		// A turn the model's output limit cut off is the one failed run worth
-		// another turn: the session is intact, nothing of the truncated turn ran,
-		// and the model can be told to finish the rest in smaller steps. Every
-		// other failure (a dead session, a provider error, an exhausted account)
-		// is reported as it always was.
-		if attempt >= retries || !isTruncatedTurn(err) {
-			return "", err
-		}
-		reminder, rerr := turnTruncatedPrompt(broker.WorkerFrame(s))
-		if rerr != nil {
-			fmt.Fprintf(os.Stderr, "[autonomy] truncated turn on %s, no retry: %v\n", s.agent.Name, rerr)
-			return "", err
-		}
-		fmt.Fprintf(os.Stderr, "[autonomy] truncated turn on %s (retry %d/%d): %v — asking for the rest in smaller steps\n",
-			s.agent.Name, attempt+1, retries, err)
-		prompt = reminder
-	}
-}
-
 // recordAgentPrompt persists a complete agent-mode interaction in one shot. It
 // is retained for callers that already hold the final output; live provider
 // runs record through BeginLLMTrace so the stream is captured as it happens.
@@ -576,26 +463,6 @@ func recordAgentPrompt(agent *Agent, taskID, input, output string) {
 		return
 	}
 	recordReasonTurn(agent, taskID, 1, ReasonModeAgent, input, output)
-}
-
-func (s *runtimeAgentSession) Release(ctx context.Context) error {
-	if s == nil || s.agent == nil || s.rt == nil {
-		return nil
-	}
-	s.agent.Stop()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	s.agent.disposeCursorSession(ctx)
-	s.agent.disposeClineSession(ctx)
-	if s.agent.IsEphemeral() {
-		softDeleteAgent(s.agent.ID)
-		s.rt.agents.Delete(s.agent.Name)
-	} else {
-		persistAgent(s.agent)
-	}
-	s.agent = nil
-	return nil
 }
 
 var _ broker.AgentBroker = (*Runtime)(nil)

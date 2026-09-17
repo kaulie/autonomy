@@ -51,7 +51,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 （以及 `{{TASK}}` / `{{CONTEXT_ENTITY}}` / `{{GOAL_TYPE}}`）—— `code_edit` 与 `deployment.monitor`
 都一样。词表、取值与渲染规则只有一份，在 `src/capability/broker`（`WorkerFramePlaceholders` /
 `WorkerFrame` / `RenderWorkerPrompt`）：取值来自 planner 用的同一个渲染器（`src/prompt.go`，
-`broker.WorkerPromptContext` 由 `Runtime.AcquireAgent` 发出的 session 实现，见 `Runtime.WorkerPlaceholders`），
+`broker.WorkerPromptContext` 由 `Runtime.AcquireAgent` 发出的 session（`LLMSession`，与 planner 用的是同一种，见 [session.md](session.md)）实现，见 `Runtime.WorkerPlaceholders`），
 所以被委托的 agent 看到的世界、完成原则和 planner 看到的是同一份。差别只有视角：worker 那份按**它自己**渲染
 —— agent 身份 / workspace / backend 是 worker 的（委托方的沙箱永远不会被说成 worker 的，委托方以
 `delegated_by` 出现），Task 与 `previous_actions` 是它被委托的那条 Task。host 取不到（测试替身）则该节渲染成

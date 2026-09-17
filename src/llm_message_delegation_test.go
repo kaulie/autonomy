@@ -27,9 +27,10 @@ func TestDelegatedRunInputIsAttributedToTheAgent(t *testing.T) {
 		t.Fatalf("runtime run input role=%q, want %q", ownMsgs[0].Role, LLMMessageRoleUser)
 	}
 
-	// A delegated run: a capability prompted this worker agent.
-	sess := &runtimeAgentSession{agent: &Agent{ID: 5002, Name: "agent-5002"}, taskID: "task-1"}
-	trace := sess.beginDelegatedTrace("You are an autonomous software engineer working in this workspace:\n\n/ws\n\nGoal:\n\ndo it")
+	// A delegated run: a capability prompted this worker agent. The worker identity on
+	// the agent is what makes it a delegated turn.
+	sess := &LLMSession{agent: &Agent{ID: 5002, Name: "agent-5002", Role: AgentRoleWorker}, taskID: "task-1"}
+	trace := sess.beginTurn("You are an autonomous software engineer working in this workspace:\n\n/ws\n\nGoal:\n\ndo it", RoundAuto)
 	trace.Finish(LLMRunResult{Status: LLMStatusFinished, RawOutput: "done"})
 
 	msgs := mustListMessages(t, store, trace.handle.TurnID)

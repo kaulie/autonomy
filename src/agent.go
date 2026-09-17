@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -144,6 +145,13 @@ type Agent struct {
 	CurrentTask *Task
 	Context     string
 	DecideMaker *DecisionMaker
+	// Session is this agent's conversation with its LLM — where its turns are taken
+	// and recorded. Every agent has one: the runtime gives the task's own agent a
+	// session when it starts the task (Autonomy.Run), and Runtime.AcquireAgent gives
+	// a delegated worker one when a capability acquires it. What the agent is
+	// (Role) is what makes its turns plan turns or delegated turns, so there is no
+	// second kind of session to pick from.
+	Session *LLMSession
 
 	cursorAgent *cursorsdk.Agent
 	// clineAgent is the Cline session for the mode in use; clineAgents keeps one
@@ -185,6 +193,34 @@ func (a *Agent) resetLLMFrame() {
 
 func (a *Agent) IsEphemeral() bool {
 	return a.Lifecycle == "" || a.Lifecycle == AgentLifecycleEphemeral
+}
+
+// closeAgent ends an agent's life: it stops, its provider sessions are torn down, and
+// it is let go — an ephemeral agent is deleted (soft-deleted in the store, dropped
+// from the factory), while a persistent one is only closed, so its durable
+// provider-side state can be resumed later.
+//
+// Every agent ends here, whichever door it came in through: the task's own agent when
+// its run is over, a delegated worker when the capability releases its session. There
+// is nothing in it that depends on who the agent was, which is why there is one of it.
+func closeAgent(agent *Agent, factory *AgentFactory, ctx context.Context) {
+	if agent == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	agent.Stop()
+	agent.disposeCursorSession(ctx)
+	agent.disposeClineSession(ctx)
+	if agent.IsEphemeral() {
+		softDeleteAgent(agent.ID)
+		if factory != nil {
+			factory.Delete(agent.Name)
+		}
+		return
+	}
+	persistAgent(agent)
 }
 
 func (a *Agent) Observe(result Result) {

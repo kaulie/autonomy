@@ -33,11 +33,7 @@ func NewDecideMaker() *DecisionMaker {
 	// Default stays local for offline tests. Set AUTONOMY_REASONER=llm to use Cursor SDK Bridge.
 	reasoner := Reasoner(NewLocalReasoner("local-reasoner"))
 	if os.Getenv("AUTONOMY_REASONER") == "llm" {
-		model := os.Getenv("AUTONOMY_LLM_MODEL")
-		if model == "" {
-			model = "composer-2"
-		}
-		reasoner = NewLLMReasoner(model)
+		reasoner = NewLLMReasoner()
 	}
 	return &DecisionMaker{reasoner: reasoner}
 }

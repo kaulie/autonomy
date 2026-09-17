@@ -16,7 +16,7 @@ func TestLLMReasonerLive(t *testing.T) {
 	if os.Getenv("CURSOR_API_KEY") == "" {
 		t.Skip("CURSOR_API_KEY missing")
 	}
-	r := autonomy.NewLLMReasoner("composer-2")
+	r := autonomy.NewLLMReasoner()
 	task := &autonomy.Task{
 		ID: "live", Description: "smoke",
 	}
