@@ -175,6 +175,12 @@ type ActionResult struct {
 // The loop stops at one of those: asking the planner again spends a whole cycle to be
 // told the same thing, which is what "a cycle concludes with observation and
 // verification, not with the step count running out" means (docs/execution-loop.md).
+//
+// This is a property of the type alone: what executing the decision did — including
+// the runtime refusing it because it broke its type's requirements
+// (src/decision_rules.go) — never changes it. So the loop reads this *before* the
+// cycle runs and breaks only if the answer also held up: a refused done / blocked /
+// need_input is a failed cycle, and the planner gets to re-plan from the reason.
 func (d Decision) Concludes() bool {
 	switch strings.ToLower(strings.TrimSpace(d.Type)) {
 	case decisionDone, decisionBlocked, decisionNeedInput:

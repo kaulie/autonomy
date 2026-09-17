@@ -140,6 +140,19 @@ func (r *Autonomy) Run(task *Task) error {
 			failTask(task, err)
 			return err
 		}
+		// Whether this decision concludes the task is the decision's own answer to
+		// give — its type — and nothing the cycle does can change it. It is read
+		// here, before the cycle runs, so that is not left to the reader to infer
+		// from where the break sits below.
+		//
+		// The cycle still runs, though: Runtime.Execute is where the decision's
+		// contract is checked (a done that proves nothing does not get to complete
+		// anything) and where its plan row is written — the record of the answer,
+		// with the evidence it rests on and, for blocked / need_input, the need.
+		// A concluding decision carries no steps, so running it *is* that check and
+		// that row.
+		concludes := decision.Concludes()
+
 		// A failed action stops this cycle, not the task: the failure is observed
 		// and handed to the next decision (see executeDecision).
 		result = r.executeDecision(agent, decision)
@@ -148,8 +161,14 @@ func (r *Autonomy) Run(task *Task) error {
 		// A decision that concludes the task ends the run here: done / blocked /
 		// need_input are answers, not plans, so another cycle would only ask the same
 		// question again (task-26 asked three times after its plan had succeeded).
-		// A *failed* cycle is the other case — it re-plans until the budget is gone.
-		if decision.Concludes() {
+		//
+		// An answer the runtime *refused* concluded nothing. A done with no evidence
+		// and a blocked that does not say what is missing break their type's
+		// requirements (src/decision_rules.go), so that cycle failed like any other
+		// failed cycle and the planner re-plans from the reason it carries — the
+		// promise docs/execution-loop.md makes. Only an answer that held up ends the
+		// run. Either way the loop stays bounded by maxSteps.
+		if concludes && result.Err == nil {
 			break
 		}
 	}
@@ -165,7 +184,9 @@ func (r *Autonomy) Run(task *Task) error {
 			// under the vocabulary's own word for it, and `blocked` / `need_input` as
 			// themselves, since a task waiting on something is not a finished one. Why it
 			// is blocked is that decision's `need`, on its plan row and in its reply;
-			// Error stays what docs/store.md says it is: why a run failed.
+			// Error stays what docs/store.md says it is: why a run failed. (A concluding
+			// decision reaches this branch only if it held up: a refused answer leaves the
+			// loop the way any failed cycle does, so `err` above takes it instead.)
 			task.Status = TaskStatusFor(decision)
 			persistTask(task)
 		default:

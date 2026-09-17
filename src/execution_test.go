@@ -299,6 +299,51 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 	}
 }
 
+// TestRunDoesNotStopOnAnAnswerTheRuntimeRefused: an answer stops a run because it is an
+// answer, but only once it holds up. A `done` that proves nothing breaks
+// done.evidence_present, which is the type's requirement, so that cycle fails like any
+// other: nothing is written for it, nothing is executed, and the planner re-plans from
+// the reason — the task is never completed on the model's word (docs/execution-loop.md).
+func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
+	store, rt := plannerRun(t, "unproven answer")
+	t.Setenv("AUTONOMY_MAX_STEPS", "4")
+
+	task := &Task{ID: "task-unproven", Description: "unproven answer", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
+	err := rt.Run(task)
+	if err == nil {
+		t.Fatal("Run succeeded; the planner answered `done` without evidence every cycle")
+	}
+	// The run ends on the last cycle's failure, and that failure is the rule the answer
+	// broke — not the answer's own claim.
+	if !strings.Contains(err.Error(), "done.evidence_present") {
+		t.Fatalf("err=%v, want the rule the refused answer broke", err)
+	}
+
+	var turns int
+	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, task.ID).Scan(&turns); err != nil {
+		t.Fatal(err)
+	}
+	if turns != 4 {
+		t.Fatalf("reason_turns=%d, want the run to re-plan after every refusal (budget was 4)", turns)
+	}
+	// A refused decision is neither written nor executed: there is no plan row, so
+	// nothing records this task as having concluded anything.
+	if plans, err := store.ListExecutionPlans(task.ID); err != nil || len(plans) != 0 {
+		t.Fatalf("plans=%v err=%v, want none for a refused decision", plans, err)
+	}
+
+	var status, taskError string
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &taskError); err != nil {
+		t.Fatal(err)
+	}
+	if status != TaskStatusError {
+		t.Fatalf("status=%q, want %q: the run ended on a failed cycle, not on an answer", status, TaskStatusError)
+	}
+	if !strings.Contains(taskError, "done.evidence_present") {
+		t.Fatalf("tasks.error=%q, want why the runtime gave up on the task", taskError)
+	}
+}
+
 // TestRunRecordsThePlanAndWhatItTalkedTo drives the whole chain: the planner answers
 // (through the fake bridge), the runtime writes the plan and executes its step, and
 // afterwards the plan is traceable to the exact reply — and to the task's own first
