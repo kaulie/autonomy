@@ -176,7 +176,7 @@ func (r *Runtime) verifyCriterion(ctx DecisionContext, planID int64, criterion C
 	case InputSourceWorld:
 		return r.verifyWorldCriterion(verdict, src, criterion.Expect)
 	case InputSourceStep:
-		return r.verifyStepCriterion(&v, verdict, src, criterion, prior)
+		return r.verifyStepCriterion(ctx, &v, verdict, src, criterion, prior)
 	}
 	return verdict(verificationInconclusive, fmt.Sprintf("unknown evidence source kind %q", src.kind), "", verificationMethodNone)
 }
@@ -218,8 +218,10 @@ func (r *Runtime) verifyWorldCriterion(verdict verdictFunc, src inputSource, exp
 
 // verifyStepCriterion judges a criterion whose slot is a step's output. What a step
 // reported is evidence — a reference — not truth, so the value it produced is only what
-// the authoritative source is asked *about*; the verdict comes from that source.
-func (r *Runtime) verifyStepCriterion(v *Verification, verdict verdictFunc, src inputSource, criterion Criterion, prior []ActionResult) Verification {
+// the authoritative source is asked *about*; the verdict comes from that source. The
+// context is threaded through because asking is a call this runtime makes on the task's
+// behalf (its task id goes to a reader that declares one — see askAuthority).
+func (r *Runtime) verifyStepCriterion(ctx DecisionContext, v *Verification, verdict verdictFunc, src inputSource, criterion Criterion, prior []ActionResult) Verification {
 	producer, ok := stepOutputByName(prior, src.step)
 	if !ok {
 		return verdict(verificationInconclusive,
@@ -241,7 +243,7 @@ func (r *Runtime) verifyStepCriterion(v *Verification, verdict verdictFunc, src 
 	if err != nil {
 		return verdict(verificationInconclusive, err.Error(), reference, verificationMethodNone)
 	}
-	answer, err := r.askAuthority(ask, prior)
+	answer, err := r.askAuthority(ctx, ask, prior)
 	if err != nil {
 		return verdict(verificationInconclusive, fmt.Sprintf("the authoritative source could not answer: %v", err), reference, ask.method)
 	}
@@ -298,7 +300,15 @@ func authorityFor(criterion Criterion, producer ActionResult, key string) (verif
 // nothing. Its inputs are checked the way a plan step's are — a reader called with an
 // input it does not declare, or without one it requires, is a broken verification and
 // says so instead of being called anyway.
-func (r *Runtime) askAuthority(ask verificationAsk, prior []ActionResult) (map[string]string, error) {
+//
+// It is a call the runtime makes on this task's behalf, so it goes through the same
+// path a plan step does: the task id is filled for a reader that declares `task_id`
+// before the reader runs (fillTaskID). A reader that acquires a worker for this
+// observation — deployment.monitor does — therefore produces an agent row and
+// reason_turns rows under *this* task, exactly as the step whose evidence it is
+// judging did. The inputs the contract bound are still what the reader is called with;
+// nothing else is added, and nothing bound is overwritten.
+func (r *Runtime) askAuthority(ctx DecisionContext, ask verificationAsk, prior []ActionResult) (map[string]string, error) {
 	name := strings.ToLower(strings.TrimSpace(ask.capability))
 	reader, ok := r.caps[name]
 	if !ok {
@@ -322,6 +332,7 @@ func (r *Runtime) askAuthority(ask verificationAsk, prior []ActionResult) (map[s
 	if err != nil {
 		return nil, err
 	}
+	fillTaskID(name, ctx.Task, values)
 	return reader.Run(values)
 }
 

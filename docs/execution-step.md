@@ -73,6 +73,7 @@ step 的每个入参都写清**来源**，而且只有三种（没有第四种�
 - **不因为后续步骤缺输入而重开已完成的 step**：缺依赖就报缺依赖（`previous_actions` 里能看到原因），而不是把已经满足 contract 的步骤再跑一遍。
 - **元信息不是产出**：谁解析出的 ref、谁触发的、轮询了几次、哪个 backend 跑的 —— 那描述的是**这次调用**，不是它产出什么，也不是后面哪一步能绑定的东西。下游要这类状态就走**世界模型**（`world_model:…`，runtime 观察到的世界）或它自己的输入；**"别人要用"不会把元信息变成产出**，能力也不需要替下游把自己的账本回传。
 - **runtime 自己只补一个入参：`task_id`**，而且只补给它**声明过** `task_id` 的能力（`code_edit` 用它把 worker 的 run 归属到这条 Task）。
+  验证问权威来源时走的是**同一条路**（`src/verification.go` 的 `askAuthority` 与 `CapabilityAction` 都经 `fillTaskID`）：读者也不会因为是被验证调用而不是被 step 调用，就产出一堆没有 Task 的 run（见 [verification.md](verification.md) §权威来源）。
   其余一切——包括 `instruction`——都必须来自计划：以前 runtime 会拿任务描述兜底，现在不兜了（那正是"隐式来源"）。
 
 **两类行各存一半**（这正是 plan 行与 step 行分工的用处）：

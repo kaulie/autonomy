@@ -51,6 +51,7 @@ World Model / 只读能力 → pass / fail / inconclusive
 
 - **World Model**：本地 asset 的 `kind` / `state`，runtime 直接读。这类证据的槽本身就是读取（`world_model:asset.<id>.<field>`），不需要再去问谁。
 - **只读能力**：证据的**产出者**说明它是什么东西（`service.deploy` 的 output 是一条 pipeline），运行时的 `verificationReaders` 表说明这类证据该问谁、用什么 input 问（`service.deploy → deployment.monitor`）。表里没有、判据也没写 `check` → **inconclusive**。
+- **问的方式和 step 调用同一条路**：runtime 用它调用能力的方式调用读者 —— 判据绑定的入参原样传下去，不额外添加、不覆盖任何绑定；只有那个「runtime 自己只补一个入参」的 `task_id` 照样补给它（见 [execution-step.md](execution-step.md) §Runtime Responsibility）。所以一个会 acquire worker 的读者（`deployment.monitor` 就是）产出的 agent 行与 `reason_turns` 行**挂在同一条 Task 下**：验证所问的对象和产出它的那一步，属于同一个任务。
 - **Planner 指定的 `check`**：该域还没有注册 reader 时，判据可以直接写明权威能力。
 
 ## 判定与用途

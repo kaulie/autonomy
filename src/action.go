@@ -84,11 +84,7 @@ func (a CapabilityAction) Execute(ctx DecisionContext) (ActionResult, error) {
 	// it). Everything else a step takes has to be in the plan: an input no step
 	// bound is not looked up anywhere, and one the runtime would have to invent is
 	// not invented (see docs/execution-step.md, §Runtime Responsibility).
-	if ctx.Task != nil && ctx.Task.ID != "" && in["task_id"] == "" {
-		if fields, declared := declaredInputsOf(name); declared && fieldAccepts(fields, "task_id") {
-			in["task_id"] = ctx.Task.ID
-		}
-	}
+	fillTaskID(name, ctx.Task, in)
 	// The record keeps the input the capability was actually called with, not the
 	// plan's raw step input: a resolved binding is part of what ran, and the plan row
 	// keeps the binding (docs/execution-step.md).
@@ -101,6 +97,29 @@ func (a CapabilityAction) Execute(ctx DecisionContext) (ActionResult, error) {
 	}
 	fmt.Printf("CapabilityAction %s: %v\n", name, out)
 	return record, nil
+}
+
+// fillTaskID adds the one input the runtime supplies on its own: the id of the task
+// the call is being made for, and only to a capability that *declares* `task_id`
+// (code_edit / deployment.monitor hand it to the worker they acquire, so the worker's
+// agent row and every reason_turns row it produces belong to that task).
+//
+// Every call this runtime makes on a task's behalf goes through here — a plan step and
+// a verification reader alike. A verification reader is the same act as a step
+// (docs/verification.md: the runtime fills the slot and asks the authoritative source),
+// so an agent-backed reader acquired by verification lands under the same task as the
+// step that produced the evidence it is judging; calling a capability around this is
+// how a run ends up with turns that belong to nobody.
+//
+// A nil task (or one with no id) adds nothing, and an input the caller already set is
+// never overwritten: what the plan bound wins.
+func fillTaskID(name string, task *Task, in map[string]string) {
+	if task == nil || in == nil || strings.TrimSpace(task.ID) == "" || in["task_id"] != "" {
+		return
+	}
+	if fields, declared := declaredInputsOf(name); declared && fieldAccepts(fields, "task_id") {
+		in["task_id"] = task.ID
+	}
 }
 
 func activeCapabilityFactory() *capability.Factory {

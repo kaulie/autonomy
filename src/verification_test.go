@@ -187,6 +187,70 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 	}
 }
 
+// TestVerificationReaderIsCalledWithTheTaskID: the authoritative reader is called the way
+// a plan step is — through the same path, task id included. A reader that acquires a
+// worker (deployment.monitor does) has to attribute that worker's agent row and its
+// reason_turns rows to the task whose done is being verified; calling the capability
+// around the runtime's own fill is how runs end up with turns that belong to nobody.
+// What the contract bound for `task_id`, if anything, still wins.
+func TestVerificationReaderIsCalledWithTheTaskID(t *testing.T) {
+	const criterion = `{"name":"C2","requirement":"the deployment completed",` +
+		`"evidence":{"source":"step:deploy.output.pipeline_id"},` +
+		`"expect":{"field":"state","equals":"succeeded"}`
+
+	cases := []struct {
+		name     string
+		check    string // appended to the criterion: a check that names the task id itself
+		wantTask string
+	}{
+		{name: "the runtime fills the task id", wantTask: "task-attribution"},
+		{
+			name: "what the contract bound wins",
+			check: `,"check":{"capability":"deployment.monitor","inputs":{` +
+				`"deployment":{"source":"step:deploy.output.pipeline_id"},"task_id":"task-bound"}}`,
+			wantTask: "task-bound",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := executionTestStore(t)
+			prevAuto := _autonomy
+			factory := capability.NewFactory()
+			reader := &fakeVerificationReader{
+				name:    "deployment.monitor",
+				inputs:  []spec.Field{{Name: "deployment", Required: true}, {Name: "task_id"}},
+				outputs: []spec.Field{{Name: "state"}},
+				answer:  map[string]string{"state": "succeeded"},
+			}
+			factory.Register(reader)
+			_autonomy = &Autonomy{CapabilityFactory: factory}
+			t.Cleanup(func() { _autonomy = prevAuto })
+
+			task := &Task{ID: "task-attribution"}
+			planID, err := store.CreateExecutionPlan(ExecutionPlan{TaskID: task.ID, DecisionType: "plan", Cycle: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AppendExecutionStep(ExecutionStep{
+				PlanID: planID, TaskID: task.ID, Cycle: 1, Idx: 1, Name: "deploy",
+				Capability: "service.deploy", Status: "ok",
+				Output: `{"pipeline_id":"pipe-9"}`,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			pinCriterion(t, task.ID, criterion+tc.check+"}")
+
+			rt := NewRuntime(NewAgentFactory(), factory.GetAll()...)
+			if err := rt.verifyDone(DecisionContext{Task: task, Cycle: 2}, planID); err != nil {
+				t.Fatalf("err=%v, want the claim to hold up", err)
+			}
+			if got := reader.asked["task_id"]; got != tc.wantTask {
+				t.Fatalf("the reader was asked task_id=%q, want %q (%v)", got, tc.wantTask, reader.asked)
+			}
+		})
+	}
+}
+
 // TestVerifyDoneWithNoPinnedContract: nothing pinned is not a pass and not a crash — a
 // `done` has nothing to be verified against, which is what it is told.
 func TestVerifyDoneWithNoPinnedContract(t *testing.T) {
