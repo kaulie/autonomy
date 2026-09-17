@@ -129,7 +129,7 @@ func TestRuntimeAcquireAgentKnowsWhatItIsFor(t *testing.T) {
 	}
 	defer func() { _ = sess.Release(context.Background()) }()
 
-	acquired, ok := sess.(*runtimeAgentSession)
+	acquired, ok := sess.(*LLMSession)
 	if !ok {
 		t.Fatalf("acquired session is %T, want the runtime's own", sess)
 	}

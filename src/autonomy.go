@@ -119,6 +119,11 @@ func (r *Autonomy) Run(task *Task) error {
 	agent := r.AgentFactory.Create(task)
 	defer r.finishAgent(agent)
 
+	// The task's own agent takes a turn every cycle, on the same session a delegated
+	// worker gets: what makes this agent the planner is its identity, not a different
+	// kind of session (see LLMSession). Every turn is attributed to this task.
+	agent.Session = NewLLMSession(r.Runtime, agent, SessionOpts{TaskID: task.ID})
+
 	agent.Start()
 	persistAgent(agent)
 
@@ -227,21 +232,12 @@ func failTask(task *Task, err error) {
 	persistTask(task)
 }
 
-// finishAgent stops the agent and tears down the Cursor SDK session.
-// Ephemeral agents are permanently deleted via Cursor DeleteAgent; DB row is soft-deleted.
-// Persistent agents are only Closed so durable Cursor state can be resumed later.
+// finishAgent ends the agent the run was for. Ending an agent's life — stop, tear
+// down its provider sessions, delete it or keep it — is the same wherever the agent
+// came from, so it is one function (closeAgent) that both this and a released worker
+// session go through.
 func (r *Autonomy) finishAgent(agent *Agent) {
-	if agent == nil {
-		return
-	}
-	agent.Stop()
-	agent.disposeCursorSession(context.Background())
-	if agent.IsEphemeral() {
-		softDeleteAgent(agent.ID)
-		r.AgentFactory.Delete(agent.Name)
-	} else {
-		persistAgent(agent)
-	}
+	closeAgent(agent, r.AgentFactory, context.Background())
 }
 
 // executeDecision runs one decision's plan and tells the agent what happened.

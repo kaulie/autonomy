@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/cursorsdk"
-	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 type ReasoningInput struct {
@@ -34,48 +33,32 @@ type Reason struct {
 	UpdatedAt   time.Time
 }
 
-// LLMReasoner uses the official Cursor SDK Bridge via the Go cursorsdk adapter.
-// Requires CURSOR_API_KEY and cursor-sdk-bridge (CURSOR_SDK_BRIDGE_BIN or third_party/bin).
-// Cursor agent lifetime follows Autonomy Agent.Lifecycle (create once per task; Delete on ephemeral finish).
-type LLMReasoner struct {
-	model string
-	cwd   string
-}
+// LLMReasoner asks the agent's own LLM session for one turn and reads the answer as a
+// decision.
+//
+// Requires the agent's session (Agent.Session): which backend, model and workspace a
+// turn runs on, and where it is recorded, belong to the session rather than to the
+// reasoner — a turn is the same thing whether a task's planner or a delegated worker
+// takes it (see LLMSession).
+type LLMReasoner struct{}
 
-func NewLLMReasoner(model string) Reasoner {
-	return &LLMReasoner{model: model}
+func NewLLMReasoner() Reasoner {
+	return &LLMReasoner{}
 }
 
 func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (ReasoningResult, error) {
 	if ctx.Agent == nil {
 		return ReasoningResult{}, fmt.Errorf("llm reasoner requires DecisionContext.Agent")
 	}
-
-	cwd := r.cwd
-	if cwd == "" && ctx.Agent != nil && ctx.Agent.Workspace != "" {
-		cwd = ctx.Agent.Workspace
-	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	model := r.model
-	if model == "" {
-		model = os.Getenv("AUTONOMY_LLM_MODEL")
-	}
-	if model == "" {
-		model = "composer-2"
+	sess := ctx.Agent.Session
+	if sess == nil {
+		return ReasoningResult{}, fmt.Errorf("llm reasoner requires the agent's session (NewLLMSession; a task's agent gets one in Autonomy.Run)")
 	}
 
 	parent := context.Background()
 	if ctx.Context != nil {
 		parent = ctx.Context
 	}
-	// A run is never capped by wall clock: the watchdog only aborts it after
-	// AUTONOMY_LLM_TIMEOUT (default 3m) with no provider activity.
-	idle := llmrun.IdleTimeout()
-	wd := llmrun.NewIdleWatchdog(parent, idle)
-	defer wd.Stop()
-	goCtx := llmrun.WithIdleWatchdog(wd.Context(), wd)
 
 	t0 := time.Now()
 	stage := func(name string, format string, args ...any) {
@@ -88,15 +71,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		)
 	}
 
-	stage("start", "model=%s idle=%s cwd=%s lifecycle=%s", model, idle, cwd, ctx.Agent.Lifecycle)
-
-	stage("ensureSession", "begin")
-	tEnsure := time.Now()
-	session, err := ctx.Agent.ensureLLMSession(goCtx, model, cwd, ReasonModePlan)
-	if err != nil {
-		return ReasoningResult{}, err
-	}
-	stage("ensureSession", "ok session=%s elapsed=%s", session, time.Since(tEnsure).Round(time.Millisecond))
+	stage("start", "agent=%s model=%s cycle=%d", ctx.Agent.Name, ctx.Agent.Model, ctx.Cycle)
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
@@ -109,34 +84,29 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		stage("prompt", "body:\n%s", prompt)
 	}
 
-	stage("prompt_run", "begin session=%s", session)
+	stage("prompt_run", "begin cycle=%d", ctx.Cycle)
 	tSend := time.Now()
-	trace := BeginLLMTrace(ctx.Agent, reasonTaskID(ctx), ctx.Cycle, ReasonModePlan, prompt)
-	text, runRes, err := ctx.Agent.PromptLLMStream(goCtx, prompt, ReasonModePlan, trace.Emit)
+	// One turn on this agent's own session, recorded as the decision cycle it is:
+	// the plan it produces points back at the reply it came from (Origin), not at a
+	// cycle number.
+	turn, err := sess.Say(parent, prompt, ctx.Cycle)
 	if err != nil {
-		trace.Finish(runRes)
 		return ReasoningResult{}, err
 	}
-	// The frame counts as delivered only once the session actually answered: a
-	// failed first cycle must resend it instead of leaving the session without
-	// its instructions.
-	ctx.Agent.markLLMFrameSent()
 	stage("prompt_run", "done text_bytes=%d elapsed=%s total=%s",
-		len(text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
+		len(turn.Text), time.Since(tSend).Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 
 	stage("parse", "begin")
-	decision, parseErr := parseDecision(text)
-	runRes.RawOutput = text
-	trace.Finish(runRes)
+	decision, parseErr := parseDecision(turn.Text)
 	if parseErr != nil {
-		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", parseErr, text)
+		return ReasoningResult{}, fmt.Errorf("cursor decision: %w\nraw=%s", parseErr, turn.Text)
 	}
 	decision.Ctx = ctx
 	stage("parse", "ok type=%s reason=%q actions=%d total=%s",
 		decision.Type, decision.Reason, len(decision.Actions), time.Since(t0).Round(time.Millisecond))
 	// The plan the runtime writes points back at this reply (and the input it
 	// answered) by message id, not by cycle number.
-	return ReasoningResult{Decision: decision, Origin: trace.Origin()}, nil
+	return ReasoningResult{Decision: decision, Origin: turn.Origin}, nil
 }
 
 // reasoningPrompt builds the message for one decision cycle. The AGENT_V2 frame
@@ -150,14 +120,6 @@ func reasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, bool, e
 	}
 	prompt, err := buildReasoningDelta(ctx, input)
 	return prompt, false, err
-}
-
-// reasonTaskID returns the task id carried by a decision context, if any.
-func reasonTaskID(ctx DecisionContext) string {
-	if ctx.Task == nil {
-		return ""
-	}
-	return ctx.Task.ID
 }
 
 func recordReasonIO(ctx DecisionContext, input, output string) {
