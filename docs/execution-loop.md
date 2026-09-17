@@ -31,7 +31,9 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 - **cycle**：**某个 agent 自己的轮次**，从 **1** 开始，相对于它自己而言 —— 不跨 agent 比较。
   一次 prompt → reply 就是一轮：planner 的 cycle 是它对这条 task 的决策轮；被委托的 worker 的 cycle 是**它自己的**轮次
   （第一个 prompt 就是 1），而且 **worker 完全可能有自己的 decision cycle**（规则不预设它是「只干一件事」的：
-  它自己跑多轮就是 1、2、3…）。`mode`（plan / agent）说的是这一轮在做什么，不改变 cycle 的含义。
+  它自己跑多轮就是 1、2、3…）。`mode`（plan / agent）说的是这一轮在做什么，不改变 cycle 的含义 ——
+  它和「输入行是谁写的」一样由 agent 的**身份**推出，只有一处推导（见 [session.md](session.md)）。
+  被截断的一轮重试**不占**新的 cycle：失败的原始轮与重试都记在同一个 round。
   落库就是 `reason_turns.cycle` / `llm_messages.cycle`（历史名 `step` 已重命名 —— 一个词不能指两件事）。
   要定位一次交互用 `(agent_id, cycle)` 或 turn id，不要拿两个 agent 的 cycle 相互对照；
   委托方的 cycle 出现在 worker 提示词的 `delegated_by.cycle` 里 —— 那是「谁在第几轮把它派出去」，仍是相对委托方的。

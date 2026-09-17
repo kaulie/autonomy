@@ -24,6 +24,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |
 | Model | 记录当前使用的模型（如 `composer-2`；DB 列 `model`） |
 | Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者。**V1 只分两种**：`planner`（runtime 为一条 Task 创建的那个 agent，它决定每一轮）与 `worker`（capability 通过 `AcquireAgent` 要来的那个 agent，干一件事）；worker 的 **Purpose** 就是它被要来的原因（`code_edit` / `deployment.monitor`）。两者都是 runtime state，不落库，只用来渲染 agent 自己的提示词。**这条区分属于 runtime，不属于 planner 的计划**：planner 的 policy 只按 capability 派发（step = capability + input），哪个 capability 背后有 worker 由 runtime 决定，见 [capability.md](capability.md) |
+| Session | 这只 agent 与 LLM 的会话（`src/llm_session.go`）：它自己的每一轮都在这里出去、也记在这里。**planner 与 worker 是同一种会话** —— 身份（上一行的 Role）只决定这一轮的形态（plan/agent、输入行是谁写的、round 从哪来），不是另一种 session，见 [session.md](session.md) |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |
 | Trust / Performance | 历史表现摘要（可后置） |

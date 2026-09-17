@@ -12,16 +12,17 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 2. [task.md](task.md) / [completion-contract.md](completion-contract.md) — 工作契约与完成锚点
 3. [context.md](context.md) / [project.md](project.md) — 世界与命名空间
 4. [agent.md](agent.md) / [delegation.md](delegation.md) — 责任主体与委托
-5. [capability.md](capability.md) / [provider.md](provider.md) / [action.md](action.md) — 能力空间
-6. [asset.md](asset.md) / [domain.md](domain.md) — 世界中的对象与语义空间
-7. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界
-8. [runtime.md](runtime.md) / [execution-loop.md](execution-loop.md) — 执行与主循环
-9. [trust.md](trust.md) — 信任与选择（可后置实现）
-10. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流）与多 provider 扩展
-11. [llm-message.md](llm-message.md) — 输入与返回拆成两条独立记录（llm_messages），返回溯源到具体输入
-12. [store.md](store.md) — 存储统一接口与可插拔 engine（sqlite 为默认实现）
-13. [deployment-monitor.md](deployment-monitor.md) — `deployment.monitor` 能力参考（跟随部署、定位问题；概念边界见 [capability.md](capability.md)）
-14. [execution-step.md](execution-step.md) — 计划与执行两层记录（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`）：计划先写、不可改、结果派生，且按 message id 追溯到是哪条回复、哪条输入
+5. [session.md](session.md) — 一只 agent 与 LLM 的会话（planner 与 worker 跑同一套）
+6. [capability.md](capability.md) / [provider.md](provider.md) / [action.md](action.md) — 能力空间
+7. [asset.md](asset.md) / [domain.md](domain.md) — 世界中的对象与语义空间
+8. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界
+9. [runtime.md](runtime.md) / [execution-loop.md](execution-loop.md) — 执行与主循环
+10. [trust.md](trust.md) — 信任与选择（可后置实现）
+11. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流）与多 provider 扩展
+12. [llm-message.md](llm-message.md) — 输入与返回拆成两条独立记录（llm_messages），返回溯源到具体输入
+13. [store.md](store.md) — 存储统一接口与可插拔 engine（sqlite 为默认实现）
+14. [deployment-monitor.md](deployment-monitor.md) — `deployment.monitor` 能力参考（跟随部署、定位问题；概念边界见 [capability.md](capability.md)）
+15. [execution-step.md](execution-step.md) — 计划与执行两层记录（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`）：计划先写、不可改、结果派生，且按 message id 追溯到是哪条回复、哪条输入
 
 ## 终局四对象
 

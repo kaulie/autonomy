@@ -38,6 +38,10 @@ Task Owner → Coding Agent → Research Agent → …
 - **执行位置**：被委托的 agent 在自己的 `AGENT_WORKSPACE` 里执行。委托方不能把自己的 workspace
   交给它 —— 委托走 `AcquireAgent` 且**不带 workspace**（`code_edit` 不再接收 `workspace`/`cwd` 输入），
   worker 的 workspace 由 `AgentSession.Workspace()` 回读并渲染进提示词（见 [agent.md](agent.md)）
+- **会话是同一个**：worker 拿到的 session 与 runtime 给 planner 的**是同一种**（`src/llm_session.go`）——
+  capability 看到的只是它的窄视图（`ID` / `Workspace` / `Prompt` / `Release`）。它这一轮的 `mode=agent`、
+  输入行记成 `role=agent`、round 从 1 开始，都不是"另一种 session"，而是**身份**（`Role=worker`）推出来的，
+  见 [session.md](session.md)
 
 - **提示词在文件里，不在代码里**：worker 拿到的提示词是仓库文件，每次委托现读现渲染；
   改措辞不用重新编译，文件缺失则该次委托直接失败：
