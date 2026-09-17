@@ -36,3 +36,5 @@ Runtime 是**可靠执行层**：落实 Action 的生命周期、调度 Provider
 ## 演化注记
 
 V1：进程内函数调用即可充当 Runtime。接口上保留 Action 生命周期与事件产出，便于日后换成分布式调度。
+
+V1.1：`Autonomy.Run` 把 `Execute` 放到独立 worker goroutine（`dispatchExecute`）；planner 主循环以 `cycleDone` 事件驱动下一轮 Decide / Observe，不再在 `Execute` 调用栈上阻塞（同 task 仍串行等待本轮 Result）。

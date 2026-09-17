@@ -63,7 +63,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtCycle` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
 
-- 每轮：`DecideAtCycle(cycle)` → `Decision` → `Runtime.Execute(decision)` → `Agent.Observe(result)` → 下一轮（`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)）（`Autonomy.MaxSteps`，默认 `1`）。
+- 每轮：`DecideAtCycle(cycle)` → `Decision` → **dispatch** `Runtime.Execute(decision)`（独立 worker goroutine）→ 事件 `cycleDone` → `Agent.Observe(result)` → 下一轮。Planner 主循环在 dispatch 之后停在事件等待上，**不**锁在 `Execute` 里（`src/autonomy.go:dispatchExecute`；见 [runtime.md](runtime.md)、[principles.md](principles.md) §Event Driven）。同 task 仍保持 decide → execute → observe 的顺序，下一轮 Decide 必须先看到本轮 `previous_actions`。`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)（`Autonomy.MaxSteps`，默认 `1`）。
 - **决策先过闸，再执行**：`Runtime.Execute` 的第一件事是校验这份 Decision ——
   ①**类型契约**（AGENT_V2 §Type-specific Requirements：`plan` 非空、每个 step 说清 `expected_effect`、引用的 evidence 存在；`done` 不带 plan/need 且必须带 evidence；`blocked` / `need_input` 不带 plan 且必须写清 `need.description`），
   ②**计划的数据血缘**（每个入参来源可读、必填入参齐备，见 [execution-step.md](execution-step.md)）。
@@ -72,7 +72,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 - **完成契约先钉住，`done` 才收束**：答复里的 `completion_contracts` 在 **cycle 1** 被钉住（`completion_contract`，只写一次，之后重述无效；首轮那轮还会先校验它），之后每轮的 Runtime Context 都把这份钉住的合同带回去。`done` 是**唯一**被验证的答复：运行时逐条判据解析**证据槽**（planner 预先绑定的 `step:<name>.output.<key>` / `world_model:asset.<id>.<field>`，解析范围是这个 task 的步历史 —— 那个 id 要到执行完才有），再到**权威来源**查真（World Model，或证据产出者对应的只读能力 / 判据自己写的 `check`），全 `pass` 才收束成 `completed`；`fail` / `inconclusive`，以及「任务根本没有钉住合同」，都让这一轮失败，verdict 进 `previous_actions` 交给下一轮 planner —— 见 [verification.md](verification.md) 的事实链与三态。
 - 模型按 AGENT_V2 §Output Schema 回答；`parseDecision` **保留整份 plan**：`plan.steps[]` 每个 step 一个 action，按序放进 `Decision.Actions`，`evidence` / `need` / `deliverable` / `presentation` 一并带回（不再是"只留第一个 action，其余丢掉"）。
 - `Runtime.Execute` **在同一轮里按序执行所有 action**；第一个失败就结束该轮（`Result.Message` 会写第几个/共几个）。
-- **失败不结束 Task**：`Autonomy.executeDecision` 把失败记进该轮 `Result`（`Err` + `Message`），循环继续、进入下一轮 decide 重规划；只有当**最后一轮**失败时 task 才收成 `error`（`src/autonomy.go:Run`）。
+- **失败不结束 Task**：worker 把失败记进该轮 `Result`（`Err` + `Message`），planner 在 `cycleDone` 上 Observe 后继续下一轮 decide 重规划；只有当**最后一轮**失败时 task 才收成 `error`（`src/autonomy.go:Run`）。
 - 之前的每轮结果都作为 `DecisionContext.History` 传给下一次 decide，prompt 的 Runtime Context 里渲染成
   `previous_actions: [{cycle, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
   **每个 action 的原始 input/output 都原样保留、不合并**，planner 自己决定看哪条（例如 `code_edit` 的 `summary`/`workspace`）—— 这就是"观察结果再决定"的那一半。
