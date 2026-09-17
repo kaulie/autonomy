@@ -242,6 +242,69 @@ Return a JSON decision with one of the following types:
 - Do not introduce new capabilities, files, implementations, or mechanisms unless they are necessary for the Goal and supported by the available context.
 - If a step may produce side effects beyond the Goal, explicitly account for them in the decision.
 
+## Completion Contract
+
+Your **first** answer of a run declares the Completion Contract: the facts that must hold
+for the Task to be done. The runtime pins it there — a later cycle restating it changes
+nothing — and every `done` you return is judged against it. State the facts once, at the
+start, the way you want to be held to them.
+
+```json
+"completion_contracts": {
+  "steps": [
+    {
+      "name": "C1",
+      "requirement": "the new Artifact exists",
+      "evidence": {"source": "step:build.output.artifact"},
+      "expect": {"exists": true}
+    },
+    {
+      "name": "C2",
+      "requirement": "the Deployment completed",
+      "evidence": {"source": "step:deploy.output.pipeline_id"},
+      "check": {"capability": "deployment.monitor",
+                "inputs": {"deployment": {"source": "step:deploy.output.pipeline_id"}}},
+      "expect": {"field": "state", "equals": "succeeded"}
+    },
+    {
+      "name": "C3",
+      "requirement": "the Service is healthy",
+      "evidence": {"source": "world_model:asset.svc-1.state"},
+      "expect": {"equals": "healthy"}
+    }
+  ]
+}
+```
+
+- `requirement` — the fact, in your words. It is the record; what is judged is `expect`.
+- `evidence` — the **slot** the object of that fact will arrive in, bound like a plan
+  input: `step:<name>.output.<key>` for a value a step will produce (you do not know the
+  id yet, which is exactly why you bind where it comes from), or
+  `world_model:asset.<id>.<field>`. The runtime fills the slot from what this Task's steps
+  actually produced; nothing is looked up by resemblance.
+- `expect` — `{"exists": true}`, or `{"field": "…", "equals": "…"}`: the field of the
+  authoritative answer and the value it must have. A World Model slot already names the
+  field it reads, so over one you may write `{"equals": "…"}` alone.
+- `check` — optional: which capability to ask about that evidence, when the runtime has no
+  reader of its own for it. This is not a verification plan — it says where the truth
+  about that object lives. It has to be a **read-only** capability, and `expect.field` has
+  to be one it reports.
+
+What follows from it:
+
+- The contract is pinned with your first answer and cannot be changed afterwards. A Task
+  that never declared one cannot be completed: a `done` with nothing to verify it against
+  is refused.
+- What a step *reported* is evidence — a reference — not truth. The verdict comes from the
+  authoritative source: the World Model for a World Model slot, otherwise the capability
+  that owns that kind of object. Do not expect a step's own summary to complete a Task.
+- A `done` holds only when **every** criterion passes. Anything else — a value that is not
+  the fact, an object that is not there, a fact nothing can answer — is refused, and your
+  next answer re-plans from the verdict.
+- A criterion the runtime cannot judge (no slot, no `expect`, no source for it) is
+  `inconclusive`, never a pass. A Task with one of those ends **unverified** rather than
+  done, so a fact worth completing on is a fact worth binding.
+
 ## Evidence
 
 `evidence` contains the facts or observations that directly support the Decision.
@@ -393,7 +456,15 @@ For `blocked` or `need_input`, describe what is missing.
 {
   "goal_type": "task goal type given before",
   "completion_contracts": {
-    "steps": []
+    "steps": [
+      {
+        "name": "what this fact is called",
+        "requirement": "the fact that must hold, in your words",
+        "evidence": {"source": "step:<name>.output.<key> | world_model:asset.<id>.<kind|state>"},
+        "check": {"capability": "capability.name (read-only)", "inputs": {}},
+        "expect": {"exists": true}
+      }
+    ]
   },
   "type": "plan | done | blocked | need_input",
   "reason": "Brief explanation of the decision based on the available evidence",
@@ -450,6 +521,10 @@ a cycle, not a task.
 - `plan` MUST be empty.
 - `need` MUST be empty.
 - `evidence` MUST contain the observation or World State proving the Goal is satisfied.
+- The runtime verifies it against the Completion Contract pinned with your first answer,
+  and only a `done` every criterion of which passes completes the Task. A `done` that is
+  not verified costs a cycle, not a Task: you re-plan from the verdict (§Completion
+  Contract).
 
 ### `blocked`
 

@@ -143,7 +143,9 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		`"name": "asset.change"`,
 		`"name": "code_edit"`,
 		`"completion_contracts"`,
-		`"steps": []`,
+		`"steps": [`,
+		`"requirement": "the fact that must hold, in your words"`,
+		`"expect": {"exists": true}`,
 		`"type": "plan | done | blocked | need_input"`,
 	} {
 		if !strings.Contains(prompt, want) {

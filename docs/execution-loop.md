@@ -67,6 +67,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   ②**计划的数据血缘**（每个入参来源可读、必填入参齐备，见 [execution-step.md](execution-step.md)）。
   任一条不成立 → 这一轮的计划**不写、不执行**，错误里带规则名与出错的那一步；循环继续，下一轮 planner 在 `previous_actions` 里看到这条原因再规划（`src/decision_rules.go` / `src/plan_lineage.go`）。
   **契约不靠 prompt 兜**：prompt 只是请求，运行时才是闸门 —— 一个"没有任何证据的 done"不能凭模型一句话就把 Task 收成完成。
+- **完成契约先钉住，`done` 才收束**：答复里的 `completion_contracts` 在 **cycle 1** 被钉住（`completion_contract`，只写一次，之后重述无效；首轮那轮还会先校验它），之后每轮的 Runtime Context 都把这份钉住的合同带回去。`done` 是**唯一**被验证的答复：运行时逐条判据解析**证据槽**（planner 预先绑定的 `step:<name>.output.<key>` / `world_model:asset.<id>.<field>`，解析范围是这个 task 的步历史 —— 那个 id 要到执行完才有），再到**权威来源**查真（World Model，或证据产出者对应的只读能力 / 判据自己写的 `check`），全 `pass` 才收束成 `completed`；`fail` / `inconclusive`，以及「任务根本没有钉住合同」，都让这一轮失败，verdict 进 `previous_actions` 交给下一轮 planner —— 见 [verification.md](verification.md) 的事实链与三态。
 - 模型按 AGENT_V2 §Output Schema 回答；`parseDecision` **保留整份 plan**：`plan.steps[]` 每个 step 一个 action，按序放进 `Decision.Actions`，`evidence` / `need` / `deliverable` / `presentation` 一并带回（不再是"只留第一个 action，其余丢掉"）。
 - `Runtime.Execute` **在同一轮里按序执行所有 action**；第一个失败就结束该轮（`Result.Message` 会写第几个/共几个）。
 - **失败不结束 Task**：`Autonomy.executeDecision` 把失败记进该轮 `Result`（`Err` + `Message`），循环继续、进入下一轮 decide 重规划；只有当**最后一轮**失败时 task 才收成 `error`（`src/autonomy.go:Run`）。
@@ -88,7 +89,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 - **结论了任务的一轮就收束**：`done` / `blocked` / `need_input` 是**答案**而不是计划（`Decision.Concludes()`），循环在这一轮结束 —— `done` 是完成契约被满足（且按 §Type-specific Requirements 必须带证据），另两个是任务在等外部的东西。再问一次 planner 只会用一个 cycle 换回同一句话（task-26 就是计划四步全成功后连答了三次 `done`）：这正是不变式 2「每轮以观察与验证收束，不是以轮数用尽收束」。**失败**的轮才是继续重规划的那一类，`MaxSteps` 兜住它。
   这一轮**照样过闸、照样落库**（`Runtime.Execute`：校验类型契约 + 写出 `execution_plan` 那一行 —— 答案也是记录，`done` 的证据、`blocked` / `need_input` 的 `need` 都在那一行上），所以「是不是答案」由**决策本身**（它的 `type`）决定，读它的时机在执行之前 —— 执行结果不会、也不能改变它。
   但**只有站得住的答案**才收束：被拒绝的答案（没有证据的 `done`、没写清 `need.description` 的 `blocked` / `need_input`）是一个**失败的轮**，和别的失败完全一样 —— 不写、不执行、下一轮 planner 拿着规则名重规划。这正是上一层「决策先过闸」那句承诺的兑现：闸门把原因写进了错误里，就得有人有机会看它 —— 只看 `type` 就收束的话，一个「补上证据即可」的 `done` 会被直接判成任务失败。
-  任务行跟着落同一个结论：`done` → `completed`，`blocked` / `need_input` → 同名状态（`TaskStatusFor`，`src/decision.go`）—— 任务在等东西不是跑完了；为什么在等是那次决策的 `need`，`tasks.error` 仍然只写失败的原因。
+  任务行跟着落同一个结论：`done` **验证通过** → `completed`；一个始终没验过的 `done`（被拒、或世界不满足、或判不了）→ `unverified`，`tasks.error` 写它为什么没通过；`blocked` / `need_input` → 同名状态（`TaskStatusFor`，`src/decision.go`）—— 任务在等东西不是跑完了；为什么在等是那次决策的 `need`，`tasks.error` 仍然只写失败的原因。
 - 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 1`；它数的是 **decision cycle**，`step` 这个词现在专指「执行步」）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。
 
 ## 不变式
