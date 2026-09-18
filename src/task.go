@@ -19,6 +19,9 @@ const (
 	TaskStatusBlocked    = "blocked"
 	TaskStatusNeedInput  = "need_input"
 	TaskStatusError      = "error"
+	// TaskStatusStopped is a run cancelled by POST /api/tasks/{id}/stop. It is not
+	// a planner answer (done / blocked / need_input) and not a failed action.
+	TaskStatusStopped = "stopped"
 )
 
 // Task is the work contract: what to achieve and how completion is judged.
