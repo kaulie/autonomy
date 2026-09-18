@@ -382,6 +382,13 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle)
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_reason_turns_run ON reason_turns(run_id)`); err != nil {
 		return fmt.Errorf("migrate reason_turns run index: %w", err)
 	}
+	// HTTP poll / agent-status indexes: only after status (and llm_messages) exist.
+	if _, err := s.db.Exec(`
+CREATE INDEX IF NOT EXISTS idx_llm_messages_agent_id ON llm_messages(task_id, agent_id, id);
+CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agent_id, status);
+`); err != nil {
+		return fmt.Errorf("migrate http query indexes: %w", err)
+	}
 	// The execution tables gained the step's name: a plan's input bindings address a
 	// step by name, so without it a stored plan's lineage points at nothing
 	// (docs/execution-step.md, "Plan Data Lineage").

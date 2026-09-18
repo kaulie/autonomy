@@ -57,6 +57,14 @@ func (fakeStore) AppendVerification(Verification) (int64, error) { return 0, nil
 func (fakeStore) ListVerifications(string) ([]Verification, error) {
 	return nil, nil
 }
+func (fakeStore) GetTask(string) (*Task, error)   { return nil, nil }
+func (fakeStore) GetAgent(int64) (*Agent, error)  { return nil, nil }
+func (fakeStore) ActiveReasonTurn(string, int64) (*ReasonTurn, error) {
+	return nil, nil
+}
+func (fakeStore) ListLLMMessagesAfter(string, int64, int64, int) ([]LLMMessage, error) {
+	return nil, nil
+}
 func (fakeStore) Close() error { return nil }
 
 // fakeEngine records the DSN it was opened with so tests can assert dispatch to
