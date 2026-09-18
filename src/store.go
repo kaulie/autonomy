@@ -86,6 +86,19 @@ type Store interface {
 	AppendVerification(v Verification) (int64, error)
 	// ListVerifications reads a task's verdicts in creation order.
 	ListVerifications(taskID string) ([]Verification, error)
+	// GetTask reads one task row by id.
+	GetTask(taskID string) (*Task, error)
+	// GetAgent reads one agent row by id (including soft-deleted).
+	GetAgent(agentID int64) (*Agent, error)
+	// ActiveReasonTurn is the in-flight LLM run for a task's agent, if any
+	// (reason_turns.status = running). Used by the HTTP status API to surface
+	// the live provider run id as agent_run_id.
+	ActiveReasonTurn(taskID string, agentID int64) (*ReasonTurn, error)
+	// ListLLMMessagesAfter reads an agent's conversation stream across turns,
+	// ordered by llm_messages.id ascending, for rows with id > afterID. The id
+	// is the monotonic sync cursor the HTTP poll API exposes as message_seq
+	// (per-turn seq resets every run and cannot drive cross-turn polling).
+	ListLLMMessagesAfter(taskID string, agentID, afterID int64, limit int) ([]LLMMessage, error)
 	Close() error
 }
 
@@ -106,6 +119,8 @@ const (
 // The Run* / Status / usage fields are populated for streamed provider runs;
 // they stay zero for local or one-shot turns.
 type ReasonTurn struct {
+	// ID is the reason_turns row id (0 until persisted).
+	ID          int64
 	TaskID      string
 	AgentID     int64
 	Cycle       int

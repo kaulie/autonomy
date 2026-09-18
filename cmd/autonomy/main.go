@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	autonomy "github.com/kaulie/autonomy/src"
@@ -48,6 +49,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
+
+	// HTTP mode: AUTONOMY_HTTP_ADDR=:4230 autonomy
+	if addr := strings.TrimSpace(os.Getenv("AUTONOMY_HTTP_ADDR")); addr != "" {
+		srv := autonomy.NewHTTPServer(_autonomy)
+		if err := srv.ListenAndServe(addr); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// init context entity
 	projectExternalEntity := ExternalEntity{
