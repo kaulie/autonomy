@@ -1,14 +1,21 @@
 # HTTP API
 
-Autonomy 对外的任务 HTTP 接口。设置 `AUTONOMY_HTTP_ADDR`（例如 `:4230`）后启动：
+Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，默认端口 `4230`，探活 `GET /health`。
+
+本地：
 
 ```bash
-AUTONOMY_HTTP_ADDR=:4230 go run ./cmd/autonomy
+./build.sh
+RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 ```
 
-未设置时仍走原来的 CLI 演示任务路径。
+不走脚本时仍可用 `AUTONOMY_HTTP_ADDR=:4230 go run ./cmd/autonomy`。未设置该变量则走 CLI 演示任务。
 
 ## 端点
+
+### `GET /health`
+
+部署平台对每个服务统一探的路径。`GET /healthz` 是同一处理函数的别名。
 
 ### `POST /api/tasks`
 
@@ -69,10 +76,6 @@ AUTONOMY_HTTP_ADDR=:4230 go run ./cmd/autonomy
   "next_poll_after_seq": 42
 }
 ```
-
-### `GET /healthz`
-
-健康检查。
 
 ## 说明
 

@@ -9,6 +9,9 @@ import (
 	autonomy "github.com/kaulie/autonomy/src"
 )
 
+// version is stamped by build.sh (-X main.version=$APP_VERSION).
+var version = "dev"
+
 func convertToContextContainer(entity ExternalEntity) (autonomy.ContextContainer, error) {
 	var err error
 	var domainType autonomy.TaskDomain
@@ -50,8 +53,10 @@ func main() {
 		}
 	}()
 
-	// HTTP mode: AUTONOMY_HTTP_ADDR=:4230 autonomy
+	// HTTP mode. scripts/start.sh sets AUTONOMY_HTTP_ADDR from SERVICE_PORT
+	// (the deployment platform injects that; see scripts/start.sh).
 	if addr := strings.TrimSpace(os.Getenv("AUTONOMY_HTTP_ADDR")); addr != "" {
+		fmt.Fprintf(os.Stderr, "[autonomy] version=%s listen=%s\n", version, addr)
 		srv := autonomy.NewHTTPServer(_autonomy)
 		if err := srv.ListenAndServe(addr); err != nil {
 			fmt.Fprintln(os.Stderr, err)
