@@ -22,9 +22,13 @@ func NewHTTPServer(a *Autonomy) *HTTPServer {
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}", s.handleTaskProgress)
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}/agents/{agentID}", s.handleAgentStatus)
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}/agents/{agentID}/events", s.handleAgentStream)
-	s.Mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	// /health is the path the deployment platform probes for every service.
+	// /healthz stays as an alias for callers that already used it.
+	health := func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	}
+	s.Mux.HandleFunc("GET /health", health)
+	s.Mux.HandleFunc("GET /healthz", health)
 	return s
 }
 

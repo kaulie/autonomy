@@ -41,5 +41,8 @@ src/clinesdk/bridge/node_modules/
 # Local SQLite persistence ($PROJECT_ROOT/data/autonomy.db)
 data/
 
+# Deployment package produced by build.sh
+outputs/
+
 
 .DS_Store

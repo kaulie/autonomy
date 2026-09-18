@@ -101,6 +101,13 @@ func TestHTTPAPIAcceptProgressAgentStream(t *testing.T) {
 		t.Fatal("missing task_id")
 	}
 
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok"`) {
+		t.Fatalf("health status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
 	deadline := time.Now().Add(3 * time.Second)
 	var progress TaskProgress
 	for time.Now().Before(deadline) {
