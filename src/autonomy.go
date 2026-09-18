@@ -115,8 +115,15 @@ type cycleDone struct {
 }
 
 func (r *Autonomy) Run(task *Task) error {
+	return r.run(context.Background(), task)
+}
+
+func (r *Autonomy) run(ctx context.Context, task *Task) error {
 	if task == nil {
 		return fmt.Errorf("nil task")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if task.Status == "" {
 		task.Status = TaskStatusRunning
@@ -147,6 +154,10 @@ func (r *Autonomy) Run(task *Task) error {
 	var history []Result
 	needDecide := true
 	for {
+		if err := ctx.Err(); err != nil {
+			markStopped(task)
+			return fmt.Errorf("stopped: %w", err)
+		}
 		if needDecide {
 			if !r.ShouldContinue(agent) {
 				break
@@ -155,8 +166,12 @@ func (r *Autonomy) Run(task *Task) error {
 			if cycles > r.maxSteps() {
 				break
 			}
-			decision, err = agent.DecideAtCycle(cycles, history)
+			decision, err = agent.decide(ctx, cycles, history)
 			if err != nil {
+				if ctx.Err() != nil {
+					markStopped(task)
+					return fmt.Errorf("stopped: %w", ctx.Err())
+				}
 				// Nothing was planned, so nothing else can explain it: the reason it
 				// could not decide is the whole failure.
 				err = fmt.Errorf("decide: %w", err)
@@ -176,7 +191,13 @@ func (r *Autonomy) Run(task *Task) error {
 			continue
 		}
 
-		ev := <-events
+		var ev cycleDone
+		select {
+		case ev = <-events:
+		case <-ctx.Done():
+			markStopped(task)
+			return fmt.Errorf("stopped: %w", ctx.Err())
+		}
 		decision = ev.decision
 		result = ev.result
 		err = result.Err
@@ -200,6 +221,10 @@ func (r *Autonomy) Run(task *Task) error {
 		needDecide = true
 	}
 
+	if ctx.Err() != nil {
+		markStopped(task)
+		return fmt.Errorf("stopped: %w", ctx.Err())
+	}
 	if task.Status == TaskStatusRunning || task.Status == TaskStatusPending {
 		switch {
 		case err != nil && isDone(decision):
@@ -255,6 +280,20 @@ func (r *Autonomy) dispatchExecute(events chan<- cycleDone, decision Decision) {
 		}
 		events <- cycleDone{decision: decision, result: result}
 	}()
+}
+
+// markStopped records that a caller cancelled the run (POST /api/tasks/{id}/stop).
+// A run that already left running/pending keeps that outcome.
+func markStopped(task *Task) {
+	if task == nil {
+		return
+	}
+	if task.Status != TaskStatusRunning && task.Status != TaskStatusPending && task.Status != "" {
+		return
+	}
+	task.Status = TaskStatusStopped
+	task.Error = "stopped"
+	persistTask(task)
 }
 
 // failTask ends the task in error, with the reason the runtime gave up on it —

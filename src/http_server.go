@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ type HTTPServer struct {
 func NewHTTPServer(a *Autonomy) *HTTPServer {
 	s := &HTTPServer{Autonomy: a, Mux: http.NewServeMux()}
 	s.Mux.HandleFunc("POST /api/tasks", s.handleAcceptTask)
+	s.Mux.HandleFunc("POST /api/tasks/{taskID}/stop", s.handleStopTask)
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}", s.handleTaskProgress)
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}/agents/{agentID}", s.handleAgentStatus)
 	s.Mux.HandleFunc("GET /api/tasks/{taskID}/agents/{agentID}/events", s.handleAgentStream)
@@ -60,6 +62,26 @@ func (s *HTTPServer) handleAcceptTask(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusAccepted, resp)
+}
+
+func (s *HTTPServer) handleStopTask(w http.ResponseWriter, req *http.Request) {
+	task, err := s.Autonomy.StopTask(req.PathValue("taskID"))
+	if errors.Is(err, errTaskNotFound) {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, errTaskNotRunning) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task_id": task.ID,
+		"status":  task.Status,
+	})
 }
 
 func (s *HTTPServer) handleTaskProgress(w http.ResponseWriter, req *http.Request) {

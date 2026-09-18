@@ -37,9 +37,19 @@ RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 { "task_id": "task-…", "agent_id": 10001, "status": "running" }
 ```
 
+### `POST /api/tasks/{task_id}/stop`
+
+取消正在跑的任务。planner 循环在当前 decide 或当前 cycle 的事件等待处退出，状态记为 `stopped`。
+
+- `200`：`{"task_id","status":"stopped"}`
+- `404`：没有这条 task
+- `409`：task 不在运行中
+
 ### `GET /api/tasks/{task_id}`
 
-查询任务进展：状态、错误、计划轮次与每轮已执行步数。
+查询任务进展：状态、错误，以及每一份 execution plan 和其中每一步的执行情况。
+
+`plans[].steps[]` 按计划顺序：`status` 为 `pending`（计划了还没跑）、`ok` 或 `failed`。已跑的步带上实际 `input` / `output` / `error`。
 
 ### `GET /api/tasks/{task_id}/agents/{agent_id}`
 

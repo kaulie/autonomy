@@ -232,7 +232,12 @@ func (a *Agent) Decide() (Decision, error) {
 }
 
 func (a *Agent) DecideAtCycle(cycle int, history []Result) (Decision, error) {
+	return a.decide(context.Background(), cycle, history)
+}
+
+func (a *Agent) decide(ctx context.Context, cycle int, history []Result) (Decision, error) {
 	decision, err := a.DecideMaker.Decide(DecisionContext{
+		Context: ctx,
 		Task:    a.CurrentTask,
 		Agent:   a,
 		Cycle:   cycle,
