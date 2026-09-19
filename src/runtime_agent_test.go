@@ -38,8 +38,49 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	if err := sess.Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if f.Get(id) != nil {
-		t.Fatal("ephemeral agent still in factory after Release")
+	if f.Get(id) == nil {
+		t.Fatal("an agent is kept after its session is released; nothing asked for a throwaway one")
+	}
+}
+
+// TestAcquiredWorkerIsKeptUnlessAskedToBeThrowaway: a worker is kept like any
+// other agent — its row, its resumable provider session — unless the capability
+// asked for a throwaway one. The opt-out deletes; the default does not.
+func TestAcquiredWorkerIsKeptUnlessAskedToBeThrowaway(t *testing.T) {
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+
+	kept, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{Purpose: "code_edit", Backend: string(AgentBackendLocal)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kept.(*LLMSession).agent.Lifecycle; got != AgentLifecyclePersistent {
+		t.Fatalf("acquired agent lifecycle=%q, want %q", got, AgentLifecyclePersistent)
+	}
+	keptName := kept.ID()
+	if err := kept.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.Get(keptName) == nil {
+		t.Fatalf("a kept worker %s must stay in the factory for its next instruction", keptName)
+	}
+
+	throwaway, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{
+		Purpose: "one_shot", Backend: string(AgentBackendLocal), Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := throwaway.(*LLMSession).agent.Lifecycle; got != AgentLifecycleEphemeral {
+		t.Fatalf("throwaway lifecycle=%q, want %q", got, AgentLifecycleEphemeral)
+	}
+	name := throwaway.ID()
+	if err := throwaway.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.Get(name) != nil {
+		t.Fatal("a throwaway agent must be dropped when its session is released")
 	}
 }
 

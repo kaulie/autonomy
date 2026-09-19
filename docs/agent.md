@@ -18,12 +18,13 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | 字段 | 含义 |
 |------|------|
 | Identity | Agent 自有标识（与 Task ID 独立；`current_task_id` 关联当前负责的任务）——**被委托的 agent（capability acquire 出来的 worker）记的是同一个 task id**：它和它的 run 都挂在委托方那条 Task 下 |
-| Lifecycle | `ephemeral`（默认）：任务结束时先 Cancel 未结束 run，再调用 Cursor SDK `DeleteAgent`；`persistent`：仅 `CloseAgent`，保留可 Resume |
+| Lifecycle | **`persistent`（默认）：一只 agent 不因一次运行结束而消失** —— 停掉未结束的 run、`CloseAgent`（Cursor）/关闭 session（Cline），行、workspace 与 provider session id 都留着，下一条指令（哪怕是重启后的进程）还能 Resume 它。`ephemeral` 是**有人明确要一个用完即弃的 worker** 时才用（`broker.AcquireAgentOpts.Ephemeral`）：`Release` 时软删行 + 从 factory 摘掉。见「重启之后」 |
 | Workspace | `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`，创建 Agent 时分配，供 Cursor / `code_edit` 使用。**委托出去的 worker 用自己这一份**：委托方（planner）不能把自己的 workspace 强加给它 —— 委托时 `AcquireAgent` 不带 workspace，worker 在自己的沙箱里干活 |
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |
 | Model | 记录当前使用的模型（如 `composer-2`；DB 列 `model`） |
 | Role (dynamic) | 当前是 Task Owner、Specialist，还是 Capability Provider 的承载者。**V1 只分两种**：`planner`（runtime 为一条 Task 创建的那个 agent，它决定每一轮）与 `worker`（capability 通过 `AcquireAgent` 要来的那个 agent，干一件事）；worker 的 **Purpose** 就是它被要来的原因（`code_edit` / `deployment.monitor`）。两者都是 runtime state，不落库，只用来渲染 agent 自己的提示词。**这条区分属于 runtime，不属于 planner 的计划**：planner 的 policy 只按 capability 派发（step = capability + input），哪个 capability 背后有 worker 由 runtime 决定，见 [capability.md](capability.md) |
+| Inbox | 发给这只 agent 的消息队列（`src/inbox.go`，见 [inbox.md](inbox.md)）：`user`（指令）/ `agent`（别的 agent 的委托）/ `system`（runtime 的停止）三种来源，**按到达顺序一条条处理**。指令可以持续接收：agent 忙的时候照样入队。持久化在 `agent_messages`，重启后接着处理 |
 | Session | 这只 agent 与 LLM 的会话（`src/llm_session.go`）：它自己的每一轮都在这里出去、也记在这里。**planner 与 worker 是同一种会话** —— 身份（上一行的 Role）只决定这一轮的形态（plan/agent、输入行是谁写的、round 从哪来），不是另一种 session，见 [session.md](session.md) |
 | Owned / Accepted Tasks | 正在负责的工作 |
 | Declared Capabilities | 对外暴露的能力语义（可注册） |
@@ -52,6 +53,27 @@ planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方�
   注意 `cycle` 是**相对某个 agent 自己**的轮次（从 1 起，不跨 agent 比较）：worker 的 Runtime Context 里不渲染自己的
   cycle（那是它拿到的处境），它自己的轮次记在它自己的 run header 上，委托方的轮次以 `delegated_by.cycle` 出现。
 - **不编造**：runtime 没记录 role 的 agent（比如手搓的测试替身）不会被硬塞一个身份 —— 该字段就不出现。
+
+## 重启之后：这条 Task 还是那只 agent
+
+一条指令进来（`POST /api/tasks`）时，runtime 不是先造一只新 agent，而是**先找这条 Task 已经对接的那只**（`resumeAgentForTask`，`src/agent_resume.go`）：
+
+| 步 | 做什么 |
+|---|---|
+| 1 | `AgentFactory.ForTask(taskID)`：本进程已经拿着它（上一条指令留下的 handle）→ 直接用它，同一段对话继续 |
+| 2 | 否则读**任务自己的行**：`tasks.agent_id` → `agents` 行（`store.GetAgent`）。行还在（`deleted_at` 为空）→ 用它重建 handle：同一个 `id` / `name` / workspace / `llm_agent_id`，身份是 planner；`AgentFactory.Adopt(...)` 把它登记回 factory（后续指令由 factory 维护这一个 handle） |
+| 3 | 重新挂 provider 会话（`resumeAgentSession`）：Cursor 按 `agents.llm_agent_id` **真 Resume**；provider 已经不认它了（会话过期，或那个 id 属于别的进程/后端）→ 退化成新建一个 session，任务继续，不下线。Cline 桥的 session 活在它自己的进程里、没有 re-attach 这回事，所以重启后是同一个 agent 上的**新 session**（agent 自己的对话历史在库里，frame 会重发一次） |
+| 4 | 都找不到（这条 Task 第一次被处理，或它对接的 agent 已被 let go）→ `AgentFactory.Create`：新 planner agent |
+
+不变式：
+
+1. **一条 Task 只有一只 agent**：找得到就复用 / Resume，找不到才新建；重复的指令不会给同一条 Task 造第二只。
+2. **配对写在行里**：`tasks.agent_id` 是「这条 Task 对接谁」的事实来源，所以一次不携带 agent id 的 task 写入**不会**把它抹掉（`UpsertTask`）。
+3. **默认不删**：只有明确 `ephemeral` 的 agent 会在结束时被软删；其余的留着 —— 留着才谈得上 Resume。
+
+实现：`src/agent_resume.go`（`resumeAgentForTask` / `storedAgentForTask` / `restoredAgent` / `resumeAgentSession`）、`src/agent.go`（`AgentFactory.ForTask` / `Adopt`）。
+
+一条指令不是直接「跑这个 task」，而是**放进这只 agent 的 inbox**（`instruction` 消息），由它自己按顺序处理 —— 见 [inbox.md](inbox.md)。
 
 ## 不变式
 

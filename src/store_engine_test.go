@@ -57,8 +57,16 @@ func (fakeStore) AppendVerification(Verification) (int64, error) { return 0, nil
 func (fakeStore) ListVerifications(string) ([]Verification, error) {
 	return nil, nil
 }
-func (fakeStore) GetTask(string) (*Task, error)  { return nil, nil }
-func (fakeStore) GetAgent(int64) (*Agent, error) { return nil, nil }
+func (fakeStore) EnqueueMessage(AgentMessage) (int64, error) { return 0, nil }
+func (fakeStore) ClaimNextMessage(int64) (AgentMessage, bool, error) {
+	return AgentMessage{}, false, nil
+}
+func (fakeStore) FinishAgentMessage(int64, AgentMessageStatus, string) error { return nil }
+func (fakeStore) RequeueRunningMessages(int64) error                         { return nil }
+func (fakeStore) ListAgentMessages(int64, int) ([]AgentMessage, error)       { return nil, nil }
+func (fakeStore) CountQueuedMessages(int64) (int, error)                     { return 0, nil }
+func (fakeStore) GetTask(string) (*Task, error)                              { return nil, nil }
+func (fakeStore) GetAgent(int64) (*Agent, error)                             { return nil, nil }
 func (fakeStore) ActiveReasonTurn(string, int64) (*ReasonTurn, error) {
 	return nil, nil
 }

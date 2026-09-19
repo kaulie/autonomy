@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +22,18 @@ type AcceptTaskRequest struct {
 	ContextRef  map[string]string `json:"context_ref,omitempty"`
 }
 
-// AcceptTaskResponse is returned as soon as the task is accepted and the planner
-// agent exists; Run continues asynchronously.
+// AcceptTaskResponse is returned as soon as the instruction is accepted: its task
+// exists, its agent is known, and the instruction is a message in that agent's
+// inbox, waiting its turn (src/inbox.go).
 type AcceptTaskResponse struct {
 	TaskID  string `json:"task_id"`
 	AgentID int64  `json:"agent_id"`
 	Status  string `json:"status"`
+	// MessageID is the inbox message this instruction was accepted as, and Queued
+	// is how many messages the agent still has in front of it (0 = this is what the
+	// agent is doing, or is about to do, next).
+	MessageID int64 `json:"message_id,omitempty"`
+	Queued    int   `json:"queued"`
 }
 
 // TaskProgress is a snapshot of how far a task has got.
@@ -113,11 +120,17 @@ var (
 	errTaskNotRunning = errors.New("task is not running")
 )
 
-// inFlightTasks maps a running task id to the cancel func for its Run.
+// inFlightTasks maps a task that is being processed right now to the cancel func of
+// the message its agent is on. It is what POST /api/tasks/{id}/stop cancels, and it
+// is written by that message's own processing (Autonomy.processInstruction).
 var inFlightTasks sync.Map
 
-// AcceptTask persists the task, creates its planner agent, and starts Run on a
-// background goroutine so the HTTP caller is not locked inside the decision loop.
+// AcceptTask accepts one instruction: the task it is about is written as pending,
+// its agent is resolved (resumed, after a restart — see resumeAgentForTask), and
+// the instruction becomes a message in that agent's inbox. The agent's own consumer
+// processes it, one message at a time, in the order the messages arrived — so an
+// instruction that arrives while the agent is busy is accepted and queued behind
+// what it is doing, instead of being refused.
 func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error) {
 	if r == nil {
 		return nil, fmt.Errorf("autonomy not initialized")
@@ -129,11 +142,6 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 	taskID := strings.TrimSpace(req.ID)
 	if taskID == "" {
 		taskID = newTaskID()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	if _, loaded := inFlightTasks.LoadOrStore(taskID, cancel); loaded {
-		cancel()
-		return nil, fmt.Errorf("task %s is already running", taskID)
 	}
 
 	domain := TaskDomainSoftwareDevelopment
@@ -153,6 +161,12 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 		contextRef[ContextContainerType(k)] = v
 	}
 
+	// A second instruction for a task the store already knows continues that task
+	// rather than starting a new one: it keeps the row's own identity (when the task
+	// was created, and the domain/goal it was accepted with when this request does
+	// not restate them) and, above all, the agent it was paired with — because that
+	// is the agent this instruction resumes (see resumeAgentForTask). It also keeps
+	// the description it was given then: what is being asked *now* is the message.
 	task := &Task{
 		ID:          taskID,
 		Description: desc,
@@ -163,39 +177,31 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	persistTask(task)
-
-	go func() {
-		defer inFlightTasks.Delete(taskID)
-		defer cancel()
-		task.Status = TaskStatusRunning
-		if err := r.run(ctx, task); err != nil {
-			fmt.Printf("[autonomy] task %s finished with error: %v\n", taskID, err)
+	if stored, err := r.taskStore().GetTask(taskID); err == nil && stored != nil {
+		task.CreatedAt = stored.CreatedAt
+		task.AgentID = stored.AgentID
+		if strings.TrimSpace(req.Domain) == "" {
+			task.Domain = stored.Domain
 		}
-	}()
-
-	// Agent id is assigned inside Run; wait briefly so the accept response can
-	// include it. If Run is slow to start, clients can still poll progress.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		stored, err := r.taskStore().GetTask(taskID)
-		if err == nil && stored != nil && stored.AgentID != 0 {
-			return &AcceptTaskResponse{
-				TaskID:  taskID,
-				AgentID: stored.AgentID,
-				Status:  stored.Status,
-			}, nil
+		if strings.TrimSpace(req.GoalType) == "" {
+			task.GoalType = stored.GoalType
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	stored, _ := r.taskStore().GetTask(taskID)
-	status := TaskStatusPending
-	var agentID int64
-	if stored != nil {
-		status = stored.Status
-		agentID = stored.AgentID
+	agent, msg, err := r.instruction(context.Background(), task, desc)
+	if err != nil {
+		return nil, err
 	}
-	return &AcceptTaskResponse{TaskID: taskID, AgentID: agentID, Status: status}, nil
+	id, err := r.agentInbox().Enqueue(agent, msg)
+	if err != nil {
+		return nil, err
+	}
+	return &AcceptTaskResponse{
+		TaskID:    taskID,
+		AgentID:   agent.ID,
+		Status:    task.Status,
+		MessageID: id,
+		Queued:    r.agentInbox().Queued(agent, id),
+	}, nil
 }
 
 func newTaskID() string {
@@ -339,9 +345,14 @@ func rawJSON(text string) json.RawMessage {
 	return json.RawMessage(text)
 }
 
-// StopTask cancels a running task. The run records status "stopped" and leaves
-// the planner loop. A task that is not in flight returns errTaskNotRunning;
-// a missing task returns errTaskNotFound.
+// StopTask stops what a task's agent is doing: the message it is processing right
+// now is cancelled, and the stop is recorded as a message from the system, in its
+// place in the queue — what was accepted before it is not lost, it is still the
+// agent's to process next (src/inbox.go).
+//
+// A task whose agent is not processing a message is not running (a queued
+// instruction has not started): errTaskNotRunning. A missing task returns
+// errTaskNotFound.
 func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
@@ -360,6 +371,20 @@ func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 	}
 	if cancel, ok := v.(context.CancelFunc); ok {
 		cancel()
+	}
+	// The record of it, and where it belongs: after the instruction it stopped.
+	if r.AgentFactory != nil {
+		if agent := r.AgentFactory.ForTask(taskID); agent != nil {
+			if _, err := r.agentInbox().Enqueue(agent, AgentMessage{
+				TaskID:   taskID,
+				Sender:   MessageSenderSystem,
+				SenderID: "runtime",
+				Kind:     MessageKindStop,
+				Content:  "the user stopped the task",
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "[autonomy] stop message for %s: %v\n", taskID, err)
+			}
+		}
 	}
 	markStopped(stored)
 	return stored, nil

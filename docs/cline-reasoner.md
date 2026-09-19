@@ -90,8 +90,7 @@ runtime → bridge
   autonomy 的 `ReasonModePlan` → Cline `plan`，其余 → `yolo`；需要另一种时**再建一个 session 并保留旧的**
   （key = `mode` + cwd）。**不会在别的 session 正在启动时去 close 它** —— 那样可能让新 run 静默卡住；
   所有 session 在该 agent `Release`/dispose 时一起关闭。
-- ephemeral agent（capability 通过 `Runtime.AcquireAgent` 拿到的）在 `Release` 时 `close` session；
-  常驻 agent 保留 handle 以备恢复（与 Cursor 路径一致）。
+- 一只 agent 的 session 在它结束时关闭；Cline 侧的 session 活在本进程里，**重启后由 autonomy 为同一个 agent 新建一个**（桥没有 re-attach，见 [agent.md](agent.md)），Cursor 侧则是 `CloseAgent` 之后仍可 Resume。只有明确用完即弃的 worker（`Ephemeral: true`）在 `Release` 时连 handle 一起丢。
 
 ## 事件映射（`src/llm_event_cline.go`）
 

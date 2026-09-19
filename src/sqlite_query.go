@@ -67,10 +67,12 @@ FROM agents WHERE id = ?`, agentID).Scan(
 	}
 	a.Lifecycle = AgentLifecycle(lifecycle)
 	a.LLMProvider = LLMProvider(provider)
+	if deletedAt.Valid {
+		a.DeletedAt = parseTime(deletedAt.String)
+	}
 	if taskID != "" {
 		a.CurrentTask = &Task{ID: taskID}
 	}
-	_ = deletedAt
 	return &a, nil
 }
 

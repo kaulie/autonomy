@@ -35,13 +35,13 @@
 | 门 | 谁走 | 拿到什么 |
 |---|---|---|
 | `Autonomy.Run` | 一条 Task 自己 | `NewLLMSession(rt, agent, SessionOpts{TaskID: task.ID})`，身份 `Role=planner` |
-| `Runtime.AcquireAgent` | capability（`code_edit` / `deployment.monitor`） | `NewLLMSession(rt, agent, SessionOpts{TaskID, Model, Workspace, Provider})`，身份 `Role=worker` |
+| `Runtime.AcquireAgent` | capability（`code_edit` / `deployment.monitor`） | `NewLLMSession(rt, agent, SessionOpts{TaskID, Model, Workspace, Provider, DelegatedBy, Inbox})`，身份 `Role=worker`；它的 `Prompt` 是**委托方 agent 发的一条消息**，走 worker 自己的 inbox，由 worker 的消费者跑这一轮（见 [inbox.md](inbox.md)） |
 
 capability 看到的只是 `broker.AgentSession` 那个窄视图（`ID` / `Workspace` / `Prompt` / `Release`）—— 它们不编号 round，也没见过 mode；宿主（planner 那一侧）看到的是 `Say(prompt, round)`，因为**决策轮由 runtime 数**。
 
 ## 结束：一个函数
 
-`Close`（= capability 侧看到的 `Release`）走 `closeAgent`（`src/agent.go`），和 `Autonomy.finishAgent` 是同一份：停、拆掉 provider 会话、按 `Lifecycle` 决定删（`ephemeral`：软删 + 从 factory 摘掉）还是留（`persistent`：只 Close，留待 Resume）。**结束一只 agent 与它是谁无关**，所以只有一份实现。
+`Close`（= capability 侧看到的 `Release`）走 `closeAgent`（`src/agent.go`），和 `Autonomy.finishAgent` 是同一份：停、拆掉 provider 会话、按 `Lifecycle` 决定**留**（`persistent`，**默认**：只 Close，行与 session id 留着，下一条指令还能 Resume，见 [agent.md](agent.md)）还是**删**（`ephemeral`：软删 + 从 factory 摘掉；只有明确要一个用完即弃的 worker 才这样，`broker.AcquireAgentOpts.Ephemeral`）。**结束一只 agent 与它是谁无关**，所以只有一份实现。
 
 ## 不变式
 

@@ -12,6 +12,7 @@ import (
 //
 //	TaskStore          tasks: what was asked for, and how it ended
 //	AgentStore         agents
+//	InboxStore         each agent's messages, in the order they arrived
 //	ConversationStore  a run's header, its messages, and its raw event stream
 //	ExecutionStore     what the runtime planned, and what it actually did
 //	VerificationStore  the Completion Contract and the verdicts against it
@@ -41,6 +42,30 @@ type AgentStore interface {
 	// GetAgent reads one agent row by id (including soft-deleted). A missing row
 	// returns (nil, nil).
 	GetAgent(agentID int64) (*Agent, error)
+}
+
+// InboxStore is every agent's inbox: the messages addressed to it, in arrival
+// order (src/message.go, src/inbox.go). A message is who said something and what
+// they said; the agent processes them one at a time, oldest first.
+type InboxStore interface {
+	// EnqueueMessage appends one message to an agent's inbox and returns its id,
+	// which is its place in the queue.
+	EnqueueMessage(msg AgentMessage) (int64, error)
+	// ClaimNextMessage takes the oldest queued message of one agent and marks it
+	// running, so one consumer at a time owns it. found is false when the inbox is
+	// empty (or when another consumer won that message).
+	ClaimNextMessage(agentID int64) (AgentMessage, bool, error)
+	// FinishAgentMessage records how one message ended (done / failed / stopped).
+	FinishAgentMessage(id int64, status AgentMessageStatus, errText string) error
+	// RequeueRunningMessages puts an agent's running messages back in the queue: a
+	// message a process claimed and then died on is still the agent's to process.
+	RequeueRunningMessages(agentID int64) error
+	// ListAgentMessages reads an agent's inbox in arrival order. limit <= 0 means
+	// all of it.
+	ListAgentMessages(agentID int64, limit int) ([]AgentMessage, error)
+	// CountQueuedMessages is how many messages are waiting for an agent (queued,
+	// not being processed): what "is there anything behind this one" asks.
+	CountQueuedMessages(agentID int64) (int, error)
 }
 
 // ConversationStore is one LLM interaction: a reason_turns row is the header
@@ -142,6 +167,7 @@ type VerificationStore interface {
 type Store interface {
 	TaskStore
 	AgentStore
+	InboxStore
 	ConversationStore
 	ExecutionStore
 	VerificationStore

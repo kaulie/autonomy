@@ -2,18 +2,22 @@ package autonomy
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 )
 
-func TestAgentDefaultLifecycleEphemeral(t *testing.T) {
+// TestAgentDefaultLifecycleIsPersistent: the default is to keep an agent — its
+// row, its task binding, its recorded provider session — so a later instruction
+// for the same task can find it and resume it (see resumeAgentForTask).
+func TestAgentDefaultLifecycleIsPersistent(t *testing.T) {
 	t.Parallel()
 	f := NewAgentFactory()
 	a := f.NewAgent()
-	if a.Lifecycle != AgentLifecycleEphemeral {
-		t.Fatalf("Lifecycle=%q want %q", a.Lifecycle, AgentLifecycleEphemeral)
+	if a.Lifecycle != AgentLifecyclePersistent {
+		t.Fatalf("Lifecycle=%q want %q", a.Lifecycle, AgentLifecyclePersistent)
 	}
-	if !a.IsEphemeral() {
-		t.Fatal("expected IsEphemeral")
+	if a.IsEphemeral() {
+		t.Fatal("an agent is kept by default: IsEphemeral must be false")
 	}
 }
 
@@ -45,6 +49,8 @@ func TestFinishAgentDeletesEphemeralFromFactory(t *testing.T) {
 	auto := &Autonomy{AgentFactory: NewAgentFactory()}
 	task := &Task{ID: "t-ephemeral"}
 	agent := auto.AgentFactory.Create(task)
+	// A throwaway agent is one somebody asked for; it is not the default.
+	agent.Lifecycle = AgentLifecycleEphemeral
 	name := agent.Name
 	// No Cursor session attached — disposeCursorSession is a no-op; factory still drops ephemeral.
 	auto.finishAgent(agent)
@@ -71,6 +77,39 @@ func TestFinishAgentKeepsPersistentInFactory(t *testing.T) {
 	}
 	if got.LLMAgentID != "cursor-keep-me" {
 		t.Fatalf("LLMAgentID=%q want retained for Resume", got.LLMAgentID)
+	}
+}
+
+// TestFinishAgentKeepsTheDefaultAgentInTheStore: an agent that ran is still
+// there afterwards — the row a later instruction (in this process or in the one
+// after a restart) finds it by.
+func TestFinishAgentKeepsTheDefaultAgentInTheStore(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	t.Cleanup(func() { _store = prev })
+	_store = store
+
+	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
+	task := &Task{ID: "t-kept"}
+	agent := auto.AgentFactory.Create(task)
+	auto.finishAgent(agent)
+
+	stored, err := store.GetAgent(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil {
+		t.Fatal("the agent a task was paired with was let go")
+	}
+	if !stored.DeletedAt.IsZero() {
+		t.Fatalf("agents.deleted_at=%v, want a live row", stored.DeletedAt)
+	}
+	if stored.Lifecycle != AgentLifecyclePersistent {
+		t.Fatalf("stored lifecycle=%q, want %q", stored.Lifecycle, AgentLifecyclePersistent)
 	}
 }
 

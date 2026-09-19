@@ -91,7 +91,9 @@ func TestStopTaskCancelsTheRun(t *testing.T) {
 		t.Fatal("stop did not cancel the run context")
 	}
 
-	err = rt.run(ctx, &Task{ID: "task-stop", Description: "d", Status: TaskStatusRunning, Domain: TaskDomainServer, GoalType: GoalType_FEATURE})
+	agent := rt.AgentFactory.Create(&Task{ID: "task-stop", Description: "d"})
+	agent.Session = NewLLMSession(rt.Runtime, agent, SessionOpts{TaskID: "task-stop"})
+	err = rt.runLoop(ctx, agent, &Task{ID: "task-stop", Description: "d", Status: TaskStatusRunning, Domain: TaskDomainServer, GoalType: GoalType_FEATURE}, "d")
 	if err == nil {
 		t.Fatal("run returned nil after stop")
 	}

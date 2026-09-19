@@ -1,0 +1,320 @@
+package autonomy
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The task ↔ agent pairing across process lifetimes: an instruction finds the
+// agent the task is paired with, in this process or in the one that just started,
+// and runs on it (src/agent_resume.go).
+
+// resumeTestStore opens a store and points the package's active store at it, so the
+// runtime's own persistence calls (persistTask / persistAgent) land here.
+func resumeTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := _store
+	t.Cleanup(func() {
+		_store = prev
+		_ = store.Close()
+	})
+	_store = store
+	return store
+}
+
+// pairedTask is what a process that ran a task leaves behind: the task row with
+// its agent_id, and the agent row — id, name, provider session — that row names.
+func pairedTask(t *testing.T, store *SQLiteStore, taskID string) (*Task, *Agent) {
+	t.Helper()
+	task := &Task{ID: taskID, Description: "ship it", Status: TaskStatusRunning}
+	agent := &Agent{
+		State:       "idle",
+		Lifecycle:   AgentLifecyclePersistent,
+		LLMProvider: LLMProviderCline,
+		Model:       "deepseek-v4-pro",
+		LLMAgentID:  "cls_from_before_the_restart",
+		CurrentTask: task,
+	}
+	if err := store.UpsertAgent(agent); err != nil {
+		t.Fatal(err)
+	}
+	task.AgentID = agent.ID
+	if err := store.UpsertTask(task); err != nil {
+		t.Fatal(err)
+	}
+	return task, agent
+}
+
+// TestASecondInstructionForATaskReusesItsAgent: the instruction after the one that
+// created the agent is the same conversation, not a second agent on one task.
+func TestASecondInstructionForATaskReusesItsAgent(t *testing.T) {
+	store := resumeTestStore(t)
+	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
+
+	first, err := auto.resumeAgentForTask(context.Background(), &Task{ID: "t-reused", Description: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == 0 || first.Role != AgentRolePlanner {
+		t.Fatalf("first instruction got %+v, want a planner agent", first)
+	}
+	// The second instruction arrives as its own Task value, the way AcceptTask
+	// builds one from a request that names the same task id.
+	second, err := auto.resumeAgentForTask(context.Background(), &Task{ID: "t-reused", AgentID: first.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("second instruction got agent %d, want the same handle as the first (%d)", second.ID, first.ID)
+	}
+}
+
+// TestAfterARestartATaskResumesTheAgentItsRowNames is the restart flow: a process
+// that holds nothing takes an instruction, finds the agent by the task's own row,
+// rebuilds the handle, registers it in the factory and re-opens its provider
+// session.
+func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
+	store := resumeTestStore(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+
+	task, agent := pairedTask(t, store, "t-restarted")
+
+	// A fresh process: nothing in memory, only what the store kept.
+	f := NewAgentFactory()
+	restarted := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+	got, err := restarted.resumeAgentForTask(context.Background(), &Task{ID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != agent.ID || got.Name != agent.Name {
+		t.Fatalf("resumed agent %d/%s, want the task's own %d/%s", got.ID, got.Name, agent.ID, agent.Name)
+	}
+	if got.Role != AgentRolePlanner {
+		t.Fatalf("role=%q, want %q", got.Role, AgentRolePlanner)
+	}
+	if f.Get(got.Name) != got {
+		t.Fatal("the resumed handle is not the one the factory maintains")
+	}
+	if got.LLMAgentID == "" || got.LLMAgentID == agent.LLMAgentID {
+		t.Fatalf("LLMAgentID=%q, want the live session of this process, not the dead one", got.LLMAgentID)
+	}
+	if !got.needsLLMFrame() {
+		t.Fatal("a session this process started has no frame yet: the next cycle must send it")
+	}
+	// The row now names the live session, which is what the next restart resumes.
+	stored, err := store.GetAgent(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LLMAgentID != got.LLMAgentID {
+		t.Fatalf("agents.llm_agent_id=%q, want the resumed session %q", stored.LLMAgentID, got.LLMAgentID)
+	}
+}
+
+// TestARestartedRuntimeRunsTheInstructionOnTheTasksAgent: the same flow through
+// Autonomy.Run — the cycles of a task nobody in this process created are still
+// that task's own agent's cycles.
+func TestARestartedRuntimeRunsTheInstructionOnTheTasksAgent(t *testing.T) {
+	store := resumeTestStore(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "local")
+	t.Setenv("AUTONOMY_MAX_STEPS", "1")
+
+	task, agent := pairedTask(t, store, "t-restarted-run")
+
+	f := NewAgentFactory()
+	restarted := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+	_ = restarted.Run(&Task{ID: task.ID})
+
+	var agentID int64
+	if err := store.db.QueryRow(`SELECT agent_id FROM reason_turns WHERE task_id = ? LIMIT 1`, task.ID).Scan(&agentID); err != nil {
+		t.Fatalf("the instruction left no run for the task: %v", err)
+	}
+	if agentID != agent.ID {
+		t.Fatalf("reason_turns.agent_id=%d, want the task's own agent %d", agentID, agent.ID)
+	}
+	var agents int
+	if err := store.db.QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
+		t.Fatal(err)
+	}
+	if agents != 1 {
+		t.Fatalf("agents=%d, want the one the task was already paired with", agents)
+	}
+}
+
+// TestATaskWhoseAgentWasLetGoGetsANewOne: a deleted agent is not resumed — the
+// task gets a new agent instead of a handle back to a row that was let go.
+// waitForTaskToFinish waits until the agent is done with what it was processing, so
+// a test can read the record a run left behind.
+func waitForTaskToFinish(t *testing.T, taskID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, running := inFlightTasks.Load(taskID); !running {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("task %s never left the in-flight set", taskID)
+}
+
+// TestASecondInstructionIsAcceptedOnTheSameAgent is the flow as a user sees it: an
+// instruction arrives, the runtime pairs the task with an agent, and the next
+// instruction for that task is that agent's next conversation — not a second agent
+// on one task.
+func TestASecondInstructionIsAcceptedOnTheSameAgent(t *testing.T) {
+	store := resumeTestStore(t)
+	t.Setenv("AUTONOMY_REASONER", "local")
+	t.Setenv("AUTONOMY_MAX_STEPS", "1")
+
+	f := NewAgentFactory()
+	auto := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+
+	first, err := auto.AcceptTask(AcceptTaskRequest{ID: "t-http", Description: "ship it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AgentID == 0 || first.MessageID == 0 {
+		t.Fatalf("the accepted instruction has no agent or no message: %+v", first)
+	}
+
+	// The second instruction arrives while the agent may still be busy, and that is
+	// the point: it is accepted and queued, not refused.
+	second, err := auto.AcceptTask(AcceptTaskRequest{ID: "t-http", Description: "and again"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.AgentID != first.AgentID {
+		t.Fatalf("second instruction got agent %d, want the task's own agent %d", second.AgentID, first.AgentID)
+	}
+	if second.MessageID == first.MessageID {
+		t.Fatalf("both instructions are message %d, want one message each", first.MessageID)
+	}
+	var agents int
+	if err := store.db.QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
+		t.Fatal(err)
+	}
+	if agents != 1 {
+		t.Fatalf("agents=%d, want the one this task's instructions share", agents)
+	}
+	// Both instructions are the agent's messages, in the order they were accepted.
+	waitForTaskToFinish(t, "t-http")
+	messages, err := store.ListAgentMessages(first.AgentID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("inbox=%d messages, want the two instructions", len(messages))
+	}
+	for i, want := range []string{"ship it", "and again"} {
+		if messages[i].Content != want || messages[i].Sender != MessageSenderUser || messages[i].Kind != MessageKindInstruction {
+			t.Errorf("message %d=%+v, want the %q instruction from the user", i, messages[i], want)
+		}
+	}
+}
+
+func TestATaskWhoseAgentWasLetGoGetsANewOne(t *testing.T) {
+	store := resumeTestStore(t)
+	task, agent := pairedTask(t, store, "t-let-go")
+	if err := store.SoftDeleteAgent(agent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
+	got, err := auto.resumeAgentForTask(context.Background(), &Task{ID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID == agent.ID {
+		t.Fatalf("resumed the agent %d that was let go", agent.ID)
+	}
+	if got.CurrentTask == nil || got.CurrentTask.ID != task.ID {
+		t.Fatalf("the new agent is not bound to the task: %+v", got)
+	}
+}
+
+// waitForInboxDry waits until the agent has no queued or running message left, so a
+// test can read everything the instructions produced.
+func waitForInboxDry(t *testing.T, store *SQLiteStore, agentID int64) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		messages, err := store.ListAgentMessages(agentID, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		busy := 0
+		for _, msg := range messages {
+			if msg.Status == MessageStatusQueued || msg.Status == MessageStatusRunning {
+				busy++
+			}
+		}
+		if busy == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the agent never finished its inbox")
+}
+
+// TestAQueuedInstructionReachesTheCycleThatAnswersIt: a second instruction for a
+// task is a message behind the first, and the cycle that answers it carries it —
+// the agent reads what it was asked, not only the description its task began with.
+func TestAQueuedInstructionReachesTheCycleThatAnswersIt(t *testing.T) {
+	store := resumeTestStore(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "llm")
+	t.Setenv("AUTONOMY_MAX_STEPS", "1")
+	// The LLM prompt is built from the policy files, so this test needs a root that
+	// has them (a deployment renders the same prompt).
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+
+	task, agent := pairedTask(t, store, "t-instruction")
+	f := NewAgentFactory()
+	auto := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+
+	// Two instructions for the same task: both reach the same agent, and the second
+	// waits for the first (the canned answer both prompts draw is the fake planner's).
+	if _, err := auto.AcceptTask(AcceptTaskRequest{ID: task.ID, Description: "answer done: deploy the service"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auto.AcceptTask(AcceptTaskRequest{ID: task.ID, Description: "answer done: and then tell me"}); err != nil {
+		t.Fatal(err)
+	}
+	waitForInboxDry(t, store, agent.ID)
+
+	rows, err := store.db.Query(`SELECT input FROM reason_turns WHERE task_id = ? ORDER BY id`, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var prompts []string
+	for rows.Next() {
+		var input string
+		if err := rows.Scan(&input); err != nil {
+			t.Fatal(err)
+		}
+		prompts = append(prompts, input)
+	}
+	if len(prompts) < 2 {
+		t.Fatalf("the two instructions produced %d runs, want one each", len(prompts))
+	}
+	for i, want := range []string{"deploy the service", "and then tell me"} {
+		if !strings.Contains(prompts[i], want) {
+			t.Errorf("run %d does not carry its instruction %q", i, want)
+		}
+		if !strings.Contains(prompts[i], "additional_input") {
+			t.Errorf("run %d does not render the message as additional_input", i)
+		}
+	}
+}
