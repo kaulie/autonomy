@@ -158,25 +158,11 @@ type cycleDone struct {
 	result   Result
 }
 
-// Run is one instruction, run to completion: the task's agent gets a message from
-// the user, the agent's own consumer processes it (src/inbox.go), and Run waits
-// for that message's result — which is the error a caller of Run has always got
-// back. Nothing about it is special: it is the same message an instruction
-// arriving over HTTP becomes, waited for.
-func (r *Autonomy) Run(task *Task) error {
-	ctx := context.Background()
-	agent, msg, err := r.instruction(ctx, task, taskDescription(task))
-	if err != nil {
-		return err
-	}
-	_, err = r.agentInbox().Send(ctx, agent, msg)
-	return err
-}
-
 // instruction resolves the task's agent and builds the message one instruction
-// becomes: the user speaking, about that task, saying this. Accepting an
-// instruction queues it, so the task is written as pending — the agent's consumer
-// is what marks it running.
+// becomes: the user speaking, about that task, saying this. Both doors build their
+// message here — HTTP's AcceptTask and Autonomy.Run — so an instruction is the same
+// message wherever it came from. Accepting an instruction queues it, so the task is
+// written as pending — the agent's consumer is what marks it running.
 func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) (*Agent, AgentMessage, error) {
 	if task == nil {
 		return nil, AgentMessage{}, fmt.Errorf("nil task")
@@ -186,8 +172,8 @@ func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) 
 	}
 	text := strings.TrimSpace(content)
 	if text == "" {
-		// Run(task) may hand over a task that carries just its id: what that task is
-		// asked to do is its own row.
+		// A request may carry just the task's id: what that task is asked to do is
+		// then its own row — the description an earlier instruction gave it.
 		if store := r.taskStore(); store != nil {
 			if stored, err := store.GetTask(task.ID); err == nil && stored != nil {
 				text = strings.TrimSpace(stored.Description)
@@ -218,15 +204,6 @@ func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) 
 		Kind:     MessageKindInstruction,
 		Content:  text,
 	}, nil
-}
-
-// taskDescription is the instruction a Task value carries: what Run(task) is asked
-// to do.
-func taskDescription(task *Task) string {
-	if task == nil {
-		return ""
-	}
-	return task.Description
 }
 
 // processMessage is what the inbox hands one message to: the agent's own work.

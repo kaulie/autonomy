@@ -187,12 +187,12 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	t.Setenv("AUTONOMY_REASONER", "local")
 
 	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
-	task := &Task{ID: "t-fail-loop", Description: "d", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	if err := rt.Run(task); err == nil {
+	req := AcceptTaskRequest{ID: "t-fail-loop", Description: "d", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	if _, err := rt.Run(req); err == nil {
 		t.Fatal("Run returned nil; the last cycle failed")
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, task.ID).Scan(&turns); err != nil {
+	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 2 {
@@ -202,7 +202,7 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	// The row says why, not only that: the terminal that printed the failure is
 	// not a record anyone can look at later.
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" {
@@ -240,14 +240,14 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	bootstrapFlag = true
 
 	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
-	task := &Task{ID: "t-out-of-balance", Description: "out of balance", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	err = rt.Run(task)
+	req := AcceptTaskRequest{ID: "t-out-of-balance", Description: "out of balance", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	_, err = rt.Run(req)
 	if err == nil || !strings.Contains(err.Error(), "empty model response") {
 		t.Fatalf("Run=%v, want the empty answer to have failed the decide", err)
 	}
 
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" || !strings.Contains(reason, "Insufficient Balance") {
@@ -260,7 +260,7 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	if err := store.db.QueryRow(`
 SELECT count(*) FROM llm_events e JOIN reason_turns r ON r.id = e.turn_id
 WHERE r.task_id = ? AND json_extract(e.payload, '$.source') = 'run_result'
-  AND json_extract(e.payload, '$.error.message') = 'Insufficient Balance'`, task.ID).Scan(&events); err != nil {
+  AND json_extract(e.payload, '$.error.message') = 'Insufficient Balance'`, req.ID).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
 	if events != 1 {
@@ -292,14 +292,14 @@ func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {
 	bootstrapFlag = true
 
 	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
-	task := &Task{ID: "t-no-decide", Description: "d", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	err = rt.Run(task)
+	req := AcceptTaskRequest{ID: "t-no-decide", Description: "d", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	_, err = rt.Run(req)
 	if err == nil || !strings.Contains(err.Error(), "decide:") {
 		t.Fatalf("Run=%v, want the decide to have failed", err)
 	}
 
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &reason); err != nil {
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" {

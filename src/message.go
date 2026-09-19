@@ -6,7 +6,7 @@ import "time"
 // arrived, and the agent processes them one at a time (src/inbox.go). The three
 // things that can address an agent are the three senders:
 //
-//	user    an instruction for a task (POST /api/tasks)
+//	user    an instruction for a task (POST /api/tasks, Autonomy.Run)
 //	agent   another agent handing it a job (a capability's delegated prompt)
 //	system  the runtime itself (today: a stop)
 //

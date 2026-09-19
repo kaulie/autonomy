@@ -41,6 +41,11 @@ RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 
 `message_id` 是这条指令在 inbox 里的消息 id，`queued` 是它前面还有几条（`0` = 下一条就是它）。
 
+同一个入口也有进程内的同步版本：`Autonomy.Run(AcceptTaskRequest)`。它走的是同一条 accept 路径（同一个 task、
+同一条指令消息、同一只 agent），区别只在于它会等这次运行结束才返回，返回这次运行的错误和同一份接受信息
+（`*AcceptTaskResponse`）——`cmd/autonomy` 和测试用它，不用轮询。请求里的 `description` 为空时，指令内容取这条
+task 行已有的描述（`tasks.description`）。
+
 ### `POST /api/tasks/{task_id}/stop`
 
 停掉这个 agent 正在处理的那条消息（planner 循环在当前 decide 或当前 cycle 的事件等待处退出），状态记为 `stopped`；

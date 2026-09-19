@@ -136,20 +136,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	task := &autonomy.Task{
+	// The same entry POST /api/tasks takes: an AcceptTaskRequest. Run waits for the
+	// run, which is what a CLI caller wants — nothing to poll.
+	if _, err := _autonomy.Run(autonomy.AcceptTaskRequest{
 		ID:          "task-28",
 		Description: "开放服务契约的前端入口，提交commit，提PR,merge代码后部署上线",
-		Status:      "pending",
 		GoalType:    autonomy.GoalType_FEATURE,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ContextRef: map[autonomy.ContextContainerType]string{
-			autonomy.ContextContainerTypeProject: projectContextContainer.ID,
+		ContextRef: map[string]string{
+			string(autonomy.ContextContainerTypeProject): projectContextContainer.ID,
 		},
-	}
-
-	err = _autonomy.Run(task)
-	if err != nil {
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
