@@ -11,12 +11,21 @@ import (
 )
 
 // AttachCline binds a resident Cline SDK session (through the Node bridge) to
-// this autonomy agent. All Cline-backed agents go through here so the shared
-// bridge client is the only bridge used.
+// this autonomy agent, in the mode its turns run in: a worker acts (tools
+// auto-approved). All Cline-backed agents go through here so the shared bridge
+// client is the only bridge used.
 //
 // The model comes from AUTONOMY_CLINE_MODEL, or — when that is unset — from the
 // provider/model saved by `cline auth`, resolved by the bridge.
 func (a *Agent) AttachCline(ctx context.Context) error {
+	return a.attachClineMode(ctx, clineModeFor(ReasonModeAgent))
+}
+
+// attachClineMode binds the session for an agent whose mode the caller knows: a
+// planner's cycles decide, which is Cline's plan mode (read-only). A session is
+// mode-sticky, so opening the one the agent will actually run on is what keeps a
+// resumed agent from holding a second, unused session.
+func (a *Agent) attachClineMode(ctx context.Context, mode string) error {
 	if a == nil {
 		return fmt.Errorf("nil agent")
 	}
@@ -31,7 +40,7 @@ func (a *Agent) AttachCline(ctx context.Context) error {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	return a.attachClineSession(ctx, clineModeFor(ReasonModeAgent), cwd)
+	return a.attachClineSession(ctx, mode, cwd)
 }
 
 // clineSessionKey identifies one resident session: a Cline session is sticky in

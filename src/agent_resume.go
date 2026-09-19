@@ -149,8 +149,15 @@ func (a *Agent) resumeAgentSession(ctx context.Context) (bool, error) {
 		// fresh session. What carries over is the agent itself — its row, its task,
 		// its workspace — and the conversation it already had is on the record
 		// (llm_messages), which the next turn is written against.
+		//
+		// The session is opened in the mode this agent's turns run in (a planner's
+		// cycles decide), because that is the one it will keep using.
 		a.resetLLMFrame()
-		return false, a.AttachCline(ctx)
+		mode := clineModeFor(ReasonModeAgent)
+		if a.Role == AgentRolePlanner {
+			mode = clineModeFor(ReasonModePlan)
+		}
+		return false, a.attachClineMode(ctx, mode)
 	case AgentBackendLocal:
 		// No provider session to open: a local agent's turns come from its host.
 		return false, nil

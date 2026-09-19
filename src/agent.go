@@ -134,6 +134,19 @@ func (f *AgentFactory) Get(name string) *Agent {
 	return f.agents[name]
 }
 
+// snapshot is the agents this factory holds, for a walk that does not touch the
+// registry (teardown, see Autonomy.Close).
+func (f *AgentFactory) snapshot() []*Agent {
+	if f == nil {
+		return nil
+	}
+	out := make([]*Agent, 0, len(f.agents))
+	for _, agent := range f.agents {
+		out = append(out, agent)
+	}
+	return out
+}
+
 // ForTask returns the agent this factory already holds for one task's cycles, or
 // nil. It is the planner — the agent that task's decisions belong to — because a
 // delegated worker carries the delegating task id too and is not that task's

@@ -123,12 +123,24 @@ func (r *Autonomy) SetWorld(world *World) {
 	r.World = world
 }
 
-// Close releases process-wide resources: the shared Cursor bridge client and
-// the Store. Call it at runtime teardown (e.g. deferred in main) once all
-// agents have finished.
+// Close releases process-wide resources at runtime teardown (e.g. deferred in main):
+// the provider sessions the resident agents are holding, the shared bridge clients,
+// and the Store. Rows are kept — an agent is not deleted by a shutdown, and the
+// session id on its row is what the next process resumes.
 func (r *Autonomy) Close() error {
 	var first error
+	// Agents are resident (see drainedAgent), so teardown is where their provider
+	// sessions are torn down: the rows and handles stay, and the session ids they
+	// recorded are what a later process resumes.
+	if r != nil && r.AgentFactory != nil {
+		for _, agent := range r.AgentFactory.snapshot() {
+			closeAgent(agent, r.AgentFactory, context.Background())
+		}
+	}
 	if err := closeSharedCursorClient(); err != nil && first == nil {
+		first = err
+	}
+	if err := closeSharedClineClient(); err != nil && first == nil {
 		first = err
 	}
 	if r != nil && r.Store != nil {
@@ -253,7 +265,13 @@ func (r *Autonomy) processInstruction(ctx context.Context, cancel context.Cancel
 	// The task's own agent takes a turn every cycle, on the same session a delegated
 	// worker gets: what makes this agent the planner is its identity, not a different
 	// kind of session (see LLMSession). Every turn is attributed to this task.
-	agent.Session = NewLLMSession(r.Runtime, agent, SessionOpts{TaskID: task.ID})
+	//
+	// The agent is resident, so its session is kept across messages: a new message
+	// continues the conversation it already has. A session is only opened when there is
+	// none left to continue (the first message, or one that was closed).
+	if agent.Session == nil || agent.Session.agent == nil || agent.Session.taskID != task.ID {
+		agent.Session = NewLLMSession(r.Runtime, agent, SessionOpts{TaskID: task.ID})
+	}
 	// Processing a message is running a task: that is what a stop cancels
 	// (POST /api/tasks/{id}/stop) and what says a task is running at all.
 	if cancel != nil {
@@ -281,15 +299,17 @@ func (r *Autonomy) taskForMessage(msg AgentMessage) *Task {
 }
 
 // drainedAgent is the inbox telling the runtime that an agent has nothing left to
-// process: the task's own agent is let go here — closed, its row and handle kept —
-// because nothing else ends it. A worker is not: the capability that acquired it
-// ends it when it releases the session, and closing it between two of its prompts
-// would throw away the session it is keeping.
+// process. The agent stays resident: it is only marked idle — not stopped, its
+// provider session stays open — so the next message continues the same conversation
+// on the same session, with no re-attach and no frame to send again. An agent ends
+// when it is explicitly ended: a worker when the capability that acquired it
+// releases the session, an agent that never attached at all. Nothing ends it just
+// because a run finished.
 func (r *Autonomy) drainedAgent(agent *Agent) {
-	if agent == nil || agent.Role != AgentRolePlanner {
+	if agent == nil {
 		return
 	}
-	r.finishAgent(agent)
+	agent.Stop()
 }
 
 // runLoop is one instruction's decision loop: decide → execute → observe until the

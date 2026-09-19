@@ -18,7 +18,7 @@ Agent ≠ Capability。只有需要自主决策时才需要 Agent；单纯「能
 | 字段 | 含义 |
 |------|------|
 | Identity | Agent 自有标识（与 Task ID 独立；`current_task_id` 关联当前负责的任务）——**被委托的 agent（capability acquire 出来的 worker）记的是同一个 task id**：它和它的 run 都挂在委托方那条 Task 下 |
-| Lifecycle | **`persistent`（默认）：一只 agent 不因一次运行结束而消失** —— 停掉未结束的 run、`CloseAgent`（Cursor）/关闭 session（Cline），行、workspace 与 provider session id 都留着，下一条指令（哪怕是重启后的进程）还能 Resume 它。`ephemeral` 是**有人明确要一个用完即弃的 worker** 时才用（`broker.AcquireAgentOpts.Ephemeral`）：`Release` 时软删行 + 从 factory 摘掉。见「重启之后」 |
+| Lifecycle | **`persistent`（默认）：agent 常驻** —— 一次运行结束**不停它**（只标 `idle`），provider 会话留着，下一条消息接着同一段对话（不重新挂会话、不重发 frame）；行、workspace 与 provider session id 也留着，所以重启后的进程还能 Resume 它。只有**明确的结束**才拆会话：worker 被 capability `Release`、后端根本没挂上、进程退出（`Autonomy.Close` 收尾）。`ephemeral` 是**有人明确要一个用完即弃的 worker** 时才用（`broker.AcquireAgentOpts.Ephemeral`）：`Release` 时软删行 + 从 factory 摘掉。见「重启之后」 |
 | Workspace | `AGENT_WORKSPACE=/Users/gaolei/agent-workspace-sandbox/{agent_name}/`，创建 Agent 时分配，供 Cursor / `code_edit` 使用。**委托出去的 worker 用自己这一份**：委托方（planner）不能把自己的 workspace 强加给它 —— 委托时 `AcquireAgent` 不带 workspace，worker 在自己的沙箱里干活 |
 | Backend | `local`（默认）或 `cursor`：Cursor SDK 只是后端实现；上层统一走 `AgentFactory` + `AttachCursor` / `PromptCursor` |
 | LLM Provider | `cursor` / `cline` / `deepseek_harness`：记录当前 LLM 提供方（DB 列 `llm_provider`） |

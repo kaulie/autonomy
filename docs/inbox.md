@@ -43,8 +43,9 @@
 
 ## 与 agent 生命周期的关系
 
-队空的时候 runtime 才让 agent 歇下来（关掉 provider 会话，行与 handle 留着，见 [agent.md](agent.md)）：
-一条指令与下一条之间，对话是连着的。worker 不在这里被关 —— 它由拿到它的 capability 在 `Release` 时结束。
+队空的时候 agent 只是被标成 `idle`：**不停它，也不拆它的会话**——agent 常驻，下一条消息接着同一段对话
+（不重新挂会话、不重发 frame），行与 handle 也留着（见 [agent.md](agent.md)）。拆会话只发生在明确的结束时：worker 被
+capability `Release`、后端没挂上、或进程退出（`Autonomy.Close`）。
 
 `Autonomy.Run(task)` 是同步的那扇门：它把指令放进队里，等**这条消息处理完且队空了**才返回，
 所以调用方（测试、`cmd/autonomy`）拿到的仍然是这次运行的错误；`AcceptTask` 是 HTTP 的那扇门，不等。
