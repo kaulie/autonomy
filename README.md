@@ -92,6 +92,8 @@ go run ./cmd/autonomy -description "…"    # a client of it: one instruction ov
 
 Go adapter: `src/cursorsdk` (BridgeManager + Connect client + Agent/Run), generated from `proto/sdk/v1` per [Agent: start here](https://github.com/cursor/sdk-bridge#agent-start-here).
 
+The bridge is a downloaded binary (`third_party/bin/cursor-sdk-bridge`, gitignored). `build.sh` ships it in the release package as `bin/cursor-sdk-bridge` and `scripts/start.sh` points `CURSOR_SDK_BRIDGE_BIN` at it — a deployed runtime's cwd is the runtime dir, where the runtime's own `third_party/…` lookup finds nothing.
+
 ```bash
 # regenerate stubs after proto bumps
 buf generate --template src/cursorsdk/buf.gen.yaml

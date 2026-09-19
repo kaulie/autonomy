@@ -107,7 +107,7 @@ type client struct {
 func newClient(base string) (*client, error) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if base == "" {
-		return nil, fmt.Errorf("no server: set -server (or AUTONOMY_API_URL), e.g. http://127.0.0.1:4230")
+		return nil, fmt.Errorf("no server: set -server (or AUTONOMY_API_URL), e.g. http://127.0.0.1:4300")
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme == "" || u.Host == "" {

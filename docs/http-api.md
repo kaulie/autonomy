@@ -1,6 +1,8 @@
 # HTTP API
 
-Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，默认端口 `4230`，探活 `GET /health`。
+Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
+
+发版包（`build.sh`）自带两份东西，部署上直接能用：runtime 本体 `bin/autonomyd`，以及 cursor bridge `bin/cursor-sdk-bridge`（`third_party/` 是 gitignore 的下载产物，不带它的话部署上的 llm 任务会失败在 `cursor bridge ping`；`scripts/start.sh` 会把它指给 `CURSOR_SDK_BRIDGE_BIN`）。
 
 本地：
 
@@ -9,7 +11,7 @@ Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `script
 RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 ```
 
-不走脚本时用 `go run ./cmd/autonomyd`（`AUTONOMY_HTTP_ADDR` 未设置则监听 `:4230`）——这就是 runtime 本身：
+不走脚本时用 `go run ./cmd/autonomyd`（`AUTONOMY_HTTP_ADDR` 未设置则监听 `:4300`，即契约里的端口）——这就是 runtime 本身：
 进程里装着库、store 与 agent。`cmd/autonomy` 是它的**客户端**，不链接 runtime 的任何代码，
 只用下面这些 HTTP 调用：
 
@@ -20,7 +22,7 @@ go run ./cmd/autonomy -task task-28 -progress                    # GET /api/task
 go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tasks/{id}/stop
 ```
 
-默认对着 `http://127.0.0.1:4230`（`-server` / `AUTONOMY_API_URL` 可改）。不给任何参数时发的是演示指令
+默认对着 `http://127.0.0.1:4300`（契约里 autonomy 的端口；`-server` / `AUTONOMY_API_URL` 可改，本地手起的 runtime 用它指过去）。不给任何参数时发的是演示指令
 （task 默认 `task-28`，`context_ref` 默认 `project=project-2` —— runtime 启动时播种的那个世界，见 `cmd/autonomyd/world.go`）。
 命令的退出码就是这个任务的状态（`-progress` 是它读到的那个）：`error` / `unverified` 非零，其余为 0；
 `-json` 打印 API 原样的响应。

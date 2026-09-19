@@ -6,8 +6,8 @@
 // this binary: build.sh builds it to bin/autonomyd, and scripts/start.sh runs it
 // with AUTONOMY_HTTP_ADDR set from SERVICE_PORT.
 //
-//	go run ./cmd/autonomyd                                  # serves on :4230
-//	AUTONOMY_HTTP_ADDR=127.0.0.1:4230 go run ./cmd/autonomyd
+//	go run ./cmd/autonomyd                                  # serves on :4300
+//	AUTONOMY_HTTP_ADDR=127.0.0.1:4300 go run ./cmd/autonomyd
 //
 // Its client counterpart is cmd/autonomy:
 //
@@ -25,9 +25,12 @@ import (
 // version is stamped by build.sh (-X main.version=$APP_VERSION).
 var version = "dev"
 
-// defaultAddr is where the runtime listens when AUTONOMY_HTTP_ADDR is not set.
-// A deployment always sets it — scripts/start.sh derives it from SERVICE_PORT.
-const defaultAddr = ":4230"
+// defaultAddr is where the runtime listens when AUTONOMY_HTTP_ADDR is not set:
+// the port the service contract declares for autonomy. A deployment always sets
+// it — scripts/start.sh takes it from SERVICE_PORT and falls back to the same
+// number — so this is the port `go run ./cmd/autonomyd` and `go run
+// ./cmd/autonomy` agree on.
+const defaultAddr = ":4300"
 
 func main() {
 	if err := run(); err != nil {
