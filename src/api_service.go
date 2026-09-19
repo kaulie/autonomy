@@ -131,14 +131,74 @@ var inFlightTasks sync.Map
 // processes it, one message at a time, in the order the messages arrived — so an
 // instruction that arrives while the agent is busy is accepted and queued behind
 // what it is doing, instead of being refused.
+//
+// It is HTTP's door (POST /api/tasks) into accept, and the only thing this door adds
+// to it is the decision not to wait: the request is answered as soon as the message
+// is in the queue. Run is the other door on the same accept path, and it waits.
 func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error) {
 	if r == nil {
 		return nil, fmt.Errorf("autonomy not initialized")
 	}
-	desc := strings.TrimSpace(req.Description)
-	if desc == "" {
-		return nil, fmt.Errorf("description is required")
+	task, agent, msg, err := r.accept(req)
+	if err != nil {
+		return nil, err
 	}
+	id, err := r.agentInbox().Enqueue(agent, msg)
+	if err != nil {
+		return nil, err
+	}
+	return r.accepted(task, agent, id), nil
+}
+
+// Run runs one instruction for a task to completion, in-process. It is the
+// programmatic door onto the very thing POST /api/tasks accepts: the same request
+// (AcceptTaskRequest — what to do, and optionally which task it is), through the
+// same accept path (accept), becoming the same message in the same agent's inbox.
+// The difference is only what the caller wants back: HTTP answers with the
+// acceptance, Run accepts with a receipt and waits for the run that message became,
+// returning how it ended — the error Run has always returned (nil when nothing
+// failed, with the task's outcome on its row), alongside the same acceptance HTTP
+// answers with.
+//
+// Nothing about the run is special because it came from here: it is the same
+// message, on the same session, going through the same loop as one over HTTP.
+func (r *Autonomy) Run(req AcceptTaskRequest) (*AcceptTaskResponse, error) {
+	if r == nil {
+		return nil, fmt.Errorf("autonomy not initialized")
+	}
+	task, agent, msg, err := r.accept(req)
+	if err != nil {
+		return nil, err
+	}
+	receipt, err := r.agentInbox().Accept(context.Background(), agent, msg)
+	if err != nil {
+		return nil, err
+	}
+	// The wait is the only difference from HTTP's door: Run asks for the run, not
+	// for a receipt, so it comes back when this message has been processed.
+	_, runErr := receipt.Wait()
+	return r.accepted(task, agent, receipt.ID()), runErr
+}
+
+// accepted describes one acceptance: the task, the agent that will do it, and where
+// this instruction stands in that agent's queue. Both doors answer with it.
+func (r *Autonomy) accepted(task *Task, agent *Agent, messageID int64) *AcceptTaskResponse {
+	return &AcceptTaskResponse{
+		TaskID:    task.ID,
+		AgentID:   agent.ID,
+		Status:    task.Status,
+		MessageID: messageID,
+		Queued:    r.agentInbox().Queued(agent, messageID),
+	}
+}
+
+// accept is the one accept path: the request becomes the task (its own id or a new
+// one, description, domain, goal, context references — an existing task continued
+// rather than recreated) and the instruction message its agent will process, with
+// the agent resolved and resumed (see resumeAgentForTask). A door then decides what
+// to do with the message: AcceptTask queues it and answers, Run queues it and waits.
+func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, error) {
+	desc := strings.TrimSpace(req.Description)
 	taskID := strings.TrimSpace(req.ID)
 	if taskID == "" {
 		taskID = newTaskID()
@@ -163,10 +223,12 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 
 	// A second instruction for a task the store already knows continues that task
 	// rather than starting a new one: it keeps the row's own identity (when the task
-	// was created, and the domain/goal it was accepted with when this request does
-	// not restate them) and, above all, the agent it was paired with — because that
-	// is the agent this instruction resumes (see resumeAgentForTask). It also keeps
-	// the description it was given then: what is being asked *now* is the message.
+	// was created, and the description/domain/goal it was accepted with when this
+	// request does not restate them) and, above all, the agent it was paired with —
+	// because that is the agent this instruction resumes (see resumeAgentForTask).
+	// A request that carries no words of its own changes nothing about what the task
+	// is: what is being asked *now* is the message, and a message that says nothing
+	// new is the row's own description (see instruction).
 	task := &Task{
 		ID:          taskID,
 		Description: desc,
@@ -180,6 +242,9 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 	if stored, err := r.taskStore().GetTask(taskID); err == nil && stored != nil {
 		task.CreatedAt = stored.CreatedAt
 		task.AgentID = stored.AgentID
+		if desc == "" {
+			task.Description = stored.Description
+		}
 		if strings.TrimSpace(req.Domain) == "" {
 			task.Domain = stored.Domain
 		}
@@ -189,19 +254,9 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 	}
 	agent, msg, err := r.instruction(context.Background(), task, desc)
 	if err != nil {
-		return nil, err
+		return nil, nil, AgentMessage{}, err
 	}
-	id, err := r.agentInbox().Enqueue(agent, msg)
-	if err != nil {
-		return nil, err
-	}
-	return &AcceptTaskResponse{
-		TaskID:    taskID,
-		AgentID:   agent.ID,
-		Status:    task.Status,
-		MessageID: id,
-		Queued:    r.agentInbox().Queued(agent, id),
-	}, nil
+	return task, agent, msg, nil
 }
 
 func newTaskID() string {

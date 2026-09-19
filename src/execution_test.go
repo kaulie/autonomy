@@ -247,23 +247,23 @@ func plannerRun(t *testing.T, description string) (*SQLiteStore, *Autonomy) {
 func TestRunVerifiesADoneAgainstTheCompletionContract(t *testing.T) {
 	store, rt := plannerRun(t, "answer done")
 
-	task := &Task{ID: "task-verifiable", Description: "answer done", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	if err := rt.Run(task); err != nil {
+	req := AcceptTaskRequest{ID: "task-verifiable", Description: "answer done", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	if _, err := rt.Run(req); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
 	var status string
-	if err := store.db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, task.ID).Scan(&status); err != nil {
+	if err := store.db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, req.ID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusCompleted {
 		t.Fatalf("status=%q, want %q", status, TaskStatusCompleted)
 	}
-	contract, err := store.ListCompletionContract(task.ID)
+	contract, err := store.ListCompletionContract(req.ID)
 	if err != nil || len(contract) != 1 {
 		t.Fatalf("completion_contract=%v err=%v, want the criterion the first answer declared", contract, err)
 	}
-	verdicts, err := store.ListVerifications(task.ID)
+	verdicts, err := store.ListVerifications(req.ID)
 	if err != nil || len(verdicts) != 1 {
 		t.Fatalf("verification=%v err=%v, want one verdict", verdicts, err)
 	}
@@ -284,8 +284,8 @@ func TestRunEndsUnverifiedWhenTheContractDoesNotHold(t *testing.T) {
 	store, rt := plannerRun(t, "unverified answer")
 	t.Setenv("AUTONOMY_MAX_STEPS", "4")
 
-	task := &Task{ID: "task-unverified", Description: "unverified answer", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	err := rt.Run(task)
+	req := AcceptTaskRequest{ID: "task-unverified", Description: "unverified answer", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	_, err := rt.Run(req)
 	if err == nil {
 		t.Fatal("Run succeeded; the world never satisfied the contract")
 	}
@@ -293,7 +293,7 @@ func TestRunEndsUnverifiedWhenTheContractDoesNotHold(t *testing.T) {
 		t.Fatalf("err=%v, want the refusal", err)
 	}
 
-	verdicts, err := store.ListVerifications(task.ID)
+	verdicts, err := store.ListVerifications(req.ID)
 	if err != nil || len(verdicts) != 4 {
 		t.Fatalf("verification=%v err=%v, want one verdict per refused done (budget was 4)", verdicts, err)
 	}
@@ -307,7 +307,7 @@ func TestRunEndsUnverifiedWhenTheContractDoesNotHold(t *testing.T) {
 	}
 
 	var status, taskError string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &taskError); err != nil {
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusUnverified {
@@ -337,8 +337,8 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 			t.Setenv("AUTONOMY_MAX_STEPS", "4")
 
 			taskID := "task-" + strings.ReplaceAll(tc.phrase, " ", "-")
-			task := &Task{ID: taskID, Description: tc.phrase, Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-			if err := rt.Run(task); err != nil {
+			req := AcceptTaskRequest{ID: taskID, Description: tc.phrase, Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+			if _, err := rt.Run(req); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
 
@@ -388,8 +388,8 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	store, rt := plannerRun(t, "unproven answer")
 	t.Setenv("AUTONOMY_MAX_STEPS", "4")
 
-	task := &Task{ID: "task-unproven", Description: "unproven answer", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	err := rt.Run(task)
+	req := AcceptTaskRequest{ID: "task-unproven", Description: "unproven answer", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	_, err := rt.Run(req)
 	if err == nil {
 		t.Fatal("Run succeeded; the planner answered `done` without evidence every cycle")
 	}
@@ -400,7 +400,7 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	}
 
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, task.ID).Scan(&turns); err != nil {
+	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 4 {
@@ -408,12 +408,12 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	}
 	// A refused decision is neither written nor executed: there is no plan row, so
 	// nothing records this task as having concluded anything.
-	if plans, err := store.ListExecutionPlans(task.ID); err != nil || len(plans) != 0 {
+	if plans, err := store.ListExecutionPlans(req.ID); err != nil || len(plans) != 0 {
 		t.Fatalf("plans=%v err=%v, want none for a refused decision", plans, err)
 	}
 
 	var status, taskError string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, task.ID).Scan(&status, &taskError); err != nil {
+	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusUnverified {
@@ -430,8 +430,8 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 // input — by message id rather than by cycle number.
 func TestRunRecordsThePlanAndWhatItTalkedTo(t *testing.T) {
 	store, rt := plannerRun(t, "give me a plan")
-	task := &Task{ID: "task-e2e", Description: "give me a plan", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	if err := rt.Run(task); err != nil {
+	req := AcceptTaskRequest{ID: "task-e2e", Description: "give me a plan", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	if _, err := rt.Run(req); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 

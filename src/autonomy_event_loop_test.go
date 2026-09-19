@@ -87,12 +87,12 @@ func TestRunObservesAfterCycleDone(t *testing.T) {
 	t.Setenv("AUTONOMY_REASONER", "local")
 
 	rt := &Autonomy{AgentFactory: NewAgentFactory(), Runtime: NewRuntime(NewAgentFactory()), Store: store}
-	task := &Task{ID: "t-event-loop", Description: "d", Domain: TaskDomainServer, GoalType: GoalType_FEATURE, Status: "pending"}
-	if err := rt.Run(task); err == nil {
+	req := AcceptTaskRequest{ID: "t-event-loop", Description: "d", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
+	if _, err := rt.Run(req); err == nil {
 		t.Fatal("Run returned nil; the last cycle failed")
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, task.ID).Scan(&turns); err != nil {
+	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 2 {

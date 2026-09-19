@@ -134,7 +134,7 @@ func TestARestartedRuntimeRunsTheInstructionOnTheTasksAgent(t *testing.T) {
 
 	f := NewAgentFactory()
 	restarted := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
-	_ = restarted.Run(&Task{ID: task.ID})
+	_, _ = restarted.Run(AcceptTaskRequest{ID: task.ID})
 
 	var agentID int64
 	if err := store.db.QueryRow(`SELECT agent_id FROM reason_turns WHERE task_id = ? LIMIT 1`, task.ID).Scan(&agentID); err != nil {
@@ -339,7 +339,7 @@ func TestARunLeavesTheAgentResident(t *testing.T) {
 	for i := 1; i <= 2; i++ {
 		// Whether the instruction concludes anything is not what this test is about:
 		// what matters is what an agent looks like after the queue runs dry.
-		_ = auto.Run(&Task{ID: task.ID, Description: fmt.Sprintf("answer done: instruction %d", i)})
+		_, _ = auto.Run(AcceptTaskRequest{ID: task.ID, Description: fmt.Sprintf("answer done: instruction %d", i)})
 		agent := f.ForTask(task.ID)
 		if agent == nil {
 			t.Fatalf("instruction %d left no agent for the task", i)

@@ -10,7 +10,7 @@
 
 | sender | 谁 | 今天从哪来 | kind |
 |---|---|---|---|
-| `user` | 用户 | `POST /api/tasks` 的指令 | `instruction` |
+| `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` | `instruction` |
 | `agent` | 别的 agent | capability 交给 worker 的那句 prompt（`LLMSession.Prompt`），`sender_id` 记委托方 agent | `delegation` |
 | `system` | runtime 自己 | `POST /api/tasks/{id}/stop` 的停止通知（`sender_id=runtime`） | `stop` |
 
@@ -47,8 +47,11 @@
 （不重新挂会话、不重发 frame），行与 handle 也留着（见 [agent.md](agent.md)）。拆会话只发生在明确的结束时：worker 被
 capability `Release`、后端没挂上、或进程退出（`Autonomy.Close`）。
 
-`Autonomy.Run(task)` 是同步的那扇门：它把指令放进队里，等**这条消息处理完且队空了**才返回，
-所以调用方（测试、`cmd/autonomy`）拿到的仍然是这次运行的错误；`AcceptTask` 是 HTTP 的那扇门，不等。
+`AcceptTask`（HTTP 的 `POST /api/tasks`）和 `Autonomy.Run` 是**同一个入口**的两扇门：同一个
+`AcceptTaskRequest`，同一条 accept 路径（`src/api_service.go` 的 `accept`）——同一个 task、同一条指令消息、同一只 agent。
+区别只在要不要等：`AcceptTask` 把消息放进队里就返回（`Accepted 202`），`Autonomy.Run` 用 receipt 等**这条消息处理完**
+才返回，所以调用方（测试、`cmd/autonomy`）拿到的仍然是这次运行的错误。请求不带 `description` 时，指令内容取这条
+task 行已有的描述（`tasks.description`）——「这个 task 要做什么」写在行里。
 
 ## 不变式
 

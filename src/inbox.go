@@ -73,8 +73,50 @@ func NewInbox(store InboxStore, handle MessageHandler, drained func(agent *Agent
 }
 
 // Enqueue adds one message to an agent's inbox and makes sure that agent has a
-// consumer. It returns the message's id, which is its place in the queue.
+// consumer. It returns the message's id, which is its place in the queue. It is the
+// door for a caller that does not wait for what it queued: HTTP accepting an
+// instruction, a stop being recorded behind it. A caller that means to wait says so
+// at the door (Send) or accepts with a receipt first (Accept).
 func (i *Inbox) Enqueue(agent *Agent, msg AgentMessage) (int64, error) {
+	return i.enqueue(agent, msg, nil)
+}
+
+// Send puts one message in an agent's inbox and waits for the agent to process
+// it: this is what a capability's prompt to a worker is (sender agent, kind
+// delegation) — the worker's own consumer runs the turn, and the capability sees
+// it as an ordinary call that returns when the turn is done.
+func (i *Inbox) Send(ctx context.Context, agent *Agent, msg AgentMessage) (TurnResult, error) {
+	receipt, err := i.Accept(ctx, agent, msg)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	return receipt.Wait()
+}
+
+// Accept puts one message in an agent's inbox for a caller that means to wait for
+// it, and hands back the receipt that caller waits on. Saying "I will wait" here,
+// at the door, is what makes the wait honest: the waiter is registered with the
+// message, so a consumer that is already draining cannot process it before its
+// caller is waiting for it. Send is Accept followed by Wait; an entry point that
+// accepts like HTTP and only then follows the run (Autonomy.Run) uses the two steps
+// separately — the message is in the queue either way, because the queue owns it
+// from the moment it is written.
+func (i *Inbox) Accept(ctx context.Context, agent *Agent, msg AgentMessage) (*Receipt, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waiter := &messageWaiter{ctx: ctx, ch: make(chan *messageOutcome, 1)}
+	id, err := i.enqueue(agent, msg, waiter)
+	if err != nil {
+		return nil, err
+	}
+	return &Receipt{inbox: i, id: id, waiter: waiter}, nil
+}
+
+// enqueue is the one way in: the message is written as a row (so it survives a
+// restart), the waiter — when the caller has one — is registered before anything
+// can claim the message, and the agent's consumer is started.
+func (i *Inbox) enqueue(agent *Agent, msg AgentMessage, waiter *messageWaiter) (int64, error) {
 	if i == nil || i.store == nil {
 		return 0, fmt.Errorf("no inbox")
 	}
@@ -88,58 +130,58 @@ func (i *Inbox) Enqueue(agent *Agent, msg AgentMessage) (int64, error) {
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
+	i.mu.Lock()
 	id, err := i.store.EnqueueMessage(msg)
 	if err != nil {
+		i.mu.Unlock()
 		return 0, err
 	}
-	i.mu.Lock()
+	if waiter != nil {
+		i.waiters[id] = waiter
+	}
 	i.gen[agent.Name]++
 	i.mu.Unlock()
 	i.start(agent)
 	return id, nil
 }
 
-// Send puts one message in an agent's inbox and waits for the agent to process
-// it: this is what a capability's prompt to a worker is (sender agent, kind
-// delegation) — the worker's own consumer runs the turn, and the capability sees
-// it as an ordinary call that returns when the turn is done. The waiter is
-// registered before the message is enqueued, so a consumer that is already
-// draining cannot process the message before anyone is waiting for it.
-func (i *Inbox) Send(ctx context.Context, agent *Agent, msg AgentMessage) (TurnResult, error) {
-	if i == nil || i.store == nil {
-		return TurnResult{}, fmt.Errorf("no inbox")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if agent == nil || agent.ID == 0 {
-		return TurnResult{}, fmt.Errorf("send message: unknown agent")
-	}
-	msg.AgentID = agent.ID
-	if msg.Status == "" {
-		msg.Status = MessageStatusQueued
-	}
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now()
-	}
-	waiter := &messageWaiter{ctx: ctx, ch: make(chan *messageOutcome, 1)}
-	i.mu.Lock()
-	id, err := i.store.EnqueueMessage(msg)
-	if err != nil {
-		i.mu.Unlock()
-		return TurnResult{}, err
-	}
-	i.waiters[id] = waiter
-	i.gen[agent.Name]++
-	i.mu.Unlock()
-	i.start(agent)
+// Receipt is one accepted message a caller can wait for: what Accept hands back, so
+// an entry point can accept a message like HTTP does and wait for the run it became
+// without enqueueing twice. A receipt nobody waits on costs nothing — the message is
+// in the queue, and the agent's consumer processes it all the same.
+type Receipt struct {
+	inbox  *Inbox
+	id     int64
+	waiter *messageWaiter
+}
 
+// ID is the accepted message's id — its place in the agent's queue.
+func (rc *Receipt) ID() int64 {
+	if rc == nil {
+		return 0
+	}
+	return rc.id
+}
+
+// Wait blocks until the accepted message has been processed and returns how the
+// message's handler ended. A cancelled caller stops waiting the same way Send does:
+// the message stays in the queue, still the agent's to process.
+func (rc *Receipt) Wait() (TurnResult, error) {
+	if rc == nil || rc.inbox == nil || rc.waiter == nil {
+		return TurnResult{}, nil
+	}
+	return rc.inbox.await(rc.id, rc.waiter)
+}
+
+// await is what a waiting caller does: take the outcome the consumer delivers, or
+// give up the wait when its own context is cancelled.
+func (i *Inbox) await(id int64, waiter *messageWaiter) (TurnResult, error) {
 	select {
 	case out := <-waiter.ch:
 		return out.result, out.err
-	case <-ctx.Done():
+	case <-waiter.ctx.Done():
 		i.dropWaiter(id)
-		return TurnResult{}, ctx.Err()
+		return TurnResult{}, waiter.ctx.Err()
 	}
 }
 
