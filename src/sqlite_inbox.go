@@ -170,6 +170,23 @@ SELECT count(*) FROM agent_messages WHERE agent_id = ? AND status = ?
 	return n, nil
 }
 
+// CountMessagesAhead counts the messages an agent still has in front of one
+// message: the ones that arrived before it and have not finished (queued, or being
+// processed right now). The queue's order is the row id, so "before it" is `id <`.
+func (s *SQLiteStore) CountMessagesAhead(agentID, messageID int64) (int, error) {
+	if agentID == 0 || messageID == 0 {
+		return 0, nil
+	}
+	var n int
+	if err := s.db.QueryRow(`
+SELECT count(*) FROM agent_messages
+WHERE agent_id = ? AND id < ? AND status IN (?, ?)
+`, agentID, messageID, string(MessageStatusQueued), string(MessageStatusRunning)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count messages ahead of %d for agent %d: %w", messageID, agentID, err)
+	}
+	return n, nil
+}
+
 // ListAgentMessages reads an agent's inbox in arrival order. limit <= 0 means all
 // of it.
 func (s *SQLiteStore) ListAgentMessages(agentID int64, limit int) ([]AgentMessage, error) {

@@ -143,11 +143,11 @@ func TestAMessageArrivingWhileTheAgentIsBusyWaitsItsTurn(t *testing.T) {
 	if messages[1].Status != MessageStatusQueued {
 		t.Fatalf("the second message is %q while the agent is busy, want queued", messages[1].Status)
 	}
-	if queued := inbox.Queued(agent, second); queued != 0 {
-		t.Fatalf("Queued(second)=%d, want 0 (nothing is behind it)", queued)
+	if ahead := inbox.Ahead(agent, first); ahead != 0 {
+		t.Fatalf("Ahead(first)=%d, want 0 (nothing is in front of it: the agent is on it)", ahead)
 	}
-	if queued := inbox.Queued(agent, first); queued != 1 {
-		t.Fatalf("Queued(first)=%d, want 1 (the second message is behind it)", queued)
+	if ahead := inbox.Ahead(agent, second); ahead != 1 {
+		t.Fatalf("Ahead(second)=%d, want 1 (the message being processed is in front of it)", ahead)
 	}
 
 	close(probe.release)

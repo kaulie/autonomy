@@ -203,25 +203,21 @@ func (i *Inbox) Stop(agent *Agent) bool {
 	return true
 }
 
-// Queued is how many messages the agent still has behind the one with this id
-// (queued or being processed): 0 means that message is what the agent is doing or
-// about to do, and n means n messages came in before the agent gets to it.
-func (i *Inbox) Queued(agent *Agent, afterID int64) int {
+// Ahead is how many messages the agent still has in front of the one with this id:
+// the messages that arrived before it and have not finished — queued, or being
+// processed right now. 0 means that message is what the agent is doing, or is about
+// to take next; n means the agent has n messages to get through before it. It is
+// what the acceptance answers with for the instruction it just queued.
+func (i *Inbox) Ahead(agent *Agent, id int64) int {
 	if i == nil || i.store == nil || agent == nil {
 		return 0
 	}
-	messages, err := i.store.ListAgentMessages(agent.ID, 200)
+	ahead, err := i.store.CountMessagesAhead(agent.ID, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] %s inbox: %v\n", agent.Name, err)
 		return 0
 	}
-	queued := 0
-	for _, msg := range messages {
-		if msg.ID > afterID && msg.Status != MessageStatusDone && msg.Status != MessageStatusFailed && msg.Status != MessageStatusStopped {
-			queued++
-		}
-	}
-	return queued
+	return ahead
 }
 
 // start makes sure the agent has a consumer. The first message of an idle agent
