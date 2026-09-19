@@ -50,7 +50,8 @@ capability `Release`、后端没挂上、或进程退出（`Autonomy.Close`）�
 `AcceptTask`（HTTP 的 `POST /api/tasks`）和 `Autonomy.Run` 是**同一个入口**的两扇门：同一个
 `AcceptTaskRequest`，同一条 accept 路径（`src/api_service.go` 的 `accept`）——同一个 task、同一条指令消息、同一只 agent。
 区别只在要不要等：`AcceptTask` 把消息放进队里就返回（`Accepted 202`），`Autonomy.Run` 用 receipt 等**这条消息处理完**
-才返回，所以调用方（测试、`cmd/autonomy`）拿到的仍然是这次运行的错误。请求不带 `description` 时，指令内容取这条
+才返回，所以调用方（测试）拿到的仍然是这次运行的错误。命令行不链接 runtime：`cmd/autonomy` 发 `POST /api/tasks`
+拿接受信息，`-wait` 再用 `GET /api/tasks/{id}` 轮询到这次运行结束。请求不带 `description` 时，指令内容取这条
 task 行已有的描述（`tasks.description`）——「这个 task 要做什么」写在行里。
 
 ## 不变式

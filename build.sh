@@ -35,7 +35,7 @@ mkdir -p "${GOMODCACHE}" "${GOCACHE}" "${GOPATH}" "${GOTMPDIR}"
 LDFLAGS="-s -w -X main.version=${VERSION}"
 
 CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" \
-  -o "${OUT}/bin/autonomyd" ./cmd/autonomy
+  -o "${OUT}/bin/autonomyd" ./cmd/autonomyd
 
 cp "${ROOT}/scripts/start.sh" "${ROOT}/scripts/stop.sh" "${ROOT}/scripts/restart.sh" \
   "${OUT}/scripts/"

@@ -168,7 +168,7 @@ export AUTONOMY_CLINE_MODEL=deepseek-v4-pro
 export AUTONOMY_CLINE_API_KEY=sk-...       # 可选：已 `cline auth` 则不需要
 export PROJECT_ROOT=$(pwd)
 export AUTONOMY_REASONER=llm
-go run ./cmd/autonomy                      # LLMReasoner 与 code_edit 现在都走 Cline
+go run ./cmd/autonomyd                     # LLMReasoner 与 code_edit 现在都走 Cline；cmd/autonomy 是它的 HTTP 客户端
 ```
 
 - 无 Node 的单元/集成测试：`go test ./src/...`（用 `src/clinesdk/fakebridge` 假桥覆盖协议与映射）。
