@@ -40,6 +40,13 @@ type LLMSession struct {
 	// (Runtime.AcquireAgent knows the backend it attached). It is kept here because
 	// Release detaches the agent and the step is recorded after that.
 	providerName string
+	// delegatedBy is the agent that handed this session its work, which is the sender
+	// of every message a capability's prompt becomes (see SessionOpts.DelegatedBy).
+	delegatedBy string
+	// inbox is the agent's message queue, when the host has one: a session with an
+	// inbox does not prompt the agent directly — it sends it a message and the
+	// agent's own consumer processes it (see SessionOpts.Inbox, src/inbox.go).
+	inbox *Inbox
 }
 
 // SessionOpts is what a session needs to know beyond the agent it runs as: the task
@@ -56,6 +63,13 @@ type SessionOpts struct {
 	// Provider is the backend this session runs on ("cursor", "cline", "local").
 	// Empty means the host default (Agent.effectiveBackend).
 	Provider string
+	// DelegatedBy is the agent that handed this session its job (the planner whose
+	// step acquired the worker), which is who every message it receives is from.
+	DelegatedBy string
+	// Inbox is the agent's message queue (src/inbox.go): a session that has one
+	// delivers its prompts as messages, so a worker's turns are processed by its own
+	// consumer, in order, like everything else addressed to it.
+	Inbox *Inbox
 }
 
 // TurnResult is what one turn produced: the text the agent answered with, and where
@@ -85,6 +99,8 @@ func NewLLMSession(rt *Runtime, agent *Agent, opts SessionOpts) *LLMSession {
 		taskID:       opts.TaskID,
 		model:        opts.Model,
 		providerName: opts.Provider,
+		delegatedBy:  opts.DelegatedBy,
+		inbox:        opts.Inbox,
 	}
 }
 
@@ -249,7 +265,24 @@ func (s *LLMSession) Say(ctx context.Context, prompt string, round int) (TurnRes
 // Prompt is the session as a capability sees it (broker.AgentSession): one prompt, one
 // answer, on this agent's own conversation. A capability does not number rounds — its
 // prompts are the worker's next turns.
+//
+// The prompt is delivered as a message from the delegating agent, so it is
+// processed by the worker's own consumer, in order with whatever else reached it
+// (src/inbox.go). A host with no inbox (a session built by hand) prompts directly.
 func (s *LLMSession) Prompt(ctx context.Context, prompt string) (string, error) {
+	if s != nil && s.inbox != nil && s.inbox.store != nil && s.agent != nil {
+		res, err := s.inbox.Send(ctx, s.agent, AgentMessage{
+			TaskID:   s.taskID,
+			Sender:   MessageSenderAgent,
+			SenderID: s.delegatedBy,
+			Kind:     MessageKindDelegation,
+			Content:  prompt,
+		})
+		if err != nil {
+			return "", err
+		}
+		return res.Text, nil
+	}
 	res, err := s.Say(ctx, prompt, RoundAuto)
 	if err != nil {
 		return "", err

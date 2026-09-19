@@ -38,3 +38,7 @@ Runtime 是**可靠执行层**：落实 Action 的生命周期、调度 Provider
 V1：进程内函数调用即可充当 Runtime。接口上保留 Action 生命周期与事件产出，便于日后换成分布式调度。
 
 V1.1：`Autonomy.Run` 把 `Execute` 放到独立 worker goroutine（`dispatchExecute`）；planner 主循环以 `cycleDone` 事件驱动下一轮 Decide / Observe，不再在 `Execute` 调用栈上阻塞（同 task 仍串行等待本轮 Result）。
+
+V1.3：一条指令不再是「直接跑」，而是进这只 agent 的 inbox（`src/inbox.go`）；每个 agent 一个消费者，按到达顺序一条条处理，用户指令可以持续接收（忙时入队）。
+
+V1.2：一条指令进来时，runtime 先按 `tasks.agent_id` 找回这条 Task 对接的 agent（`resumeAgentForTask`，`src/agent_resume.go`）：复用本进程已持有的 handle，或从行里重建、`Adopt` 回 `AgentFactory` 并 Resume 它的 provider 会话；只有从未被处理的 Task 才新建 agent。agent 默认不删（`persistent`），见 [agent.md](agent.md)。

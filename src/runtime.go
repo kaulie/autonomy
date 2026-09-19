@@ -26,6 +26,19 @@ type Runtime struct {
 	// stepSessions collects the agents acquired while the current step runs, so the
 	// step can record which providers it talked to (see recordStep). Reset per step.
 	stepSessions []*LLMSession
+	// inbox is every agent's message queue (src/inbox.go). The runtime does not own
+	// it — the process does — but a session a capability is handed needs it: a
+	// capability's prompt is a message from the delegating agent, so it goes
+	// through the worker's inbox instead of straight onto its session.
+	inbox *Inbox
+}
+
+// SetInbox hands the runtime the process's inbox (bootstrap) — see Inbox.
+func (r *Runtime) SetInbox(inbox *Inbox) {
+	if r == nil {
+		return
+	}
+	r.inbox = inbox
 }
 
 func NewRuntime(agents *AgentFactory, caps ...capability.Capability) *Runtime {
@@ -388,7 +401,13 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 	// that purpose is what the agent's own prompt says it is (## Agent).
 	agent.Role = AgentRoleWorker
 	agent.Purpose = strings.TrimSpace(opts.Purpose)
-	agent.Lifecycle = AgentLifecycleEphemeral
+	// A worker is kept like any other agent unless the capability asked for a
+	// throwaway one: its row records what it was acquired for, and its provider
+	// session stays resumable (see NewAgent, docs/agent.md).
+	agent.Lifecycle = AgentLifecyclePersistent
+	if opts.Ephemeral {
+		agent.Lifecycle = AgentLifecycleEphemeral
+	}
 	// A capability-acquired agent works on the same task as the agent that
 	// delegated to it, so its row carries that task id too (current_task_id used
 	// to stay empty for delegated workers even though their runs already recorded
@@ -425,14 +444,23 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		return nil, fmt.Errorf("unknown agent backend %q", opts.Backend)
 	}
 	agent.Start()
+	// Who is handing this worker its work: the agent that delegated, named on every
+	// message it gets (the capability is the hand, the planner is the agent that
+	// asked for the job — see docs/delegation.md).
+	delegatedBy := ""
+	if r.cycle != nil && r.cycle.Agent != nil {
+		delegatedBy = r.cycle.Agent.Name
+	}
 	// The worker's session: the same session a task's own agent runs on, with a
 	// worker identity on the agent. What makes its turns delegated turns is that
 	// identity (see LLMSession.turnShape) — not a different session type — and it is
 	// why the worker's runs are attributed to the task the capability delegated from.
 	sess := NewLLMSession(r, agent, SessionOpts{
-		TaskID:   strings.TrimSpace(opts.TaskID),
-		Model:    opts.Model,
-		Provider: backend,
+		TaskID:      strings.TrimSpace(opts.TaskID),
+		Model:       opts.Model,
+		Provider:    backend,
+		DelegatedBy: delegatedBy,
+		Inbox:       r.inbox,
 	})
 	agent.Session = sess
 	// Inside a cycle, this acquisition belongs to the step that made it; the step
@@ -443,6 +471,10 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 	return sess, nil
 }
 
+// releaseRegistered lets go of an agent that could not be attached. It never
+// became an agent this runtime could use, so it is not one that ended: the handle
+// goes back and its row goes with it (closeAgent is where the agents that did run
+// are kept — see docs/agent.md).
 func (r *Runtime) releaseRegistered(agent *Agent) {
 	if agent == nil {
 		return

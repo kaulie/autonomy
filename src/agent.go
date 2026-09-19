@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/kaulie/autonomy/src/clinesdk"
 	"github.com/kaulie/autonomy/src/cursorsdk"
@@ -87,10 +89,17 @@ func (f *AgentFactory) Create(task *Task) *Agent {
 // NewAgent registers a local autonomy agent with AGENT_WORKSPACE.
 // The numeric ID and name (agent-{id}) are allocated by the Store; without a
 // Store a process-local counter starting at 10000 is used as a fallback.
+//
+// An agent is kept by default (`persistent`): the row it was given, the task it
+// was paired with, and the provider session id it was recorded with all outlive
+// the run that created it, so a later instruction for the same task — in this
+// process or in the one after a restart — finds the same agent and resumes it
+// (resumeAgentForTask). A capability that wants a throwaway worker asks for one
+// explicitly (broker.AcquireAgentOpts.Ephemeral).
 func (f *AgentFactory) NewAgent() *Agent {
 	agent := &Agent{
 		State:     "idle",
-		Lifecycle: AgentLifecycleEphemeral,
+		Lifecycle: AgentLifecyclePersistent,
 		Backend:   AgentBackendLocal,
 	}
 	persistAgent(agent) // Store assigns ID and Name when available
@@ -125,6 +134,60 @@ func (f *AgentFactory) Get(name string) *Agent {
 	return f.agents[name]
 }
 
+// ForTask returns the agent this factory already holds for one task's cycles, or
+// nil. It is the planner — the agent that task's decisions belong to — because a
+// delegated worker carries the delegating task id too and is not that task's
+// agent.
+//
+// A factory that just started holds nothing: the agent a task was paired with
+// before a restart is in the store, not here (see resumeAgentForTask).
+func (f *AgentFactory) ForTask(taskID string) *Agent {
+	taskID = strings.TrimSpace(taskID)
+	if f == nil || taskID == "" {
+		return nil
+	}
+	for _, agent := range f.agents {
+		if agent == nil || agent.Role != AgentRolePlanner || agent.CurrentTask == nil {
+			continue
+		}
+		if agent.CurrentTask.ID == taskID {
+			return agent
+		}
+	}
+	return nil
+}
+
+// Adopt registers an agent that was rebuilt from its stored row (see
+// restoredAgent), under the name that row already has, so the handle the runtime
+// is about to use is the one later instructions find. Unlike NewAgent it
+// allocates nothing: the agent has its id, name and workspace already, and the
+// store has its row.
+//
+// A handle already registered under that name wins: two instances of one agent
+// would be two conversations on one record.
+func (f *AgentFactory) Adopt(agent *Agent) *Agent {
+	if f == nil || agent == nil {
+		return nil
+	}
+	if agent.Name == "" {
+		agent.Name = fmt.Sprintf("agent-%d", agent.ID)
+	}
+	if existing, ok := f.agents[agent.Name]; ok {
+		return existing
+	}
+	agent.DecideMaker = NewDecideMaker()
+	if agent.Workspace == "" {
+		if ws, err := ensureAgentWorkspace(agent.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] AGENT_WORKSPACE: %v\n", err)
+			agent.Workspace = AgentWorkspacePath(agent.Name)
+		} else {
+			agent.Workspace = ws
+		}
+	}
+	f.agents[agent.Name] = agent
+	return agent
+}
+
 // Agent is the subject that owns a task and decision authority.
 // Cursor-backed agents still register here; Cursor SDK is only the backend.
 type Agent struct {
@@ -136,6 +199,11 @@ type Agent struct {
 	LLMProvider LLMProvider
 	Model       string // LLM model in use (e.g. composer-2)
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
+	// DeletedAt is when this agent was let go (agents.deleted_at), zero while it
+	// is live. It is a row fact, not runtime state: it is read with the row and
+	// says whether the agent a task names can still be resumed (see
+	// resumeAgentForTask).
+	DeletedAt time.Time
 	// Role and Purpose are what this agent is here to do: role is planner or
 	// worker, purpose is the label the acquiring capability gave it
 	// (broker.AcquireAgentOpts.Purpose). They are runtime state — what the
@@ -195,10 +263,12 @@ func (a *Agent) IsEphemeral() bool {
 	return a.Lifecycle == "" || a.Lifecycle == AgentLifecycleEphemeral
 }
 
-// closeAgent ends an agent's life: it stops, its provider sessions are torn down, and
-// it is let go — an ephemeral agent is deleted (soft-deleted in the store, dropped
-// from the factory), while a persistent one is only closed, so its durable
-// provider-side state can be resumed later.
+// closeAgent ends an agent's life: it stops and its provider sessions are torn
+// down. What is left of it depends on its lifecycle, and the default is to keep
+// it: a persistent agent (the default — see NewAgent) is only closed, so its row
+// and its durable provider-side state stay for a later instruction to resume,
+// while an ephemeral one is deleted (soft-deleted in the store, dropped from the
+// factory) because nothing is meant to come back to it.
 //
 // Every agent ends here, whichever door it came in through: the task's own agent when
 // its run is over, a delegated worker when the capability releases its session. There
@@ -232,15 +302,19 @@ func (a *Agent) Decide() (Decision, error) {
 }
 
 func (a *Agent) DecideAtCycle(cycle int, history []Result) (Decision, error) {
-	return a.decide(context.Background(), cycle, history)
+	return a.decide(context.Background(), cycle, history, "")
 }
 
-func (a *Agent) decide(ctx context.Context, cycle int, history []Result) (Decision, error) {
+// decide is one cycle of this agent: which cycle it is, what already happened, and
+// the message it answers (the inbox message being processed — see DecisionContext.
+// Input).
+func (a *Agent) decide(ctx context.Context, cycle int, history []Result, input string) (Decision, error) {
 	decision, err := a.DecideMaker.Decide(DecisionContext{
 		Context: ctx,
 		Task:    a.CurrentTask,
 		Agent:   a,
 		Cycle:   cycle,
+		Input:   input,
 		History: history,
 	})
 	if err != nil {

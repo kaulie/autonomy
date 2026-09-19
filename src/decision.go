@@ -14,6 +14,11 @@ type DecisionContext struct {
 	Agent *Agent
 	World World
 	Cycle int // 1-based decision cycle when set by Autonomy.Run
+	// Input is the message this cycle answers — the inbox message the agent is
+	// processing (src/message.go): an instruction from the user, a delegation from
+	// another agent, or the runtime's own notice. The prompt renders it as
+	// additional_input; it is empty for a cycle nobody addressed to the agent.
+	Input string
 	// History is what the previous cycles of this task did, oldest first: the
 	// planner sees it as previous_actions and can base its evidence on it (see
 	// AGENT_V2 evidence source previous_action).
@@ -39,7 +44,7 @@ func NewDecideMaker() *DecisionMaker {
 }
 
 func (d *DecisionMaker) Decide(ctx DecisionContext) (Decision, error) {
-	reasonningResult, err := d.reasoner.Reason(ctx, ReasoningInput{})
+	reasonningResult, err := d.reasoner.Reason(ctx, ReasoningInput{Text: ctx.Input})
 	if err != nil {
 		return Decision{}, err
 	}

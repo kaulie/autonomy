@@ -24,6 +24,11 @@ type AcquireAgentOpts struct {
 	TaskID string
 	// Backend is "cursor" (default) or "local".
 	Backend string
+	// Ephemeral asks for a throwaway worker: one that is let go — soft-deleted in
+	// the store and dropped from the factory — when its session is released,
+	// instead of being kept (the default, see docs/agent.md). Leave it false for
+	// work whose agent is worth coming back to.
+	Ephemeral bool
 }
 
 // AgentSession is control of one autonomy-registered agent (backend may be Cursor).

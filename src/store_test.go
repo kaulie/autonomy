@@ -398,7 +398,10 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	}
 }
 
-func TestFinishAgentSoftDeletesInStore(t *testing.T) {
+// TestFinishAgentSoftDeletesAnEphemeralAgentInStore: deleting is what happens to
+// an agent somebody asked to throw away (ephemeral), and the row records it. The
+// default keeps the agent instead (see TestFinishAgentKeepsTheDefaultAgentInTheStore).
+func TestFinishAgentSoftDeletesAnEphemeralAgentInStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
 	store, err := OpenSQLiteStore(path)
 	if err != nil {
@@ -412,6 +415,7 @@ func TestFinishAgentSoftDeletesInStore(t *testing.T) {
 	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
 	task := &Task{ID: "t-soft"}
 	agent := auto.AgentFactory.Create(task)
+	agent.Lifecycle = AgentLifecycleEphemeral
 	id := agent.ID
 	name := agent.Name
 	auto.finishAgent(agent)
@@ -425,6 +429,35 @@ func TestFinishAgentSoftDeletesInStore(t *testing.T) {
 	}
 	if !deletedAt.Valid {
 		t.Fatal("expected soft delete in sqlite")
+	}
+}
+
+// TestUpsertTaskKeepsTheAgentWhenTheWriteNamesNone: the runtime upserts Task values
+// that need not carry the agent id (a cycle's own write, a stop, a failure). Those
+// writes must not un-pair the task — the pairing is what a later instruction
+// resumes (see resumeAgentForTask).
+func TestUpsertTaskKeepsTheAgentWhenTheWriteNamesNone(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertTask(&Task{ID: "t-paired", Description: "d", AgentID: 10001}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertTask(&Task{ID: "t-paired", Description: "d", Status: TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetTask("t-paired")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != 10001 {
+		t.Fatalf("agent_id=%d after a write that named none, want the pairing kept (10001)", got.AgentID)
+	}
+	if got.Status != TaskStatusRunning {
+		t.Fatalf("status=%q, want the write's own status", got.Status)
 	}
 }
 

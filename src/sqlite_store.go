@@ -25,11 +25,13 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir store dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
-	// Single-writer friendly defaults for local agent use.
+	// Single-writer friendly defaults for local agent use. They are in the DSN
+	// rather than only executed below because database/sql opens connections as it
+	// needs them and a PRAGMA applies to the connection it ran on.
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("pragma: %w", err)
@@ -40,6 +42,21 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// sqliteDSN is the file path plus the pragmas every connection of this database
+// needs: WAL (readers do not block the writer), foreign keys, and a write-lock wait.
+//
+// The wait is what makes "one writer at a time" a queue instead of a failure: the
+// runtime writes from more than one goroutine now — a run's own records, and the
+// inbox consumer that is processing that agent's next message — and without it the
+// second writer gets SQLITE_BUSY rather than waiting its turn.
+func sqliteDSN(path string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"
 }
 
 func (s *SQLiteStore) migrate() error {
@@ -392,6 +409,11 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 `); err != nil {
 		return fmt.Errorf("migrate http query indexes: %w", err)
 	}
+	// The inbox: one row per message per agent (sqlite_inbox.go, src/inbox.go).
+	if _, err := s.db.Exec(inboxDDL); err != nil {
+		return fmt.Errorf("migrate agent_messages: %w", err)
+	}
+
 	// The execution tables gained the step's name: a plan's input bindings address a
 	// step by name, so without it a stored plan's lineage points at nothing
 	// (docs/execution-step.md, "Plan Data Lineage").
@@ -685,7 +707,10 @@ ON CONFLICT(id) DO UPDATE SET
   domain=excluded.domain,
   status=excluded.status,
   error=excluded.error,
-  agent_id=excluded.agent_id,
+  -- A write that names no agent does not un-pair the task: the task's agent is what
+  -- a later instruction resumes (src/agent_resume.go), while the Task values the
+  -- runtime upserts on its way through a run need not carry it.
+  agent_id=CASE WHEN excluded.agent_id = 0 THEN tasks.agent_id ELSE excluded.agent_id END,
   updated_at=excluded.updated_at
 `, task.ID, task.Description, string(task.Domain),
 		task.Status, task.Error, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))

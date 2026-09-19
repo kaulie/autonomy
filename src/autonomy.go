@@ -24,7 +24,13 @@ type Autonomy struct {
 	Runtime           *Runtime
 	World             *World
 	Store             Store
-	MaxSteps          int
+	// Inbox is every agent's message queue: the messages addressed to it are
+	// processed by that agent, one at a time, in the order they arrived
+	// (src/inbox.go). It is also how an instruction reaches an agent — including
+	// one that arrives while the agent is busy, which is what makes instructions
+	// continuously acceptable.
+	Inbox    *Inbox
+	MaxSteps int
 }
 
 var bootstrapFlag bool
@@ -74,6 +80,11 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	contextContainerManager := NewContextContainerManager()
 	_autonomy.ContextContainerManager = contextContainerManager
 
+	// The inbox is wired here: it needs the store (where the messages wait) and the
+	// runtime (the sessions a delegated message is processed on), and the runtime
+	// needs it back to send one.
+	_autonomy.agentInbox()
+
 	contextEntityManager := NewContextEntityManager()
 	_autonomy.ContextEntityManager = contextEntityManager
 
@@ -85,6 +96,27 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	bootstrapFlag = true
 	return _autonomy, nil
+}
+
+// agentInbox is this runtime's message queue, built on demand: bootstrap wires one,
+// and a runtime assembled by hand (a test, an embedder) gets one the first time a
+// message goes into an agent's queue. Both doors must lead to the same queue — the
+// sessions a capability is handed send their messages through it too.
+func (r *Autonomy) agentInbox() *Inbox {
+	if r == nil {
+		return nil
+	}
+	if r.Inbox == nil {
+		store := r.Store
+		if store == nil {
+			store = activeStore()
+		}
+		r.Inbox = NewInbox(store, r.processMessage, r.drainedAgent)
+		if r.Runtime != nil {
+			r.Runtime.SetInbox(r.Inbox)
+		}
+	}
+	return r.Inbox
 }
 
 func (r *Autonomy) SetWorld(world *World) {
@@ -114,33 +146,156 @@ type cycleDone struct {
 	result   Result
 }
 
+// Run is one instruction, run to completion: the task's agent gets a message from
+// the user, the agent's own consumer processes it (src/inbox.go), and Run waits
+// for that message's result — which is the error a caller of Run has always got
+// back. Nothing about it is special: it is the same message an instruction
+// arriving over HTTP becomes, waited for.
 func (r *Autonomy) Run(task *Task) error {
-	return r.run(context.Background(), task)
+	ctx := context.Background()
+	agent, msg, err := r.instruction(ctx, task, taskDescription(task))
+	if err != nil {
+		return err
+	}
+	_, err = r.agentInbox().Send(ctx, agent, msg)
+	return err
 }
 
-func (r *Autonomy) run(ctx context.Context, task *Task) error {
+// instruction resolves the task's agent and builds the message one instruction
+// becomes: the user speaking, about that task, saying this. Accepting an
+// instruction queues it, so the task is written as pending — the agent's consumer
+// is what marks it running.
+func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) (*Agent, AgentMessage, error) {
 	if task == nil {
-		return fmt.Errorf("nil task")
+		return nil, AgentMessage{}, fmt.Errorf("nil task")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	text := strings.TrimSpace(content)
+	if text == "" {
+		// Run(task) may hand over a task that carries just its id: what that task is
+		// asked to do is its own row.
+		if store := r.taskStore(); store != nil {
+			if stored, err := store.GetTask(task.ID); err == nil && stored != nil {
+				text = strings.TrimSpace(stored.Description)
+			}
+		}
+	}
+	if text == "" {
+		return nil, AgentMessage{}, fmt.Errorf("description is required")
+	}
 	if task.Status == "" {
-		task.Status = TaskStatusRunning
+		task.Status = TaskStatusPending
+	}
+	// The agent before the task row: which agent a task is paired with is read off
+	// that row (src/agent_resume.go), so the instruction finds it before this write
+	// — which carries a Task value that need not know the agent — touches it.
+	agent, err := r.resumeAgentForTask(ctx, task)
+	if err != nil {
+		// The instruction could not be picked up at all, so the task says so
+		// instead of being left claiming to run.
+		failTask(task, err)
+		return nil, AgentMessage{}, err
 	}
 	persistTask(task)
+	return agent, AgentMessage{
+		TaskID:   task.ID,
+		Sender:   MessageSenderUser,
+		SenderID: string(MessageSenderUser),
+		Kind:     MessageKindInstruction,
+		Content:  text,
+	}, nil
+}
 
-	agent := r.AgentFactory.Create(task)
-	defer r.finishAgent(agent)
+// taskDescription is the instruction a Task value carries: what Run(task) is asked
+// to do.
+func taskDescription(task *Task) string {
+	if task == nil {
+		return ""
+	}
+	return task.Description
+}
+
+// processMessage is what the inbox hands one message to: the agent's own work.
+// What the work is, is what the message is — an instruction is a decision run, a
+// delegation is one turn of a worker's session, and a stop has already happened by
+// the time it is read (cancelling the message is what stopped it; this is the
+// record of it). The agent processing its messages one at a time, in the order
+// they arrived, is the same for all three.
+func (r *Autonomy) processMessage(ctx context.Context, cancel context.CancelFunc, agent *Agent, msg AgentMessage) (TurnResult, error) {
+	switch msg.Kind {
+	case MessageKindStop:
+		return TurnResult{}, nil
+	case MessageKindDelegation:
+		if agent == nil || agent.Session == nil {
+			return TurnResult{}, fmt.Errorf("delegated message for an agent with no session")
+		}
+		return agent.Session.Say(ctx, msg.Content, RoundAuto)
+	default:
+		return r.processInstruction(ctx, cancel, agent, msg)
+	}
+}
+
+// processInstruction is one instruction's run: the task it is about is running
+// again, this message is what the run answers (every cycle carries it as
+// additional_input), and the loop is the same loop every instruction has gone
+// through.
+func (r *Autonomy) processInstruction(ctx context.Context, cancel context.CancelFunc, agent *Agent, msg AgentMessage) (TurnResult, error) {
+	task := r.taskForMessage(msg)
+	if task == nil {
+		return TurnResult{}, fmt.Errorf("instruction for an unknown task: %q", msg.TaskID)
+	}
+	task.Status = TaskStatusRunning
+	task.AgentID = agent.ID
+	persistTask(task)
 
 	// The task's own agent takes a turn every cycle, on the same session a delegated
 	// worker gets: what makes this agent the planner is its identity, not a different
 	// kind of session (see LLMSession). Every turn is attributed to this task.
 	agent.Session = NewLLMSession(r.Runtime, agent, SessionOpts{TaskID: task.ID})
-
+	// Processing a message is running a task: that is what a stop cancels
+	// (POST /api/tasks/{id}/stop) and what says a task is running at all.
+	if cancel != nil {
+		inFlightTasks.Store(task.ID, cancel)
+		defer inFlightTasks.Delete(task.ID)
+	}
 	agent.Start()
 	persistAgent(agent)
 
+	return TurnResult{}, r.runLoop(ctx, agent, task, msg.Content)
+}
+
+// taskForMessage is the task an instruction is about: its row, or a bare task with
+// that id when the store has none.
+func (r *Autonomy) taskForMessage(msg AgentMessage) *Task {
+	if strings.TrimSpace(msg.TaskID) == "" {
+		return nil
+	}
+	if store := r.taskStore(); store != nil {
+		if task, err := store.GetTask(msg.TaskID); err == nil && task != nil {
+			return task
+		}
+	}
+	return &Task{ID: msg.TaskID}
+}
+
+// drainedAgent is the inbox telling the runtime that an agent has nothing left to
+// process: the task's own agent is let go here — closed, its row and handle kept —
+// because nothing else ends it. A worker is not: the capability that acquired it
+// ends it when it releases the session, and closing it between two of its prompts
+// would throw away the session it is keeping.
+func (r *Autonomy) drainedAgent(agent *Agent) {
+	if agent == nil || agent.Role != AgentRolePlanner {
+		return
+	}
+	r.finishAgent(agent)
+}
+
+// runLoop is one instruction's decision loop: decide → execute → observe until the
+// decision concludes the task or the budget runs out. input is the message this
+// run answers, which every cycle of it carries.
+func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input string) error {
 	// Event-driven loop (docs/principles.md §Event Driven; docs/runtime.md): Decide
 	// runs on this goroutine; Runtime.Execute runs on a worker. After a decision is
 	// dispatched the planner parks on events — it is not locked inside Execute.
@@ -166,7 +321,7 @@ func (r *Autonomy) run(ctx context.Context, task *Task) error {
 			if cycles > r.maxSteps() {
 				break
 			}
-			decision, err = agent.decide(ctx, cycles, history)
+			decision, err = agent.decide(ctx, cycles, history, input)
 			if err != nil {
 				if ctx.Err() != nil {
 					markStopped(task)

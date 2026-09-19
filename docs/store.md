@@ -6,7 +6,7 @@
 MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并选择一个新 engine，上层代码不变。
 
 - **统一接口**：`Store`（`src/store.go`）——持久化契约的并集，也是 engine 要实现的那一份。
-- **五个端口**：`TaskStore` / `AgentStore` / `ConversationStore` / `ExecutionStore` /
+- **六个端口**：`TaskStore` / `AgentStore` / `InboxStore` / `ConversationStore` / `ExecutionStore` /
   `VerificationStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
 - **引擎 SPI**：`StoreEngine`（`src/store_engine.go`）——一个 engine 对应一种数据库/方言。
 - **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_*.go`），默认启用。
@@ -37,6 +37,7 @@ StoreEngine（Name / DefaultDSN / Open）
 | `ConversationStore` | `reason_turns` 头 + `llm_messages` 对话 + `llm_events` 原始流 | `LLMTrace`（写）、HTTP 轮询（读） |
 | `ExecutionStore` | 计划 / 计划步骤 / 执行步骤 / 交互 | `saveExecutionPlan` 等、verifier 读步骤产出、HTTP 进度 |
 | `VerificationStore` | Completion Contract + verdict | `pinCompletionContract` / `pinnedCompletionContract` / `saveVerification` |
+| `InboxStore` | 每个 agent 的消息队列（`agent_messages`） | `Inbox`（`src/inbox.go`）：入队 / claim / 收尾 / 回收 / 计数 |
 
 端口只是**同一份 store 的切片**（`Store` 内嵌五个），所以 engine 一次实现全部、上层一次注入，
 但没人需要认识与自己无关的那部分：加一个消费者不必看到 30 多个方法，加一个 engine 也能按
@@ -66,7 +67,10 @@ StoreEngine（Name / DefaultDSN / Open）
 - **上层只认识端口**，不认识 SQL、方言、表名；所有 DB 访问都经 `activeStore()` 及其端口切片。
 - **engine 独占其 schema 与迁移**：DDL、`ON CONFLICT`、`INSERT OR IGNORE`、占位符（`?`）、
   `PRAGMA`、以及「Go 字段 ↔ 列值」的编码（`src/sqlite_encoding.go`）全部封装在 engine 内。
-- **数据模型中立**：`LLMEvent` / `LLMUsage` / `ReasonTurn` 等模型本身与数据库无关，engine 不参与解释。
+- **数据模型中立**：`LLMEvent` / `LLMUsage` / `ReasonTurn` / `AgentMessage` 等模型本身与数据库无关，engine 不参与解释。
+- **写者不止一个**：runtime 有多个 goroutine 在写（一轮自己的记录、inbox 消费者在跑同一条 task 的下一条消息）。
+  engine 把 `_pragma=busy_timeout(10000)` 放进 DSN（对每条连接生效），让第二个写者**等锁**而不是拿到
+  `SQLITE_BUSY`；`journal_mode=WAL` 让读者不被写者挡住。
 
 
 ## 配置
@@ -126,7 +130,8 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 ## 现状表结构
 
-`sqlite` engine 当前维护 `tasks` / `agents` / `reason_turns` / `llm_messages` / `llm_events` 五张表，加上运行时的计划与执行四张表（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`，见 [execution-step.md](execution-step.md)）
+`sqlite` engine 当前维护 `tasks` / `agents` / `reason_turns` / `llm_messages` / `llm_events` 五张表、
+每个 agent 的收件箱 `agent_messages`（见 [inbox.md](inbox.md)），加上运行时的计划与执行四张表（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`，见 [execution-step.md](execution-step.md)）
 （输入/返回消息见 [llm-message.md](llm-message.md)，原始事件流见 [llm-event-stream.md](llm-event-stream.md)）。
 其它 engine 只需实现同样的 `Store` 语义，表结构可自由设计。
 
@@ -169,7 +174,7 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 | `Store` 与五个端口（契约） | `src/store.go` |
 | engine SPI + 注册表 + 选择 | `src/store_engine.go` |
 | sqlite engine（默认 DSN / 注册） | `src/sqlite_engine.go` |
-| sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go`、`src/sqlite_query.go`、`src/sqlite_execution.go`、`src/sqlite_verification.go` |
+| sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go`、`src/sqlite_query.go`、`src/sqlite_execution.go`、`src/sqlite_verification.go`、`src/sqlite_inbox.go` |
 | sqlite 列值编码（时间 / NULL / JSON） | `src/sqlite_encoding.go` |
 | 端口边界与上层可插拔性的测试 | `src/store_ports_test.go` |
 | 进程内单例与 bootstrap | `src/autonomy.go`（`activeStore()`，`BootstrapAutonomy`） |

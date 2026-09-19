@@ -21,10 +21,13 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 | Goal / Objective | 要什么 |
 | Constraints | 不可逾越的边界 |
 | Completion Contract | 什么状态才算真正完成 |
-| Owner | 对最终结果负责的 Agent |
+| Owner | 对最终结果负责的 Agent。落库在 `tasks.agent_id`：一条 Task 与一只 agent 的配对写在行里，所以重启之后一条新指令能按它找回同一只 agent 并 Resume（见 [agent.md](agent.md)），一次不携带 agent id 的 task 写入也不会把它抹掉 |
 | Policy | 适用的策略引用（权限、预算、是否允许扩展能力等） |
 
 其中 **Goal** 与 **Completion Contract** 构成 Task 的核心。
+
+一条 Task 的**指令**是发给它那只 agent 的消息（`instruction`，见 [inbox.md](inbox.md)）：第一次就是它被接受时的
+描述（`tasks.description`），之后的每一条是新的消息；任务行本身不会被后来的指令改写。
 
 **运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点，取值就是**收束这次运行的
 那个决策**：`running`（还在跑）→ `completed`（`done` **且验证通过**：完成契约的每条判据都被权威来源证实，
