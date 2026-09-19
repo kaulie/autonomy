@@ -8,7 +8,7 @@
 #   RUNTIME_DIR  = runtimeDir
 #   APP_VERSION  = 本次部署的 8 位短 hash
 #
-# 监听端口优先级：SERVICE_PORT > PORT > 默认 4230。
+# 监听端口优先级：SERVICE_PORT > PORT > 默认 4300（服务契约里 autonomy 的 port）。
 # SERVICE_PORT 排在前面，是因为交互式 shell 里常残留别的服务的 PORT。
 #
 # runtime 布局（backend/ 下的内容由平台在部署时保留，不会被 --delete 清掉）：
@@ -23,7 +23,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-$(cd "${DIR}/.." && pwd)}"
-PORT="${SERVICE_PORT:-${PORT:-4230}}"
+PORT="${SERVICE_PORT:-${PORT:-4300}}"
 APP_VERSION="${APP_VERSION:-dev}"
 
 BIN="${RUNTIME_DIR}/bin/autonomyd"
@@ -54,11 +54,15 @@ if [ ! -f "${ENV_FILE}" ]; then
   umask 077
   cat > "${ENV_FILE}" <<EOF
 # autonomy 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
-# 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4230。
+# 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4300。
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # AUTONOMY_LLM_BACKEND=cline
 # AUTONOMY_MAX_STEPS=4
+# cursor bridge 默认用发版包自带的（bin/cursor-sdk-bridge，本脚本自动指过去）。
+# 想换桥（或指向别处的下载产物）在这里覆盖；外部桥用
+# CURSOR_SDK_BRIDGE_URL + CURSOR_SDK_BRIDGE_TOKEN。
+# CURSOR_SDK_BRIDGE_BIN=/absolute/path/to/cursor-sdk-bridge
 EOF
   chmod 600 "${ENV_FILE}"
   log "已生成 ${ENV_FILE}"
@@ -72,6 +76,14 @@ export AUTONOMY_HTTP_ADDR="127.0.0.1:${PORT}"
 export AUTONOMY_STORE_DSN="${DATA_DIR}/autonomy.db"
 export PROJECT_ROOT="${RUNTIME_DIR}"
 export APP_VERSION
+
+# 发版包自带的 cursor bridge（build.sh 放进 bin/）：runtime 的 defaultBridgeBinary
+# 只按【进程 cwd】找 third_party/bin/cursor-sdk-bridge，而部署的 cwd 是 runtimeDir
+# —— 所以这里明说它在哪。backend/.env 里显式设了 CURSOR_SDK_BRIDGE_BIN 就听它的；
+# 也可以自己指向别处的桥（或干脆用 CURSOR_SDK_BRIDGE_URL 附到外部桥）。
+if [ -z "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-bridge" ]; then
+  export CURSOR_SDK_BRIDGE_BIN="${RUNTIME_DIR}/bin/cursor-sdk-bridge"
+fi
 
 if [ -f "${PID_FILE}" ]; then
   old="$(tr -d '[:space:]' < "${PID_FILE}" || true)"
@@ -90,7 +102,7 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
-log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 库=${AUTONOMY_STORE_DSN}"
+log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 库=${AUTONOMY_STORE_DSN} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

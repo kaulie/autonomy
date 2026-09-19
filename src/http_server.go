@@ -39,7 +39,8 @@ func (s *HTTPServer) Handler() http.Handler {
 	return s.Mux
 }
 
-// ListenAndServe starts the HTTP API on addr (e.g. ":4230").
+// ListenAndServe starts the HTTP API on addr (e.g. ":4300", this service's port
+// in the deployment contract; scripts/start.sh passes it in AUTONOMY_HTTP_ADDR).
 func (s *HTTPServer) ListenAndServe(addr string) error {
 	server := &http.Server{
 		Addr:              addr,

@@ -4,7 +4,8 @@
 // It is a client of the runtime's HTTP API and nothing more (docs/http-api.md):
 // no part of the runtime is linked into this binary, so it can be run from
 // anywhere — against the service the deployment platform started (bin/autonomyd,
-// default 127.0.0.1:4230) or against a local one. The calls are the documented
+// default 127.0.0.1:4300, the port its service contract declares) or against a
+// local one. The calls are the documented
 // ones, so curl says the same thing:
 //
 //	POST /api/tasks                             one instruction (what this sends)
@@ -42,9 +43,12 @@ import (
 )
 
 const (
-	// defaultServer is where a local runtime listens: scripts/start.sh binds it
-	// there, and `go run ./cmd/autonomyd` uses the same port.
-	defaultServer = "http://127.0.0.1:4230"
+	// defaultServer is where the deployment's runtime listens: the port the
+	// service contract declares for autonomy (`4300`). The platform injects it as
+	// SERVICE_PORT and scripts/start.sh falls back to the same number, so a
+	// runtime started by hand with AUTONOMY_HTTP_ADDR wants -server (or
+	// AUTONOMY_API_URL) to say where it is.
+	defaultServer = "http://127.0.0.1:4300"
 	// demoInstruction and demoTaskID are what this command sends when it is
 	// given nothing at all — the demo README documents (`go run ./cmd/autonomy`)
 	// and the world the runtime seeds for it (cmd/autonomyd/world.go).

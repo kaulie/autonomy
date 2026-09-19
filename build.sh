@@ -12,6 +12,9 @@
 #   - VERSION / COMMIT / GIT_REPO_URL 由调用方写入发版包，本脚本不写
 #   - 运行期可变内容一律不放进 outputs/（库、.env、pid、日志都在 backend/ 下，
 #     由平台在部署时保留，见 scripts/start.sh）
+#   - cursor bridge（third_party/bin/cursor-sdk-bridge，gitignore 的下载产物）随包
+#     发出：runtime 只按 cwd 找 bridge，而部署的 cwd 是 runtimeDir，包外它找不到。
+#     没抓到就给个警告（部署上的 llm 任务会在 cursor bridge ping 处失败）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +43,19 @@ CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" \
 cp "${ROOT}/scripts/start.sh" "${ROOT}/scripts/stop.sh" "${ROOT}/scripts/restart.sh" \
   "${OUT}/scripts/"
 cp -R "${ROOT}/src/agent_policy/." "${OUT}/src/agent_policy/"
+
+# cursor bridge: the runtime spawns it (src/cursorsdk), so the release package
+# carries it — scripts/start.sh then points CURSOR_SDK_BRIDGE_BIN at
+# ${RUNTIME_DIR}/bin/cursor-sdk-bridge. Without it a deployed runtime fails every
+# task at the decision that pings the bridge (the Cline bridge is not packaged:
+# it needs `@cline/sdk` installed, see scripts/install-cline-bridge.sh).
+BRIDGE="${ROOT}/third_party/bin/cursor-sdk-bridge"
+if [ -x "${BRIDGE}" ]; then
+  cp "${BRIDGE}" "${OUT}/bin/cursor-sdk-bridge"
+else
+  echo "[build][警告] 没有 ${BRIDGE}（先跑 scripts/fetch-bridge.sh）；发版包不自带 cursor bridge，" >&2
+  echo "[build][警告] 部署上的 llm 任务会失败在 cursor bridge ping 处。" >&2
+fi
 
 chmod +x "${OUT}/bin/"* "${OUT}/scripts/"*.sh
 
