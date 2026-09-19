@@ -90,7 +90,46 @@ func TestRunWithOnlyTheTasksID(t *testing.T) {
 	}
 }
 
-// TestTheSameRequestIsAcceptedWhicheverDoorTakesIt: the two doors onto the accept
+// TestTheAcceptanceSaysHowManyMessagesAreInFront: `queued` is how many messages the
+// agent still has in front of the one just accepted — the ones that arrived before it
+// and have not finished, the message being processed right now included. 0 means the
+// agent is on it, or is about to take it next; an instruction accepted while the agent
+// is working on another says 1.
+func TestTheAcceptanceSaysHowManyMessagesAreInFront(t *testing.T) {
+	store := resumeTestStore(t)
+	// The agent's work is held open, so the first instruction is still being
+	// processed while the second is accepted behind it.
+	probe := &inboxProbe{started: make(chan string, 2), release: make(chan struct{})}
+	f := NewAgentFactory()
+	auto := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+	auto.Inbox = NewInbox(store, probe.handle, nil)
+
+	first, err := auto.AcceptTask(AcceptTaskRequest{ID: "t-ahead", Description: "one"})
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	if first.Queued != 0 {
+		t.Fatalf("queued=%d for the first instruction, want 0: nothing is in front of it", first.Queued)
+	}
+	select {
+	case <-probe.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent never picked up the first instruction")
+	}
+
+	second, err := auto.AcceptTask(AcceptTaskRequest{ID: "t-ahead", Description: "two"})
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	if second.Queued != 1 {
+		t.Fatalf("queued=%d for the second instruction, want 1: the message being processed is in front of it", second.Queued)
+	}
+
+	close(probe.release)
+	waitForMessageStatus(t, store, second.AgentID, second.MessageID, MessageStatusDone)
+	waitForInboxDry(t, store, second.AgentID)
+}
+
 // path differ in patience, not in what they accept — the same request leaves the same
 // record through HTTP as through Run.
 func TestTheSameRequestIsAcceptedWhicheverDoorTakesIt(t *testing.T) {

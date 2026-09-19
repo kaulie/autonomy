@@ -30,8 +30,10 @@ type AcceptTaskResponse struct {
 	AgentID int64  `json:"agent_id"`
 	Status  string `json:"status"`
 	// MessageID is the inbox message this instruction was accepted as, and Queued
-	// is how many messages the agent still has in front of it (0 = this is what the
-	// agent is doing, or is about to do, next).
+	// is how many messages the agent still has in front of it: the ones that arrived
+	// before this instruction and have not finished, including the one being
+	// processed right now. 0 means this instruction is what the agent is doing, or is
+	// about to take next; n means n messages come first.
 	MessageID int64 `json:"message_id,omitempty"`
 	Queued    int   `json:"queued"`
 }
@@ -188,7 +190,7 @@ func (r *Autonomy) accepted(task *Task, agent *Agent, messageID int64) *AcceptTa
 		AgentID:   agent.ID,
 		Status:    task.Status,
 		MessageID: messageID,
-		Queued:    r.agentInbox().Queued(agent, messageID),
+		Queued:    r.agentInbox().Ahead(agent, messageID),
 	}
 }
 
