@@ -41,7 +41,9 @@ capability 看到的只是 `broker.AgentSession` 那个窄视图（`ID` / `Works
 
 ## 结束：一个函数
 
-`Close`（= capability 侧看到的 `Release`）走 `closeAgent`（`src/agent.go`），和 `Autonomy.finishAgent` 是同一份：停、拆掉 provider 会话、按 `Lifecycle` 决定**留**（`persistent`，**默认**：只 Close，行与 session id 留着，下一条指令还能 Resume，见 [agent.md](agent.md)）还是**删**（`ephemeral`：软删 + 从 factory 摘掉；只有明确要一个用完即弃的 worker 才这样，`broker.AcquireAgentOpts.Ephemeral`）。**结束一只 agent 与它是谁无关**，所以只有一份实现。
+`Close`（= capability 侧看到的 `Release`）走 `closeAgent`（`src/agent.go`）：停、拆掉 provider 会话，然后按 `Lifecycle` 决定**留**（`persistent`，**默认**：行与 session id 留着，下一条指令还能 Resume，见 [agent.md](agent.md)）还是**删**（`ephemeral`：软删 + 从 factory 摘掉；只有明确要一个用完即弃的 worker 才这样，`broker.AcquireAgentOpts.Ephemeral`）。
+
+注意**一次运行结束不走这里**：agent 常驻，一次运行结束只是标 `idle`（`Autonomy.drainedAgent`），会话留着给下一条消息复用 —— 走 `closeAgent` 的是真正的结束：worker 的 `Release`、后端没挂上、进程退出。**结束一只 agent 与它是谁无关**，所以只有一份实现。
 
 ## 不变式
 

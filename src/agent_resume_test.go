@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -316,5 +317,59 @@ func TestAQueuedInstructionReachesTheCycleThatAnswersIt(t *testing.T) {
 		if !strings.Contains(prompts[i], "additional_input") {
 			t.Errorf("run %d does not render the message as additional_input", i)
 		}
+	}
+}
+
+// TestARunLeavesTheAgentResident: a run ending does not stop the agent. It is only
+// marked idle, its session stays attached, and the next instruction continues on that
+// same session — one agent, one conversation, however many instructions arrive.
+func TestARunLeavesTheAgentResident(t *testing.T) {
+	store := resumeTestStore(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_REASONER", "llm")
+	t.Setenv("AUTONOMY_MAX_STEPS", "1")
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+
+	task, _ := pairedTask(t, store, "t-resident")
+	f := NewAgentFactory()
+	auto := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+
+	var sessions []string
+	for i := 1; i <= 2; i++ {
+		// Whether the instruction concludes anything is not what this test is about:
+		// what matters is what an agent looks like after the queue runs dry.
+		_ = auto.Run(&Task{ID: task.ID, Description: fmt.Sprintf("answer done: instruction %d", i)})
+		agent := f.ForTask(task.ID)
+		if agent == nil {
+			t.Fatalf("instruction %d left no agent for the task", i)
+		}
+		if agent.State != "idle" {
+			t.Fatalf("after instruction %d state=%q, want idle (a finished run does not leave it running)", i, agent.State)
+		}
+		if agent.clineAgent == nil || agent.LLMAgentID == "" {
+			t.Fatalf("after instruction %d the agent holds no session (%q): a resident agent keeps it", i, agent.LLMAgentID)
+		}
+		if agent.needsLLMFrame() {
+			t.Fatalf("after instruction %d the session is treated as new; a resident agent's session already has the frame", i)
+		}
+		sessions = append(sessions, agent.LLMAgentID)
+	}
+	if sessions[0] != sessions[1] {
+		t.Fatalf("the second instruction opened a new session (%q → %q); a resident agent continues the one it has", sessions[0], sessions[1])
+	}
+
+	// Still one agent, with its row and its two messages: a finished run is not a farewell.
+	resident := f.ForTask(task.ID)
+	stored, err := store.GetAgent(resident.ID)
+	if err != nil || stored == nil || !stored.DeletedAt.IsZero() {
+		t.Fatalf("the agent row is gone or let go: %+v err=%v", stored, err)
+	}
+	if stored.LLMAgentID != sessions[1] {
+		t.Fatalf("agents.llm_agent_id=%q, want the resident session %q", stored.LLMAgentID, sessions[1])
+	}
+	messages, err := store.ListAgentMessages(stored.ID, 0)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("inbox=%d messages err=%v, want both instructions", len(messages), err)
 	}
 }
