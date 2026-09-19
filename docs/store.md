@@ -2,20 +2,25 @@
 
 ## 目标
 
-把所有数据库操作收敛到一个**与具体数据库无关**的统一接口，具体后端（SQLite / Postgres /
+把所有数据库操作收敛到一个**与具体数据库无关**的接口，具体后端（SQLite / Postgres /
 MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并选择一个新 engine，上层代码不变。
 
-- **统一接口**：`Store`（`src/store.go`）——上层唯一依赖的持久化契约。
+- **统一接口**：`Store`（`src/store.go`）——持久化契约的并集，也是 engine 要实现的那一份。
+- **五个端口**：`TaskStore` / `AgentStore` / `ConversationStore` / `ExecutionStore` /
+  `VerificationStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
 - **引擎 SPI**：`StoreEngine`（`src/store_engine.go`）——一个 engine 对应一种数据库/方言。
-- **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_store.go`），默认启用。
+- **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_*.go`），默认启用。
 
 ## 分层
 
 ```
-调用方（autonomy / reasoner / llm_trace …）
-        │  只依赖
+调用方（autonomy / llm_trace / verification / http 读接口 …）
+        │  只依赖它用到的那一个端口
         ▼
-Store 接口（与数据库无关：UpsertTask / UpsertAgent / InsertReasonTurn / …）
+TaskStore  AgentStore  ConversationStore  ExecutionStore  VerificationStore
+        │                    └──────────┬──────────┘
+        ▼                               ▼
+   Store = 五个端口的并集（src/store.go）
         ▲  由 engine 提供实现
         │
 StoreEngine（Name / DefaultDSN / Open）
@@ -23,12 +28,46 @@ StoreEngine（Name / DefaultDSN / Open）
         └── 未来的 postgresEngine / mysqlEngine / …
 ```
 
+谁依赖哪个端口，就是「它到底需要什么数据」的说明：
+
+| 端口 | 内容 | 上层谁用 |
+|------|------|----------|
+| `TaskStore` | tasks | `persistTask`、HTTP 读接口（进度 / 停止 / 受理） |
+| `AgentStore` | agents | `persistAgent`、`softDeleteAgent`、HTTP agent 状态 |
+| `ConversationStore` | `reason_turns` 头 + `llm_messages` 对话 + `llm_events` 原始流 | `LLMTrace`（写）、HTTP 轮询（读） |
+| `ExecutionStore` | 计划 / 计划步骤 / 执行步骤 / 交互 | `saveExecutionPlan` 等、verifier 读步骤产出、HTTP 进度 |
+| `VerificationStore` | Completion Contract + verdict | `pinCompletionContract` / `pinnedCompletionContract` / `saveVerification` |
+
+端口只是**同一份 store 的切片**（`Store` 内嵌五个），所以 engine 一次实现全部、上层一次注入，
+但没人需要认识与自己无关的那部分：加一个消费者不必看到 30 多个方法，加一个 engine 也能按
+端口分块实现、分块验证。取用方式：
+
+- 进程内：`activeTaskStore()` / `activeConversationStore()` / …（`src/store.go`）。
+- 持有 `Autonomy` 时（HTTP 读接口）：`r.taskStore()` / `r.conversationStore()` / …。
+
+## 边界是被测试钉住的
+
+「上层不认识数据库」不只是约定，`src/store_ports_test.go` 会失败：
+
+- **`TestOnlyTheStorageEngineMayImportADriver`**：遍历仓库里所有**非 engine 的生产 .go 文件**
+  （engine 文件 = `sqlite_*.go`），任何一个
+  1. import 了 `database/sql`、`modernc.org/sqlite`、`lib/pq`、`go-sql-driver/mysql`、`pgx` …，
+  2. 或提到了 `SQLiteStore` / `OpenSQLiteStore` / `sqliteEngine` / `sql.Open(`，
+
+  即视为越界 → 测试失败。driver 只能活在 engine 里，`sqlite_engine.go` 也不带 driver
+  （它调用 `OpenSQLiteStore`）。
+- **`TestTheUpperLayerWritesThroughItsPorts`**：用一个**不是 SQLite** 的 store（`recordingStore`）
+  驱动全部上层写入（task / agent / run / plan+step+interaction / verdict / contract），
+  断言它们只以端口调用的形式落地、字段与顺序不变。
+- 编译期断言（同文件）：`SQLiteStore` 满足每一个端口与 `Store`。
+
 关键不变式：
 
-- **上层只认识 `Store`**，不认识 SQL、方言、表名；所有 DB 访问都经 `activeStore()`。
+- **上层只认识端口**，不认识 SQL、方言、表名；所有 DB 访问都经 `activeStore()` 及其端口切片。
 - **engine 独占其 schema 与迁移**：DDL、`ON CONFLICT`、`INSERT OR IGNORE`、占位符（`?`）、
-  `PRAGMA` 等方言细节全部封装在 engine 内（见 `src/sqlite_store.go`）。
+  `PRAGMA`、以及「Go 字段 ↔ 列值」的编码（`src/sqlite_encoding.go`）全部封装在 engine 内。
 - **数据模型中立**：`LLMEvent` / `LLMUsage` / `ReasonTurn` 等模型本身与数据库无关，engine 不参与解释。
+
 
 ## 配置
 
@@ -127,8 +166,10 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 | 关注点 | 文件 |
 |--------|------|
-| `Store` 统一接口 | `src/store.go` |
+| `Store` 与五个端口（契约） | `src/store.go` |
 | engine SPI + 注册表 + 选择 | `src/store_engine.go` |
 | sqlite engine（默认 DSN / 注册） | `src/sqlite_engine.go` |
-| sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go` |
+| sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go`、`src/sqlite_query.go`、`src/sqlite_execution.go`、`src/sqlite_verification.go` |
+| sqlite 列值编码（时间 / NULL / JSON） | `src/sqlite_encoding.go` |
+| 端口边界与上层可插拔性的测试 | `src/store_ports_test.go` |
 | 进程内单例与 bootstrap | `src/autonomy.go`（`activeStore()`，`BootstrapAutonomy`） |

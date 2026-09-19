@@ -7,11 +7,14 @@ import (
 	"strings"
 )
 
-// This file defines the storage-engine SPI. Store (store.go) is the single,
-// database-agnostic contract the rest of Autonomy codes against; a StoreEngine
-// is a pluggable backend that produces a Store. SQLite is the built-in engine,
-// and other databases (Postgres, MySQL, ...) plug in by registering another
-// engine: switching the database never touches callers or the Store interface.
+// This file defines the storage-engine SPI. Store (store.go) is the persistence
+// contract the rest of Autonomy codes against — five cohesive ports (TaskStore,
+// AgentStore, ConversationStore, ExecutionStore, VerificationStore) whose union
+// is Store — and a StoreEngine is a pluggable backend that produces one. SQLite
+// is the built-in engine, and other databases (Postgres, MySQL, ...) plug in by
+// registering another engine: switching the database never touches callers, and
+// no upper-layer file ever names a driver or a dialect (enforced by
+// store_ports_test.go).
 
 const (
 	// StoreEngineSQLite is the built-in, file-backed engine.

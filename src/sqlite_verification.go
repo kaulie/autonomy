@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// The verification tables, as the sqlite engine serves them: a task's pinned
-// Completion Contract (written once) and its verdicts (appended, never updated). See
+// VerificationStore, as the sqlite engine serves it: a task's pinned Completion
+// Contract (written once) and its verdicts (appended, never updated). See
 // docs/verification.md.
 
 // AppendCompletionContract pins one criterion. The first row for a (task_id, idx) is the
