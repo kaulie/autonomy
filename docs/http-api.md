@@ -76,7 +76,24 @@ go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tas
 
 ### `GET /api/tasks/{task_id}`
 
-查询任务进展：状态、错误，以及每一份 execution plan 和其中每一步的执行情况。
+查询任务详情：**这条 task 是什么** + 进展。
+
+「是什么」来自行本身（`tasks.goal_type` / `tasks.context_ref`，见 [task.md](task.md)）加上把那层引用解析出来的结果：
+
+| 字段 | 含义 |
+|------|------|
+| `goal_type` | 受理时的目标类型（`tasks.goal_type`） |
+| `context_ref` | 它引用的世界，如 `{"project": "project-749a0238"}` |
+| `project` | **所属 project**：`{"id", "name", "description", "domain", "git_repo_url", "organization"}` |
+| `project.organization` | **project 所属的组织（部门）**：`{"id": "D0005", "name": "AI研发部"}` |
+
+`project` 由两处合成，都不强求：runtime 自己注册过的 context container 提供它知道的（`name` / `description` / `domain`），
+平台的 **project 注册表**（控制面 `GET /api/projects`，`PROJECTS_API_URL` 覆盖，默认 `http://127.0.0.1:4211`）提供 project 的名字、
+仓库与**所属部门** —— 一个 project 属于哪个组织是平台的事实，autonomy 只读、不另立一份注册表。注册表读不到（未启动/超时 2s）
+不影响这个接口：详情照常返回，`project` 只剩 id（和本进程世界知道的那点信息），不会因为一个注册表挂了而失败。注册表结果缓存 30s
+（失败缓存 5s），所以每次读详情不会真的每次都去问。
+
+进展：状态、错误，以及每一份 execution plan 和其中每一步的执行情况。
 
 `plans[].steps[]` 按计划顺序：`status` 为 `pending`（计划了还没跑）、`ok` 或 `failed`。已跑的步带上实际 `input` / `output` / `error`。
 

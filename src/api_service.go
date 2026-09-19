@@ -38,15 +38,21 @@ type AcceptTaskResponse struct {
 
 // TaskProgress is a snapshot of how far a task has got.
 type TaskProgress struct {
-	TaskID      string             `json:"task_id"`
-	Description string             `json:"description"`
-	Domain      string             `json:"domain"`
-	Status      string             `json:"status"`
-	Error       string             `json:"error,omitempty"`
-	AgentID     int64              `json:"agent_id"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
-	Plans       []TaskPlanProgress `json:"plans"`
+	TaskID      string    `json:"task_id"`
+	Description string    `json:"description"`
+	Domain      string    `json:"domain"`
+	Status      string    `json:"status"`
+	Error       string    `json:"error,omitempty"`
+	AgentID     int64     `json:"agent_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// What the task is: the goal type it was accepted as, the context references it
+	// carries, and that context resolved — the project it belongs to and the
+	// organization that project belongs to (TaskProject, src/task_project.go).
+	GoalType   string             `json:"goal_type,omitempty"`
+	ContextRef map[string]string  `json:"context_ref,omitempty"`
+	Project    *TaskProject       `json:"project,omitempty"`
+	Plans      []TaskPlanProgress `json:"plans"`
 }
 
 // TaskPlanProgress summarises one decision cycle's plan and its execution.
@@ -296,6 +302,9 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 		AgentID:     task.AgentID,
 		CreatedAt:   task.CreatedAt,
 		UpdatedAt:   task.UpdatedAt,
+		GoalType:    string(task.GoalType),
+		ContextRef:  formatContextRefMap(task.ContextRef),
+		Project:     r.TaskProject(projectRefOf(task)),
 		Plans:       []TaskPlanProgress{},
 	}
 	plans, err := r.executionStore().ListExecutionPlans(taskID)

@@ -385,7 +385,31 @@ func stopRun(ctx context.Context, c *client, o options, stdout, stderr io.Writer
 }
 
 func printProgress(w io.Writer, p taskProgress) {
-	fmt.Fprintf(w, "task %s  status %s  agent %d  domain %s\n", p.TaskID, p.Status, p.AgentID, p.Domain)
+	fmt.Fprintf(w, "task %s  status %s  agent %d  domain %s", p.TaskID, p.Status, p.AgentID, p.Domain)
+	if p.GoalType != "" {
+		fmt.Fprintf(w, "  goal %s", p.GoalType)
+	}
+	fmt.Fprintln(w)
+	if refs := contextRefs(p.ContextRef).String(); refs != "" {
+		fmt.Fprintf(w, "  context %s\n", refs)
+	}
+	if project := p.Project; project != nil {
+		if project.Name != "" {
+			fmt.Fprintf(w, "  project %s  %s\n", project.Name, project.ID)
+		} else {
+			fmt.Fprintf(w, "  project %s\n", project.ID)
+		}
+		if project.GitRepoURL != "" {
+			fmt.Fprintf(w, "  repo %s\n", project.GitRepoURL)
+		}
+		if org := project.Organization; org != nil {
+			if org.Name != "" {
+				fmt.Fprintf(w, "  org %s  %s\n", org.Name, org.ID)
+			} else {
+				fmt.Fprintf(w, "  org %s\n", org.ID)
+			}
+		}
+	}
 	if p.Description != "" {
 		fmt.Fprintf(w, "  %s\n", oneLine(p.Description))
 	}
