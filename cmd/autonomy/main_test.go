@@ -137,7 +137,15 @@ func TestStopAndProgressAreTheTaskPaths(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/task-failed"):
 			_, _ = io.WriteString(w, `{"task_id":"task-failed","status":"error","error":"decide: no bridge","agent_id":10000,"plans":[]}`)
 		default:
-			_, _ = io.WriteString(w, `{"task_id":"task-28","status":"running","agent_id":10000,"plans":[]}`)
+			// The task detail as the runtime answers it: what the task is (goal, context,
+			// the project and its organization), then its plans.
+			_, _ = io.WriteString(w, `{"task_id":"task-28","description":"开放服务契约的前端入口",
+				"domain":"software_development","status":"running","agent_id":10000,
+				"goal_type":"dev_feature","context_ref":{"project":"project-749a0238"},
+				"project":{"id":"project-749a0238","name":"autonomy",
+					"git_repo_url":"https://github.com/kaulie/autonomy",
+					"organization":{"id":"D0005","name":"AI研发部"}},
+				"plans":[]}`)
 		}
 	}))
 	defer srv.Close()
@@ -155,8 +163,16 @@ func TestStopAndProgressAreTheTaskPaths(t *testing.T) {
 	if code := cli([]string{"-server", srv.URL, "-progress"}, &out, &errOut); code != 0 {
 		t.Fatalf("-progress exit = %d, stderr = %q", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "task task-28  status running  agent 10000") {
-		t.Errorf("-progress stdout = %q", out.String())
+	for _, line := range []string{
+		"task task-28  status running  agent 10000  domain software_development  goal dev_feature",
+		"  context project=project-749a0238",
+		"  project autonomy  project-749a0238",
+		"  repo https://github.com/kaulie/autonomy",
+		"  org AI研发部  D0005",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("-progress stdout missing %q: %s", line, out.String())
+		}
 	}
 
 	// -progress exits by the status it read: a failed task is a failure for the

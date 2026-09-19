@@ -44,16 +44,38 @@ type stopResponse struct {
 	Status string `json:"status"`
 }
 
-// taskProgress is GET /api/tasks/{id}: the task's status and every plan it has
-// run, each with the steps it planned and what executing them did.
+// taskProgress is GET /api/tasks/{id}: what the task is (goal type, the context it
+// names, the project it belongs to and that project's organization), its status,
+// and every plan it has run, each with the steps it planned and what executing
+// them did.
 type taskProgress struct {
-	TaskID      string         `json:"task_id"`
-	Description string         `json:"description"`
-	Domain      string         `json:"domain"`
-	Status      string         `json:"status"`
-	Error       string         `json:"error,omitempty"`
-	AgentID     int64          `json:"agent_id"`
-	Plans       []planProgress `json:"plans"`
+	TaskID      string            `json:"task_id"`
+	Description string            `json:"description"`
+	Domain      string            `json:"domain"`
+	Status      string            `json:"status"`
+	Error       string            `json:"error,omitempty"`
+	AgentID     int64             `json:"agent_id"`
+	GoalType    string            `json:"goal_type,omitempty"`
+	ContextRef  map[string]string `json:"context_ref,omitempty"`
+	Project     *taskProject      `json:"project,omitempty"`
+	Plans       []planProgress    `json:"plans"`
+}
+
+// taskProject is the project a task belongs to and the organization that project
+// belongs to, as the runtime resolved them (the project registry's name and
+// repository, plus this runtime's own world; the id is always what the task said).
+type taskProject struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	Domain       string            `json:"domain,omitempty"`
+	GitRepoURL   string            `json:"git_repo_url,omitempty"`
+	Organization *taskOrganization `json:"organization,omitempty"`
+}
+
+type taskOrganization struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }
 
 type planProgress struct {
