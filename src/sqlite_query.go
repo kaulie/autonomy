@@ -11,20 +11,27 @@ import (
 // than part of the schema/migration path.
 
 // GetTask reads one task by id. A missing row returns (nil, nil).
+//
+// A task's goal type and context references are read back with the row, not only
+// held for the request that wrote them: they are what the task *is* — the world it
+// was accepted into — so an instruction that names neither (src/api_service.go's
+// accept) continues the task with them instead of stripping it.
 func (s *SQLiteStore) GetTask(taskID string) (*Task, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("empty task id")
 	}
 	var (
-		t         Task
-		domain    string
-		createdAt string
-		updatedAt string
+		t          Task
+		domain     string
+		goalType   string
+		contextRef string
+		createdAt  string
+		updatedAt  string
 	)
 	err := s.db.QueryRow(`
-SELECT id, description, domain, status, error, agent_id, created_at, updated_at
+SELECT id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at
 FROM tasks WHERE id = ?`, taskID).Scan(
-		&t.ID, &t.Description, &domain, &t.Status, &t.Error, &t.AgentID, &createdAt, &updatedAt,
+		&t.ID, &t.Description, &domain, &goalType, &contextRef, &t.Status, &t.Error, &t.AgentID, &createdAt, &updatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -32,7 +39,13 @@ FROM tasks WHERE id = ?`, taskID).Scan(
 	if err != nil {
 		return nil, fmt.Errorf("get task: %w", err)
 	}
+	refs, err := parseTaskContextRef(contextRef)
+	if err != nil {
+		return nil, fmt.Errorf("get task %s: %w", taskID, err)
+	}
 	t.Domain = TaskDomain(domain)
+	t.GoalType = GoalType(goalType)
+	t.ContextRef = refs
 	t.CreatedAt = parseTime(createdAt)
 	t.UpdatedAt = parseTime(updatedAt)
 	return &t, nil

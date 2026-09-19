@@ -135,6 +135,11 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 （输入/返回消息见 [llm-message.md](llm-message.md)，原始事件流见 [llm-event-stream.md](llm-event-stream.md)）。
 其它 engine 只需实现同样的 `Store` 语义，表结构可自由设计。
 
+`tasks` 行记「这条 Task 是什么」：`description` / `domain` / `goal_type` / `context_ref`（`{"容器类型": "容器 id"}` 的 JSON）
+/ `status` / `error` / `agent_id`。`goal_type` 与 `context_ref` 是**受理时**写下的 —— `UpsertTask` 对它们的空值语义与
+`agent_id` 一致：一次不带它们的写入（运行时沿途 upsert 的 Task 值、或只说得出 task id 的续指令）保留行里已有的值，
+只有写入方真的给出了新值才覆盖（见 [task.md](task.md)、[http-api.md](http-api.md)）。
+
 **失败必须落成可查的数据，而不是只留在终端上**：
 
 - `tasks.status` 是结果（`running` / `completed` / `blocked` / `need_input` / `error` —— **收束这次运行的那个决策**），

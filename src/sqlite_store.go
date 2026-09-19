@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   description TEXT NOT NULL DEFAULT '',
   domain TEXT NOT NULL DEFAULT '',
+  goal_type TEXT NOT NULL DEFAULT '',      -- GoalType: what the task was accepted as
+  context_ref TEXT NOT NULL DEFAULT '{}',  -- ContextContainerType -> container id (JSON object)
   status TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   agent_id INTEGER NOT NULL DEFAULT 0,
@@ -414,6 +416,19 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 		return fmt.Errorf("migrate agent_messages: %w", err)
 	}
 
+	// A task's world lives on its row now: goal_type and context_ref are what the
+	// task was accepted as (src/api_service.go), so a later instruction that names
+	// neither continues the task instead of stripping it. A row written before the
+	// columns existed reads back as "nothing was said".
+	for _, c := range []struct{ name, decl string }{
+		{"goal_type", "TEXT NOT NULL DEFAULT ''"},
+		{"context_ref", "TEXT NOT NULL DEFAULT '{}'"},
+	} {
+		if err := s.ensureColumn("tasks", c.name, c.decl); err != nil {
+			return fmt.Errorf("migrate tasks.%s: %w", c.name, err)
+		}
+	}
+
 	// The execution tables gained the step's name: a plan's input bindings address a
 	// step by name, so without it a stored plan's lineage points at nothing
 	// (docs/execution-step.md, "Plan Data Lineage").
@@ -690,6 +705,49 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// taskContextRefJSON is a task's context references as its row keeps them: the
+// container type -> container id map as a JSON object. No references is "{}", so
+// "this write gave none" and "there are none" are the same row value (UpsertTask
+// reads it back to decide whether a write may overwrite what is there).
+func taskContextRefJSON(ref map[ContextContainerType]string) string {
+	out := map[string]string{}
+	for ctype, id := range ref {
+		if id == "" {
+			continue
+		}
+		out[string(ctype)] = id
+	}
+	if len(out) == 0 {
+		return "{}"
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+// parseTaskContextRef is the read side of taskContextRefJSON (src/sqlite_query.go).
+// A row that says nothing — no column value, or "{}" — carries no references.
+func parseTaskContextRef(text string) (map[ContextContainerType]string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" || text == "{}" || text == "null" {
+		return nil, nil
+	}
+	var raw map[string]string
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		return nil, fmt.Errorf("context_ref: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make(map[ContextContainerType]string, len(raw))
+	for k, v := range raw {
+		out[ContextContainerType(k)] = v
+	}
+	return out, nil
+}
+
 func (s *SQLiteStore) UpsertTask(task *Task) error {
 	if task == nil {
 		return fmt.Errorf("nil task")
@@ -700,11 +758,16 @@ func (s *SQLiteStore) UpsertTask(task *Task) error {
 	}
 	task.UpdatedAt = now
 	_, err := s.db.Exec(`
-INSERT INTO tasks (id, description, domain, status, error, agent_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   description=excluded.description,
   domain=excluded.domain,
+  -- A write that says nothing new about what the task is does not take it away:
+  -- goal_type and context_ref are what the task was accepted as, and the Task
+  -- values the runtime upserts on its way through a run need not carry them.
+  goal_type=CASE WHEN excluded.goal_type = '' THEN tasks.goal_type ELSE excluded.goal_type END,
+  context_ref=CASE WHEN excluded.context_ref = '{}' THEN tasks.context_ref ELSE excluded.context_ref END,
   status=excluded.status,
   error=excluded.error,
   -- A write that names no agent does not un-pair the task: the task's agent is what
@@ -712,7 +775,7 @@ ON CONFLICT(id) DO UPDATE SET
   -- runtime upserts on its way through a run need not carry it.
   agent_id=CASE WHEN excluded.agent_id = 0 THEN tasks.agent_id ELSE excluded.agent_id END,
   updated_at=excluded.updated_at
-`, task.ID, task.Description, string(task.Domain),
+`, task.ID, task.Description, string(task.Domain), string(task.GoalType), taskContextRefJSON(task.ContextRef),
 		task.Status, task.Error, task.AgentID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert task: %w", err)
