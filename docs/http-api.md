@@ -61,7 +61,8 @@ go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tas
 同一条指令消息、同一只 agent），区别只在于它会等这次运行结束才返回，返回这次运行的错误和同一份接受信息
 （`*AcceptTaskResponse`）。命令行客户端（`cmd/autonomy`）不链接 runtime，它是这条路线的 HTTP 版本：
 `POST /api/tasks` 拿到接受信息，再用 `GET /api/tasks/{id}` 轮询到状态不再是 `running` / `pending`（`-wait`，默认开），
-运行的结局就是命令的退出码。请求里的 `description` 为空时，指令内容取这条 task 行已有的描述（`tasks.description`）。
+运行的结局就是命令的退出码。请求里的 `description` 为空时，指令内容取这条 task 行已有的描述（`tasks.description`）；
+`goal_type` / `context_ref` 同理：不带就用行里已有的（`tasks.goal_type` / `tasks.context_ref`，见 [task.md](task.md)）。
 
 ### `POST /api/tasks/{task_id}/stop`
 

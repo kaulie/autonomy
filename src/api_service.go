@@ -223,12 +223,17 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 
 	// A second instruction for a task the store already knows continues that task
 	// rather than starting a new one: it keeps the row's own identity (when the task
-	// was created, and the description/domain/goal it was accepted with when this
-	// request does not restate them) and, above all, the agent it was paired with —
-	// because that is the agent this instruction resumes (see resumeAgentForTask).
-	// A request that carries no words of its own changes nothing about what the task
-	// is: what is being asked *now* is the message, and a message that says nothing
-	// new is the row's own description (see instruction).
+	// was created, and the description/domain/goal/context it was accepted with when
+	// this request does not restate them) and, above all, the agent it was paired
+	// with — because that is the agent this instruction resumes (see
+	// resumeAgentForTask).
+	//
+	// What the task *is* is on its row, so a request that names no world is not a
+	// request to leave the world behind: goal_type and context_ref are read back
+	// with the row (src/sqlite_query.go) and carried here when the request has none
+	// of its own. A request that carries no words of its own changes nothing either:
+	// what is being asked *now* is the message, and a message that says nothing new
+	// is the row's own description (see instruction).
 	task := &Task{
 		ID:          taskID,
 		Description: desc,
@@ -248,8 +253,11 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 		if strings.TrimSpace(req.Domain) == "" {
 			task.Domain = stored.Domain
 		}
-		if strings.TrimSpace(req.GoalType) == "" {
+		if strings.TrimSpace(req.GoalType) == "" && strings.TrimSpace(string(stored.GoalType)) != "" {
 			task.GoalType = stored.GoalType
+		}
+		if len(contextRef) == 0 && len(stored.ContextRef) > 0 {
+			task.ContextRef = stored.ContextRef
 		}
 	}
 	agent, msg, err := r.instruction(context.Background(), task, desc)

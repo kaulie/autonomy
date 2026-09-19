@@ -611,6 +611,80 @@ func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
 	}
 }
 
+// TestSQLiteStoreMigratesTaskGoalTypeAndContextRef: an existing database gets the
+// two columns a task's world is written in, in place — the rows it already has read
+// back as "nothing was said", which is what they are, and the columns round-trip
+// afterwards.
+func TestSQLiteStoreMigratesTaskGoalTypeAndContextRef(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pre-change schema: the tasks table without goal_type / context_ref.
+	_, err = db.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY,
+		description TEXT NOT NULL DEFAULT '',
+		domain TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
+		error TEXT NOT NULL DEFAULT '',
+		agent_id INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO tasks (id, description, domain, status, error, agent_id, created_at, updated_at)
+		VALUES ('task-old', 'the older task', 'software_development', 'completed', '', 10000, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer store.Close()
+
+	// The row that was already there says nothing about a world, and reading it
+	// does not fail on the columns it predates.
+	legacy, err := store.GetTask("task-old")
+	if err != nil || legacy == nil {
+		t.Fatalf("task=%v err=%v", legacy, err)
+	}
+	if legacy.GoalType != "" || len(legacy.ContextRef) != 0 {
+		t.Fatalf("goal_type=%q context_ref=%v, want a legacy row to say nothing", legacy.GoalType, legacy.ContextRef)
+	}
+	if legacy.Description != "the older task" || legacy.AgentID != 10000 {
+		t.Fatalf("task=%+v, want the row itself intact", legacy)
+	}
+
+	// The migrated columns round-trip, and a write that gives neither leaves the
+	// world the row already has alone.
+	legacy.GoalType = GoalType_Resolve_ISSUE
+	legacy.ContextRef = map[ContextContainerType]string{ContextContainerTypeProject: "project-2"}
+	if err := store.UpsertTask(legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Status = TaskStatusRunning
+	legacy.GoalType = ""
+	legacy.ContextRef = nil
+	if err := store.UpsertTask(legacy); err != nil {
+		t.Fatal(err)
+	}
+	read, err := store.GetTask("task-old")
+	if err != nil || read == nil {
+		t.Fatalf("task=%v err=%v", read, err)
+	}
+	if read.GoalType != GoalType_Resolve_ISSUE || read.ContextRef[ContextContainerTypeProject] != "project-2" {
+		t.Fatalf("goal_type=%q context_ref=%v, want the migrated columns to round-trip", read.GoalType, read.ContextRef)
+	}
+}
+
 // TestSQLiteStoreMigratesStepToCycle: reason_turns.step / llm_messages.step counted
 // decision cycles and are called cycle now — a step is one execution step of a plan,
 // and one word should not mean two things. An older database is renamed in place:

@@ -29,6 +29,10 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 一条 Task 的**指令**是发给它那只 agent 的消息（`instruction`，见 [inbox.md](inbox.md)）：第一次就是它被接受时的
 描述（`tasks.description`），之后的每一条是新的消息；任务行本身不会被后来的指令改写。
 
+**世界也写在行里**：`tasks.goal_type` / `tasks.context_ref`（`{"容器类型": "容器 id"}` 的 JSON）是这条 Task 被受理时的
+目标类型与它所在的世界。跟 `tasks.agent_id` 同理，后来的指令不携带它们时不会把它们抹掉 —— 受理时从行里读回，所以一条
+只说得出 task id 的指令仍然在同一个世界里跑（见 [store.md](store.md)、[http-api.md](http-api.md)）。
+
 **运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点，取值就是**收束这次运行的
 那个决策**：`running`（还在跑）→ `completed`（`done` **且验证通过**：完成契约的每条判据都被权威来源证实，
 见 [verification.md](verification.md)）／`unverified`（运行结束时最后一个答复是 `done`，而它始终没通过验证 ——
