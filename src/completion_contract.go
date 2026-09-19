@@ -277,7 +277,7 @@ func pinCompletionContract(decision Decision, planID int64) {
 	if task == nil || strings.TrimSpace(task.ID) == "" || len(decision.Contract) == 0 {
 		return
 	}
-	s := activeStore()
+	s := activeVerificationStore()
 	if s == nil {
 		return
 	}
@@ -300,7 +300,7 @@ func pinCompletionContract(decision Decision, planID int64) {
 // error: it is a task whose `done` has nothing to be verified against, which is what
 // verification reports.
 func pinnedCompletionContract(taskID string) []Criterion {
-	s := activeStore()
+	s := activeVerificationStore()
 	if s == nil || strings.TrimSpace(taskID) == "" {
 		return nil
 	}

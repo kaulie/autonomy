@@ -12,7 +12,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// SQLiteStore is a file-backed Store using modernc.org/sqlite (pure Go).
+// SQLiteStore is a file-backed Store using modernc.org/sqlite (pure Go). It is
+// the engine's implementation of every Store port: tasks and agents and the
+// conversation (this file, with sqlite_query.go), the execution record
+// (sqlite_execution.go), and verification (sqlite_verification.go).
 type SQLiteStore struct {
 	db *sql.DB
 }

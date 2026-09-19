@@ -5,6 +5,11 @@ import (
 	"fmt"
 )
 
+// TaskStore and AgentStore reads, plus the ConversationStore reads the HTTP API
+// polls with, as the sqlite engine serves them (src/http_server.go). They live
+// apart from sqlite_store.go because they are the read half of the ports rather
+// than part of the schema/migration path.
+
 // GetTask reads one task by id. A missing row returns (nil, nil).
 func (s *SQLiteStore) GetTask(taskID string) (*Task, error) {
 	if taskID == "" {

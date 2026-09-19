@@ -342,7 +342,7 @@ func (r *Runtime) askAuthority(ctx DecisionContext, ask verificationAsk, prior [
 // against the task's own step history — a slot naming a step this plan does not have is
 // a step an earlier cycle ran.
 func taskStepOutputs(taskID string) []ActionResult {
-	s := activeStore()
+	s := activeExecutionStore()
 	if s == nil || strings.TrimSpace(taskID) == "" {
 		return nil
 	}

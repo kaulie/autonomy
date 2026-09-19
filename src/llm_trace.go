@@ -35,9 +35,10 @@ func llmEventStreamEnabled() bool {
 //
 // Persistence is best-effort: failures are logged and never fail the model
 // call, so observability degrades instead of the run breaking. A trace with no
-// active store is a safe no-op.
+// active store is a safe no-op. It writes only the conversation port: the run
+// header, its messages, and its raw event stream (src/store.go).
 type LLMTrace struct {
-	store  Store
+	store  ConversationStore
 	handle ReasonTurnHandle
 	runID  string
 	seq    int
@@ -73,7 +74,7 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cy
 	if inputRole == "" {
 		inputRole = LLMMessageRoleUser
 	}
-	t := &LLMTrace{store: activeStore(), start: time.Now(), events: llmEventStreamEnabled()}
+	t := &LLMTrace{store: activeConversationStore(), start: time.Now(), events: llmEventStreamEnabled()}
 	if t.store == nil {
 		return t
 	}

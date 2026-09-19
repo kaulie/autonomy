@@ -178,7 +178,7 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 	// include it. If Run is slow to start, clients can still poll progress.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		stored, err := r.Store.GetTask(taskID)
+		stored, err := r.taskStore().GetTask(taskID)
 		if err == nil && stored != nil && stored.AgentID != 0 {
 			return &AcceptTaskResponse{
 				TaskID:  taskID,
@@ -188,7 +188,7 @@ func (r *Autonomy) AcceptTask(req AcceptTaskRequest) (*AcceptTaskResponse, error
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	stored, _ := r.Store.GetTask(taskID)
+	stored, _ := r.taskStore().GetTask(taskID)
 	status := TaskStatusPending
 	var agentID int64
 	if stored != nil {
@@ -211,7 +211,7 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
 	}
-	task, err := r.Store.GetTask(taskID)
+	task, err := r.taskStore().GetTask(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 		UpdatedAt:   task.UpdatedAt,
 		Plans:       []TaskPlanProgress{},
 	}
-	plans, err := r.Store.ListExecutionPlans(taskID)
+	plans, err := r.executionStore().ListExecutionPlans(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -242,17 +242,17 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 			Need:         plan.Need,
 			StepCount:    plan.StepCount,
 		}
-		steps, err := r.Store.ListExecutionSteps(plan.ID)
+		steps, err := r.executionStore().ListExecutionSteps(plan.ID)
 		if err != nil {
 			return nil, err
 		}
 		item.Executed = len(steps)
-		if outcome, ok, err := r.Store.ExecutionPlanOutcome(plan.ID); err != nil {
+		if outcome, ok, err := r.executionStore().ExecutionPlanOutcome(plan.ID); err != nil {
 			return nil, err
 		} else if ok {
 			item.Outcome = outcome.Status
 		}
-		planned, err := r.Store.ListExecutionStepPlan(plan.ID)
+		planned, err := r.executionStore().ListExecutionStepPlan(plan.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +347,7 @@ func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 		return nil, fmt.Errorf("store not ready")
 	}
 	taskID = strings.TrimSpace(taskID)
-	stored, err := r.Store.GetTask(taskID)
+	stored, err := r.taskStore().GetTask(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +371,7 @@ func (r *Autonomy) AgentStatus(taskID string, agentID int64) (*AgentWorkStatus, 
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
 	}
-	agent, err := r.Store.GetAgent(agentID)
+	agent, err := r.agentStore().GetAgent(agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func (r *Autonomy) AgentStatus(taskID string, agentID int64) (*AgentWorkStatus, 
 		LLMProvider: string(agent.LLMProvider),
 		Model:       agent.Model,
 	}
-	turn, err := r.Store.ActiveReasonTurn(taskID, agentID)
+	turn, err := r.conversationStore().ActiveReasonTurn(taskID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +412,7 @@ func (r *Autonomy) AgentStream(taskID string, agentID, lastSyncedMessageSeq int6
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
 	}
-	messages, err := r.Store.ListLLMMessagesAfter(taskID, agentID, lastSyncedMessageSeq, 200)
+	messages, err := r.conversationStore().ListLLMMessagesAfter(taskID, agentID, lastSyncedMessageSeq, 200)
 	if err != nil {
 		return nil, err
 	}

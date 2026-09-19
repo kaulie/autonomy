@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// The execution plan/step tables, as the sqlite engine serves them. Every method
-// here inserts or reads: a plan is written before its steps run and never
-// rewritten, its outcome is derived from the steps, and nothing is keyed on the
-// cycle (see docs/execution-step.md).
+// ExecutionStore, as the sqlite engine serves it: the execution plan/step tables.
+// Every method here inserts or reads: a plan is written before its steps run and
+// never rewritten, its outcome is derived from the steps, and nothing is keyed on
+// the cycle (see docs/execution-step.md).
 
 // CreateExecutionPlan writes one plan. This is the only statement that ever touches
 // the row: a plan is one-shot, and a re-plan is a new plan.

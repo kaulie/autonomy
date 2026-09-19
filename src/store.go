@@ -1,26 +1,54 @@
 package autonomy
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"time"
 )
 
-// Store is the single, database-agnostic persistence contract the rest of
-// Autonomy codes against: tasks, agents, reasoner turns, and conversation
-// messages. A reason_turns row is the header (run metadata) of one LLM
-// interaction; its llm_messages rows are the user input and assistant output as
-// independent, linked records; its llm_events rows are the provider's raw run
-// stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
+// Persistence is described by five cohesive ports instead of one flat surface,
+// so each component takes the slice it needs and a database engine has a scoped
+// method set to implement (and can even be built port by port):
 //
-// Concrete databases sit behind the StoreEngine SPI (store_engine.go): SQLite is
-// the built-in engine, and other databases plug in by registering another
-// engine. Neither this interface nor its callers change when the database does.
-type Store interface {
+//	TaskStore          tasks: what was asked for, and how it ended
+//	AgentStore         agents
+//	ConversationStore  a run's header, its messages, and its raw event stream
+//	ExecutionStore     what the runtime planned, and what it actually did
+//	VerificationStore  the Completion Contract and the verdicts against it
+//
+// Store is their union: the whole contract one database engine implements behind
+// the StoreEngine SPI (store_engine.go). Upper-layer components depend on the
+// port they use rather than on Store — llm_trace writes ConversationStore, the
+// verifier reads ExecutionStore and writes VerificationStore, the HTTP read API
+// reads TaskStore/AgentStore/ConversationStore/ExecutionStore — so switching the
+// database does not touch any of them.
+//
+// That boundary is enforced, not just intended: store_ports_test.go fails when a
+// file outside the engine imports a database driver or names the concrete engine.
+
+// TaskStore is the task rows: what the user asked for and how the run ended.
+type TaskStore interface {
+	// UpsertTask writes the task, including the agent the run gave it.
 	UpsertTask(task *Task) error
+	// GetTask reads one task row by id. A missing row returns (nil, nil).
+	GetTask(taskID string) (*Task, error)
+}
+
+// AgentStore is the agent rows.
+type AgentStore interface {
 	UpsertAgent(agent *Agent) error
 	SoftDeleteAgent(id int64) error
+	// GetAgent reads one agent row by id (including soft-deleted). A missing row
+	// returns (nil, nil).
+	GetAgent(agentID int64) (*Agent, error)
+}
+
+// ConversationStore is one LLM interaction: a reason_turns row is the header
+// (run metadata) of the interaction, its llm_messages rows are the user input,
+// the aggregated thinking/tool intermediates, and the assistant output as
+// independent linked records, and its llm_events rows are the provider's raw run
+// stream (see BeginReasonTurn / AppendLLMEvents / FinishReasonTurn).
+type ConversationStore interface {
 	// InsertReasonTurn writes a complete interaction in one shot (used by the
 	// local reasoner and other non-streaming callers). The header, the user
 	// input, and the assistant output are recorded together.
@@ -50,6 +78,21 @@ type Store interface {
 	// AssistantMessageID is the row a run's reply was recorded in, so a decision can
 	// be traced to the exact message it came from (llm_messages.id).
 	AssistantMessageID(turnID int64) (int64, bool, error)
+	// ActiveReasonTurn is the in-flight LLM run for a task's agent, if any
+	// (reason_turns.status = running). Used by the HTTP status API to surface
+	// the live provider run id as agent_run_id.
+	ActiveReasonTurn(taskID string, agentID int64) (*ReasonTurn, error)
+	// ListLLMMessagesAfter reads an agent's conversation stream across turns,
+	// ordered by llm_messages.id ascending, for rows with id > afterID. The id
+	// is the monotonic sync cursor the HTTP poll API exposes as message_seq
+	// (per-turn seq resets every run and cannot drive cross-turn polling).
+	ListLLMMessagesAfter(taskID string, agentID, afterID int64, limit int) ([]LLMMessage, error)
+}
+
+// ExecutionStore is the run's account of itself: the plan written before
+// anything ran, the steps that then ran, and the provider interactions inside
+// them (src/execution.go, src/runtime.go).
+type ExecutionStore interface {
 	// CreateExecutionPlan writes one plan (the steps are written next, before any
 	// of them runs). A plan is immutable: there is no update, and a re-plan is a
 	// new row.
@@ -76,6 +119,11 @@ type Store interface {
 	// ExecutionPlanOutcome derives a plan's result from its steps: the last one's
 	// status. Nothing stores it, so none of it can drift.
 	ExecutionPlanOutcome(planID int64) (ExecutionPlanOutcome, bool, error)
+}
+
+// VerificationStore is the Completion Contract a task pinned and the verdicts
+// checked against it (src/completion_contract.go, src/verification.go).
+type VerificationStore interface {
 	// AppendCompletionContract pins one criterion of a task's Completion Contract.
 	// The first row for a (task, idx) is the one kept: a task's contract is written
 	// once, and a later cycle restating it changes nothing (src/completion_contract.go).
@@ -86,19 +134,18 @@ type Store interface {
 	AppendVerification(v Verification) (int64, error)
 	// ListVerifications reads a task's verdicts in creation order.
 	ListVerifications(taskID string) ([]Verification, error)
-	// GetTask reads one task row by id.
-	GetTask(taskID string) (*Task, error)
-	// GetAgent reads one agent row by id (including soft-deleted).
-	GetAgent(agentID int64) (*Agent, error)
-	// ActiveReasonTurn is the in-flight LLM run for a task's agent, if any
-	// (reason_turns.status = running). Used by the HTTP status API to surface
-	// the live provider run id as agent_run_id.
-	ActiveReasonTurn(taskID string, agentID int64) (*ReasonTurn, error)
-	// ListLLMMessagesAfter reads an agent's conversation stream across turns,
-	// ordered by llm_messages.id ascending, for rows with id > afterID. The id
-	// is the monotonic sync cursor the HTTP poll API exposes as message_seq
-	// (per-turn seq resets every run and cannot drive cross-turn polling).
-	ListLLMMessagesAfter(taskID string, agentID, afterID int64, limit int) ([]LLMMessage, error)
+}
+
+// Store is every port at once: the contract a database engine implements and the
+// handle the runtime's own writers (persistTask, saveExecutionPlan, …) are wired
+// to. A caller that needs less should take the port instead of Store.
+type Store interface {
+	TaskStore
+	AgentStore
+	ConversationStore
+	ExecutionStore
+	VerificationStore
+	// Close releases the engine's connection.
 	Close() error
 }
 
@@ -207,6 +254,9 @@ type LLMMessage struct {
 
 var _store Store
 
+// activeStore is the process-wide store the runtime's writers use. It is nil
+// when no database is wired in (tests, embedding), and every best-effort writer
+// below tolerates that.
 func activeStore() Store {
 	if _store != nil {
 		return _store
@@ -217,6 +267,26 @@ func activeStore() Store {
 	return nil
 }
 
+// The port accessors narrow the active store to the slice a component needs, so
+// no part of the upper layer has to know the whole persistence surface: whoever
+// reads tasks takes activeTaskStore(), whoever writes a run's conversation takes
+// activeConversationStore(). Each is nil when no store is wired in.
+
+func activeTaskStore() TaskStore                 { return activeStore() }
+func activeAgentStore() AgentStore               { return activeStore() }
+func activeConversationStore() ConversationStore { return activeStore() }
+func activeExecutionStore() ExecutionStore       { return activeStore() }
+func activeVerificationStore() VerificationStore { return activeStore() }
+
+// The same narrowing for a component that holds an Autonomy rather than the
+// process singleton (the HTTP read API). Each method returns the port, nil when
+// no store is bound.
+
+func (r *Autonomy) taskStore() TaskStore                 { return r.Store }
+func (r *Autonomy) agentStore() AgentStore               { return r.Store }
+func (r *Autonomy) conversationStore() ConversationStore { return r.Store }
+func (r *Autonomy) executionStore() ExecutionStore       { return r.Store }
+
 // saveExecutionPlan writes one plan and its steps before any of them runs, and
 // returns the steps as stored — with their row ids, because plan_step_id is the row
 // an execution step belongs to and only the database knows that id. The error is
@@ -224,7 +294,7 @@ func activeStore() Store {
 // without one (see Runtime.Execute). Without a store there is nothing to write and
 // nothing to block on.
 func saveExecutionPlan(plan ExecutionPlan, steps []ExecutionStepPlan) (int64, []ExecutionStepPlan, error) {
-	s := activeStore()
+	s := activeExecutionStore()
 	if s == nil {
 		return 0, steps, nil
 	}
@@ -249,7 +319,7 @@ func saveExecutionPlan(plan ExecutionPlan, steps []ExecutionStepPlan) (int64, []
 // provider interaction of it. Both are best effort: the step already happened, and
 // losing the record must not fail the action it describes.
 func saveExecutionStep(step ExecutionStep) int64 {
-	s := activeStore()
+	s := activeExecutionStore()
 	if s == nil {
 		return 0
 	}
@@ -262,7 +332,7 @@ func saveExecutionStep(step ExecutionStep) int64 {
 }
 
 func saveExecutionStepInteraction(in ExecutionStepInteraction) {
-	s := activeStore()
+	s := activeExecutionStore()
 	if s == nil {
 		return
 	}
@@ -274,7 +344,7 @@ func saveExecutionStepInteraction(in ExecutionStepInteraction) {
 // saveVerification records one verdict. Like the execution records it is best effort:
 // the verdict is what the run acts on, and losing the row must not change it.
 func saveVerification(v Verification) {
-	s := activeStore()
+	s := activeVerificationStore()
 	if s == nil {
 		return
 	}
@@ -286,7 +356,7 @@ func saveVerification(v Verification) {
 // taskInputMessageID is the task's own first user input as already recorded on its
 // plans, so every plan of the task points at the same message.
 func taskInputMessageID(taskID string) (int64, bool) {
-	s := activeStore()
+	s := activeExecutionStore()
 	if s == nil {
 		return 0, false
 	}
@@ -302,7 +372,7 @@ func persistTask(task *Task) {
 	if task == nil {
 		return
 	}
-	if s := activeStore(); s != nil {
+	if s := activeTaskStore(); s != nil {
 		if err := s.UpsertTask(task); err != nil {
 			fmt.Fprintf(os.Stderr, "[autonomy] persist task %s: %v\n", task.ID, err)
 		}
@@ -313,7 +383,7 @@ func persistAgent(agent *Agent) {
 	if agent == nil {
 		return
 	}
-	if s := activeStore(); s != nil {
+	if s := activeAgentStore(); s != nil {
 		if err := s.UpsertAgent(agent); err != nil {
 			fmt.Fprintf(os.Stderr, "[autonomy] persist agent %s: %v\n", agent.Name, err)
 		}
@@ -321,7 +391,7 @@ func persistAgent(agent *Agent) {
 }
 
 func softDeleteAgent(id int64) {
-	if s := activeStore(); s != nil {
+	if s := activeAgentStore(); s != nil {
 		if err := s.SoftDeleteAgent(id); err != nil {
 			fmt.Fprintf(os.Stderr, "[autonomy] soft-delete agent %d: %v\n", id, err)
 		}
@@ -329,7 +399,7 @@ func softDeleteAgent(id int64) {
 }
 
 func persistReasonTurn(turn ReasonTurn) {
-	if s := activeStore(); s != nil {
+	if s := activeConversationStore(); s != nil {
 		if turn.CreatedAt.IsZero() {
 			turn.CreatedAt = time.Now()
 		}
@@ -357,56 +427,4 @@ func recordReasonTurn(agent *Agent, taskID string, cycle int, mode ReasonMode, i
 		turn.Model = agent.Model
 	}
 	persistReasonTurn(turn)
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		t = time.Now()
-	}
-	return t.UTC().Format(time.RFC3339Nano)
-}
-
-// nullTimeArg renders a possibly-zero time as a nullable column value.
-func nullTimeArg(t time.Time) any {
-	if t.IsZero() {
-		return nil
-	}
-	return formatTime(t)
-}
-
-// nullFloatArg renders a possibly-nil float as a nullable column value.
-func nullFloatArg(f *float64) any {
-	if f == nil {
-		return nil
-	}
-	return *f
-}
-
-// usageCostArg renders usage cost as a nullable column value, keeping unknown
-// cost distinct from a genuine zero.
-func usageCostArg(u LLMUsage) any {
-	if !u.CostKnown {
-		return nil
-	}
-	return u.CostCents
-}
-
-// parseTime parses a stored RFC3339Nano timestamp, returning the zero time for
-// empty or malformed input.
-func parseTime(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
-}
-
-func nullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
 }
