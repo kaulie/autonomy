@@ -87,7 +87,7 @@ StoreEngine（Name / DefaultDSN / Open）
 
 ```bash
 # 默认：sqlite @ $PROJECT_ROOT/data/autonomy.db
-go run ./cmd/autonomy
+go run ./cmd/autonomyd
 
 # 指定 engine / DSN
 export AUTONOMY_STORE_ENGINE=sqlite

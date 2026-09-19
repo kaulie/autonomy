@@ -9,7 +9,21 @@ Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `script
 RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 ```
 
-不走脚本时仍可用 `AUTONOMY_HTTP_ADDR=:4230 go run ./cmd/autonomy`。未设置该变量则走 CLI 演示任务。
+不走脚本时用 `go run ./cmd/autonomyd`（`AUTONOMY_HTTP_ADDR` 未设置则监听 `:4230`）——这就是 runtime 本身：
+进程里装着库、store 与 agent。`cmd/autonomy` 是它的**客户端**，不链接 runtime 的任何代码，
+只用下面这些 HTTP 调用：
+
+```bash
+go run ./cmd/autonomy -description "开放服务契约的前端入口"     # POST /api/tasks，再轮询进展（-wait 默认开）
+go run ./cmd/autonomy -task task-28 -description "接着上次那条"  # 同一个 task 再给一条指令
+go run ./cmd/autonomy -task task-28 -progress                    # GET /api/tasks/{id}，看一眼
+go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tasks/{id}/stop
+```
+
+默认对着 `http://127.0.0.1:4230`（`-server` / `AUTONOMY_API_URL` 可改）。不给任何参数时发的是演示指令
+（task 默认 `task-28`，`context_ref` 默认 `project=project-2` —— runtime 启动时播种的那个世界，见 `cmd/autonomyd/world.go`）。
+命令的退出码就是这个任务的状态（`-progress` 是它读到的那个）：`error` / `unverified` 非零，其余为 0；
+`-json` 打印 API 原样的响应。
 
 ## 端点
 
@@ -41,10 +55,11 @@ RUNTIME_DIR="$(pwd)/outputs" bash outputs/scripts/start.sh
 
 `message_id` 是这条指令在 inbox 里的消息 id，`queued` 是它前面还有几条（`0` = 下一条就是它）。
 
-同一个入口也有进程内的同步版本：`Autonomy.Run(AcceptTaskRequest)`。它走的是同一条 accept 路径（同一个 task、
+同一个入口也有进程内的同步版本：`Autonomy.Run(AcceptTaskRequest)`（测试用它）。它走的是同一条 accept 路径（同一个 task、
 同一条指令消息、同一只 agent），区别只在于它会等这次运行结束才返回，返回这次运行的错误和同一份接受信息
-（`*AcceptTaskResponse`）——`cmd/autonomy` 和测试用它，不用轮询。请求里的 `description` 为空时，指令内容取这条
-task 行已有的描述（`tasks.description`）。
+（`*AcceptTaskResponse`）。命令行客户端（`cmd/autonomy`）不链接 runtime，它是这条路线的 HTTP 版本：
+`POST /api/tasks` 拿到接受信息，再用 `GET /api/tasks/{id}` 轮询到状态不再是 `running` / `pending`（`-wait`，默认开），
+运行的结局就是命令的退出码。请求里的 `description` 为空时，指令内容取这条 task 行已有的描述（`tasks.description`）。
 
 ### `POST /api/tasks/{task_id}/stop`
 
