@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Persistence is described by five cohesive ports instead of one flat surface,
+// Persistence is described by seven cohesive ports instead of one flat surface,
 // so each component takes the slice it needs and a database engine has a scoped
 // method set to implement (and can even be built port by port):
 //
@@ -16,6 +16,7 @@ import (
 //	ConversationStore  a run's header, its messages, and its raw event stream
 //	ExecutionStore     what the runtime planned, and what it actually did
 //	VerificationStore  the Completion Contract and the verdicts against it
+//	TurnQueryStore     the read-only walk over reason turns the evaluation side reads through
 //
 // Store is their union: the whole contract one database engine implements behind
 // the StoreEngine SPI (store_engine.go). Upper-layer components depend on the
@@ -174,6 +175,161 @@ type VerificationStore interface {
 	ListVerifications(taskID string) ([]Verification, error)
 }
 
+// TurnQueryStore is the read-only log surface the evaluation side reads through:
+// the benchmark tool, over HTTP (docs/http-api.md「数据 API」), instead of opening
+// this database's file.
+//
+// It is a port of its own rather than more ConversationStore methods because it
+// answers a different question. ConversationStore follows *one* run: its header,
+// its messages, its stream. This one walks the whole log — filter, order, page,
+// facet and count reason turns, and list the tasks those turns belong to — which is
+// what a list page, a comparison page and a filter bar ask. Every method is a read:
+// none of them writes, and none of them migrates, so no query here can have a side
+// effect on the database it is only supposed to describe.
+//
+// The rows it returns are the *contract's* shape, not the schema's (TurnRecord
+// below): that normalization is the point of moving the reader here — column names,
+// the agent-name join and the "0 vs unknown cost" distinction are this side's
+// business now, and a schema change no longer has to be chased by every consumer.
+type TurnQueryStore interface {
+	// QueryTurns reads one page of reason turns: the rows matching q, and the
+	// number of rows that match the same filter (the pager's count, not the
+	// table's). A filter matching nothing is an empty slice and a 0 count, not an
+	// error.
+	QueryTurns(q TurnQuery) ([]TurnRecord, int, error)
+	// GetTurn reads one turn by id, untruncated. A missing row returns (nil, nil).
+	GetTurn(id int64) (*TurnRecord, error)
+	// TurnFacets reads every filter's distinct values with their counts, in one
+	// call: the filter bar renders from one round trip.
+	TurnFacets() (TurnFacets, error)
+	// ListTaskOptions reads the task selector's candidates: the task rows unioned
+	// with the task ids that only ever appear in the log (a task whose row is gone,
+	// or one that was never written, is still a task someone ran).
+	ListTaskOptions() ([]TaskOption, error)
+	// ListTurnsByTask reads one task's turns in execution order (created_at, then
+	// id — not id, which is only the order they were written in), and how many the
+	// task has in total, so a caller can tell a capped page from a complete one.
+	ListTurnsByTask(taskID string, limit int) ([]TurnRecord, int, error)
+	// CountTurns is how many reason turns the store holds at all (the data API's
+	// self-description, where the old reader asked the file).
+	CountTurns() (int, error)
+}
+
+// TurnQuery is one page request of the turn list: every field is optional, and the
+// zero value is "the newest first page of everything".
+type TurnQuery struct {
+	// TaskID / Mode / Model / Status match exactly.
+	TaskID string
+	Mode   ReasonMode
+	Model  string
+	Status string
+	// Agent matches agents.name — the name, not the id, because a name is what the
+	// filter bar offers (TurnFacets.Agents) and what a person recognizes.
+	Agent string
+	// Search is a literal substring of a turn's input or raw output. It is a
+	// substring, not a pattern: % and _ are characters the caller searched for.
+	Search string
+	// Order is the column to sort by — id, created_at, duration_ms or total_tokens
+	// (see the engine's whitelist). Anything else reads as id, so no caller text
+	// ever reaches the SQL text. Dir is the direction: "asc" is oldest (or smallest)
+	// first, and anything else — including nothing at all — is "desc", the reading
+	// order, newest first. Ties break on id descending, which is what keeps a page
+	// boundary from skipping or repeating a row.
+	Order string
+	Dir   string
+	// Limit / Offset are the page: a limit <= 0 means DefaultTurnPageLimit and one
+	// above MaxTurnPageLimit is clamped to it; a negative offset means 0. The store
+	// clamps them itself, so a caller that already clamped (the HTTP layer, which
+	// echoes the effective limit back) and one that did not agree.
+	Limit  int
+	Offset int
+}
+
+// TurnRecord is one reason turn as the data API reads it: a reason_turns row plus
+// the name of the agent that produced it, with the contract's field names
+// (llm_provider → provider, raw_output → output) and its timestamps verbatim.
+//
+// The timestamps are strings, exactly as the database holds them (RFC3339 text, in
+// UTC): the log is evidence, and re-formatting evidence is how a reader ends up
+// disagreeing with the file it read. CostCents is a pointer because the schema
+// allows NULL — "the provider did not say" and "it cost 0" are different facts.
+type TurnRecord struct {
+	ID               int64       `json:"id"`
+	TaskID           string      `json:"task_id"`
+	Cycle            int         `json:"cycle"`
+	Mode             ReasonMode  `json:"mode"`
+	AgentID          int64       `json:"agent_id"`
+	Agent            string      `json:"agent"`
+	Provider         LLMProvider `json:"provider"`
+	Model            string      `json:"model"`
+	LLMAgentID       string      `json:"llm_agent_id"`
+	Status           string      `json:"status"`
+	ErrorCode        string      `json:"error_code"`
+	ErrorMessage     string      `json:"error_message"`
+	Input            string      `json:"input"`
+	Output           string      `json:"output"`
+	NormalizedOutput string      `json:"normalized_output"`
+	RunID            string      `json:"run_id"`
+	DurationMS       int64       `json:"duration_ms"`
+	EventCount       int         `json:"event_count"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	ReasoningTokens  int64       `json:"reasoning_tokens"`
+	TotalTokens      int64       `json:"total_tokens"`
+	CostCents        *float64    `json:"cost_cents"`
+	StartedAt        string      `json:"started_at"`
+	EndedAt          string      `json:"ended_at"`
+	CreatedAt        string      `json:"created_at"`
+}
+
+// TurnFacets is the filter bar's data: each facet column's distinct values, with
+// how many turns carry them, ordered most-used first.
+type TurnFacets struct {
+	Tasks     []TurnFacetValue `json:"tasks"`
+	Agents    []TurnFacetValue `json:"agents"`
+	Modes     []TurnFacetValue `json:"modes"`
+	Models    []TurnFacetValue `json:"models"`
+	Providers []TurnFacetValue `json:"providers"`
+	Statuses  []TurnFacetValue `json:"statuses"`
+}
+
+// TurnFacetValue is one value a filter accepts, and how many turns have it (empty
+// values are left out: "" is not a filter anyone can choose).
+type TurnFacetValue struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// TaskOption is one candidate of the task selector: what the task row says it is,
+// plus what the log says happened to it.
+type TaskOption struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Turns       int    `json:"turns"`
+	// LastAt is the newest turn's created_at, verbatim, and "" when the task has
+	// no turns at all (which is a real state: accepted, never run).
+	LastAt string `json:"last_at"`
+}
+
+const (
+	// DefaultTurnPageLimit / MaxTurnPageLimit bound one page of the turn list: the
+	// list page's default, and the most a caller may ask for in one request (the
+	// rows carry whole prompts, so the page size is also a payload size).
+	DefaultTurnPageLimit = 50
+	MaxTurnPageLimit     = 500
+	// DefaultTaskTurnLimit / MaxTaskTurnLimit bound one task's execution series.
+	// The series is read whole — a comparison page orders the whole task — so the
+	// cap is high, and a series longer than it reports itself as capped.
+	DefaultTaskTurnLimit = 1000
+	MaxTaskTurnLimit     = 1000
+	// DefaultTurnPreviewChars is how much of input / output a preview page keeps
+	// when the caller does not say (truncate).
+	DefaultTurnPreviewChars = 400
+)
+
 // Store is every port at once: the contract a database engine implements and the
 // handle the runtime's own writers (persistTask, saveExecutionPlan, …) are wired
 // to. A caller that needs less should take the port instead of Store.
@@ -184,6 +340,7 @@ type Store interface {
 	ConversationStore
 	ExecutionStore
 	VerificationStore
+	TurnQueryStore
 	// Close releases the engine's connection.
 	Close() error
 }

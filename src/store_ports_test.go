@@ -22,6 +22,7 @@ var (
 	_ ConversationStore = (*SQLiteStore)(nil)
 	_ ExecutionStore    = (*SQLiteStore)(nil)
 	_ VerificationStore = (*SQLiteStore)(nil)
+	_ TurnQueryStore    = (*SQLiteStore)(nil)
 	_ Store             = (*SQLiteStore)(nil)
 	_ Store             = fakeStore{}
 )

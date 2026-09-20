@@ -75,7 +75,19 @@ func (fakeStore) ActiveReasonTurn(string, int64) (*ReasonTurn, error) {
 func (fakeStore) ListLLMMessagesAfter(string, int64, int64, int) ([]LLMMessage, error) {
 	return nil, nil
 }
-func (fakeStore) Close() error { return nil }
+
+// The data API's read port is a no-op here too: this fake exists to prove the engine
+// SPI needs no SQLite, and a store that keeps nothing answers every one of those
+// reads with nothing.
+func (fakeStore) QueryTurns(TurnQuery) ([]TurnRecord, int, error) { return nil, 0, nil }
+func (fakeStore) GetTurn(int64) (*TurnRecord, error)              { return nil, nil }
+func (fakeStore) TurnFacets() (TurnFacets, error)                 { return TurnFacets{}, nil }
+func (fakeStore) ListTaskOptions() ([]TaskOption, error)          { return nil, nil }
+func (fakeStore) ListTurnsByTask(string, int) ([]TurnRecord, int, error) {
+	return nil, 0, nil
+}
+func (fakeStore) CountTurns() (int, error) { return 0, nil }
+func (fakeStore) Close() error             { return nil }
 
 // fakeEngine records the DSN it was opened with so tests can assert dispatch to
 // the registered engine (and its DefaultDSN fallback).

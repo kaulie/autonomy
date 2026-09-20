@@ -6,8 +6,8 @@
 MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并选择一个新 engine，上层代码不变。
 
 - **统一接口**：`Store`（`src/store.go`）——持久化契约的并集，也是 engine 要实现的那一份。
-- **六个端口**：`TaskStore` / `AgentStore` / `InboxStore` / `ConversationStore` / `ExecutionStore` /
-  `VerificationStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
+- **七个端口**：`TaskStore` / `AgentStore` / `InboxStore` / `ConversationStore` / `ExecutionStore` /
+  `VerificationStore` / `TurnQueryStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
 - **引擎 SPI**：`StoreEngine`（`src/store_engine.go`）——一个 engine 对应一种数据库/方言。
 - **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_*.go`），默认启用。
 
@@ -17,10 +17,10 @@ MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并�
 调用方（autonomy / llm_trace / verification / http 读接口 …）
         │  只依赖它用到的那一个端口
         ▼
-TaskStore  AgentStore  ConversationStore  ExecutionStore  VerificationStore
+TaskStore  AgentStore  ConversationStore  ExecutionStore  VerificationStore  TurnQueryStore
         │                    └──────────┬──────────┘
         ▼                               ▼
-   Store = 五个端口的并集（src/store.go）
+   Store = 七个端口的并集（src/store.go）
         ▲  由 engine 提供实现
         │
 StoreEngine（Name / DefaultDSN / Open）
@@ -38,8 +38,9 @@ StoreEngine（Name / DefaultDSN / Open）
 | `ExecutionStore` | 计划 / 计划步骤 / 执行步骤 / 交互 | `saveExecutionPlan` 等、verifier 读步骤产出、HTTP 进度 |
 | `VerificationStore` | Completion Contract + verdict | `pinCompletionContract` / `pinnedCompletionContract` / `saveVerification` |
 | `InboxStore` | 每个 agent 的消息队列（`agent_messages`） | `Inbox`（`src/inbox.go`）：入队 / claim / 收尾 / 回收 / 计数 |
+| `TurnQueryStore` | `reason_turns` 的**只读**遍历（过滤 / 排序 / 分页 / facets / task 候选 / 计数） | 数据 API（`src/turn_api.go`，评测侧读日志的 HTTP 接口，见 [http-api.md](http-api.md)）—— 全部 `SELECT`，不写、不迁移 |
 
-端口只是**同一份 store 的切片**（`Store` 内嵌五个），所以 engine 一次实现全部、上层一次注入，
+端口只是**同一份 store 的切片**（`Store` 内嵌七个），所以 engine 一次实现全部、上层一次注入，
 但没人需要认识与自己无关的那部分：加一个消费者不必看到 30 多个方法，加一个 engine 也能按
 端口分块实现、分块验证。取用方式：
 
@@ -162,31 +163,32 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 ## 外部读者与 schema 变更
 
-这个库不只是 autonomy 自己在读：**别的服务按只读方式打开同一份文件**（`agent-benchmark-tool`
-的 `benchmarkd` 就是长期挂着的一个，它的 `AUTONOMY_DB` 指向本库），而且往往一开就是好几天。
+这个库曾经不只是 autonomy 自己在读：`agent-benchmark-tool` 的 `benchmarkd` 以只读方式打开同一份文件
+（`AUTONOMY_DB`），而且一开就是好几天。于是 in-place 改列名/删列有一个必须知道的爆炸半径：**已经打开库、
+把 schema 缓存下来的读者会当场报错**。`reason_turns.step → cycle`（见 `renameColumnIfPresent`，数据与索引
+一起改）那次就是：常驻的 `benchmarkd`（11:04 启动时探测到的是 `step`）在 19:34 重命名之后，每个列表请求
+都变成 `SQL logic error: no such column: r.step` → 页面 500，直到它重启或重新部署。
 
-于是 in-place 改列名/删列有一个必须知道的爆炸半径：**已经打开库、把 schema 缓存下来的读者会当场报错**。
+那次之后评测侧改成走 HTTP 取数（数据 API，见 [http-api.md](http-api.md)），这条半径就此收口：
 
-- `reason_turns.step → cycle`（见 `renameColumnIfPresent`，数据与索引一起改）就是这样：常驻的
-  `benchmarkd`（11:04 启动时探测到的是 `step`）在 19:34 重命名之后，每个列表请求都变成
-  `SQL logic error: no such column: r.step` → 页面 500，**直到它重启/重新部署**。
-- 迁移本身照旧（engine 的事，见上），但改列名的人要按这个半径评估：**读者需要重新启动一次**。
-
-对读者那一侧的规矩，写在这里免得下次再踩：
-
-1. **schema 是运行期事实，不是编译期常量**：先 `PRAGMA table_info` 探测列再拼 SQL，
-   不要假设列一定在（改名后的名字要认，旧名字也别急着摘）。
-2. **对 "no such column" 这类错误重新探测并重试一次**，而不是把启动时的 schema 用到进程结束。
-   否则源库的一次正常迁移就会让一个只读的旁观者永久 500。
+- **schema 是持有方的事**：列名、agent 名字的 join、分页与排序都在 engine 与 `TurnQueryStore` 里，改表不再
+  要求外部读者重新部署 —— 对外契约是 JSON 字段名，不是列名，`GET /api/meta` 还会主动报当前列名。
+- **库在哪也只由持有者负责**：读者只认服务地址（`AUTONOMY_API_URL`），不再有「攥着旧 inode 的旁观者」——
+  2026-09-20 的旧库归档事故就是这种耦合的代价：软链换了目标、旧库被归档，页面照旧显示 236 条旧数据，
+  而且两边都不报错。
+- 老规矩仍然成立的那部分：**改列名/删列的迁移要按「读者会不会当场报错」评估**（进程内的读者仍是重启一次），
+  迁移本身照旧属于 engine（见上）。
 
 ## 代码位置
 
 | 关注点 | 文件 |
 |--------|------|
-| `Store` 与五个端口（契约） | `src/store.go` |
+| `Store` 与七个端口（契约） | `src/store.go` |
 | engine SPI + 注册表 + 选择 | `src/store_engine.go` |
 | sqlite engine（默认 DSN / 注册） | `src/sqlite_engine.go` |
 | sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go`、`src/sqlite_query.go`、`src/sqlite_execution.go`、`src/sqlite_verification.go`、`src/sqlite_inbox.go` |
+| sqlite 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/sqlite_turns.go` |
+| 数据 API 的读取与响应（`TurnQueryStore` 的使用方） | `src/turn_api.go`、`src/http_server.go` |
 | sqlite 列值编码（时间 / NULL / JSON） | `src/sqlite_encoding.go` |
 | 端口边界与上层可插拔性的测试 | `src/store_ports_test.go` |
 | 进程内单例与 bootstrap | `src/autonomy.go`（`activeStore()`，`BootstrapAutonomy`） |

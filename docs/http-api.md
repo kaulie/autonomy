@@ -1,6 +1,8 @@
 # HTTP API
 
-Autonomy 对外的任务 HTTP 接口。契约本身由代码里的注解生成（见文末「服务契约」）。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
+Autonomy 对外的 HTTP 接口，两半：**任务接口**（受理指令、查进展、查 agent 状态、轮询对话流）与
+**数据接口**（把日志当数据读：列表 / 详情 / facets / task 选择器 / 自述，给评测侧用，见
+「[数据 API](#数据-api评测侧读日志不再读库)」）。契约本身由代码里的注解生成（见文末「服务契约」）。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
 
 发版包（`build.sh`）自带两份东西，部署上直接能用：runtime 本体 `bin/autonomyd`，以及 cursor bridge `bin/cursor-sdk-bridge`（`third_party/` 是 gitignore 的下载产物，不带它的话部署上的 llm 任务会失败在 `cursor bridge ping`；`scripts/start.sh` 会把它指给 `CURSOR_SDK_BRIDGE_BIN`）。
 
@@ -182,6 +184,119 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 }
 ```
 
+
+## 数据 API（评测侧读日志，不再读库）
+
+`agent-benchmark-tool` 原先以 `mode=ro` 直接挂 autonomy 的 SQLite 文件取数，于是库路径与 schema 成了两边的
+耦合点。2026-09-20 就发生过一次：benchmarkd 攥着已被归档的旧库 inode，页面照旧显示 236 条旧数据，而
+autonomy 真正在写的是 12 条新数据，两边都不报错。以下端点把这层收口到 HTTP —— **库在哪、列叫什么、
+agent 名字怎么 join 由 autonomy 负责**，评测侧只认服务地址（`AUTONOMY_API_URL`，默认
+`http://127.0.0.1:4300`）。
+
+需求原文（字段级契约）在 benchmark 仓库的 `docs/autonomy-api.md`；本节是 autonomy 侧的落地说明。
+
+统一约定：
+
+| 约定 | 说明 |
+|---|---|
+| 只读 | 全部是 `GET`，不写任何数据、不触发迁移；读的是 `TurnQueryStore`（[store.md](store.md)）这一个只读端口 |
+| JSON / UTF-8 | `Content-Type: application/json; charset=utf-8`；错误是 `{"error": "..."}`（与既有 `errResponse` 一致） |
+| 时间 | 库里是什么就透出什么（UTC RFC3339 文本），不换算、不截断精度 |
+| 空结果 | `200` + 空数组（不是 404，也不是 `null`） |
+| 未知参数 | 忽略，不报错；读不出来的 `limit` / `offset` 当没给 |
+| 读不了日志 | `500 {"error":"store not ready"}` —— 「没有数据」和「读不到数据」不能在页面上长得一样 |
+| 版本自述 | `GET /api/meta`：服务名、构建版本（部署的 `APP_VERSION`）、列名、`turns` 条数 |
+
+### `GET /api/reason-turns` — 日志列表（过滤 / 排序 / 分页 / 预览）
+
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| `task_id` `mode` `model` `status` | 精确匹配 | 取值见 facets |
+| `agent` | 精确匹配 `agents.name` | 是**名字**，不是 `agent_id` |
+| `q` | 子串匹配 `input` / `raw_output` | **字面匹配**：`%` `_` `\` 都当普通字符（转义后再 LIKE） |
+| `order` | `id`（默认）/ `created_at` / `duration_ms` / `total_tokens` | 白名单，其他值回落 `id`（**不是**拼接 SQL） |
+| `dir` | `desc`（默认）/ `asc` | 其他值当 `desc` |
+| `limit` / `offset` | 整数 | 默认 50 / 0，`limit` 上限 500（夹到 500，响应里回报实际值）；`limit=0` 或读不出来就是默认 |
+| `preview` | `1` / `true` | 只回 `input` / `output` 的前 `truncate` 个字符（列表页不必拉全文） |
+| `truncate` | 整数，默认 400 | 按 **rune** 截断；截断就是前缀，不加省略号 |
+
+```json
+{ "turns": [ { "id": 12, "task_id": "task-29", "cycle": 3, "mode": "plan", "agent_id": 10001,
+               "agent": "agent-10001", "provider": "cline", "model": "deepseek-v4-flash",
+               "status": "finished", "input": "…", "output": "…", "normalized_output": "…",
+               "duration_ms": 445086, "total_tokens": 0, "cost_cents": 2.1322308,
+               "created_at": "2026-09-20T07:49:46.033072Z" } ],
+  "total": 12, "limit": 50, "offset": 0 }
+```
+
+`total` 是**过滤后**的总数（分页器用）。排序稳定性：`ORDER BY <order> <dir>, id DESC` —— 同 key 时用 id
+兜底，翻页不跳行、不重复。`turn` 的字段与 §4.0 契约逐项对应（库里叫 `llm_provider` / `raw_output`，
+对外叫 `provider` / `output`；`cost_cents` 为 `null` 表示 provider 没报成本，与 0 不同）。
+
+### `GET /api/reason-turns/{id}` — 单条全文
+
+`200` 一个 `Turn` 对象，字段同上但**不截断**。`id` 非数字 → `400`；没有这条 → `404
+{"error":"turn not found"}`。
+
+### `GET /api/reason-turns/facets` — 筛选下拉的取值
+
+一次给全六类（去重 + 计数，跳过空值，按计数降序、同计数按值升序）：
+
+```json
+{ "tasks": [{"value": "task-29", "count": 12}], "agents": [{"value": "agent-10001", "count": 8}],
+  "modes": [{"value": "plan", "count": 8}], "models": [{"value": "deepseek-v4-flash", "count": 9}],
+  "providers": [{"value": "cline", "count": 9}], "statuses": [{"value": "finished", "count": 9}] }
+```
+
+`agents` 是**名字**（`LEFT JOIN agents`）；join 不上的 turn 不计入（旧库里 `agent_id` 是 TEXT 的那种行
+也照常读，只是名字为空、不进 facets）。
+
+### `GET /api/tasks` — 对比页的 task 选择器
+
+与 `POST /api/tasks` **同路径不同方法**：读的是候选与它们的运行量。
+
+```json
+{ "tasks": [ { "id": "task-29", "description": "…", "status": "blocked", "turns": 12,
+               "last_at": "2026-09-20T07:49:46.033072Z" },
+             { "id": "task-28", "description": "…", "status": "error", "turns": 0, "last_at": "" } ] }
+```
+
+- 候选 = `tasks` 表的行 ∪ **只出现在日志里的 task_id**（行被删了、或没落库的历史数据也要能对比）；
+  `description` / `status` 取自 `tasks` 表，没有就是 `""`。
+- `last_at` 是该 task 最近一条 turn 的 `created_at`，没有 turn 就是 `""`。
+- 排序：`last_at` 降序（最近在前），同则 `id` 升序。不分页（task 数量级不大，一次渲染下拉）。
+
+### `GET /api/tasks/{taskID}/turns` — 一个 task 的执行序列
+
+对比页要按**执行顺序**把 turn 排起来，所以这里按 `created_at ASC, id ASC`（不是 id、也不是时间倒序）。
+
+- 参数：`limit`（默认 1000，上限 1000）。
+- 响应：`{"task_id": "task-29", "turns": [ /* 全文，不截断 */ ], "total": 12, "capped": false}`
+- `capped=true` 表示被 `limit` 截断（页面提示「只显示前 N 条」）；task 不存在或没有 turn → `200` +
+  `turns: []`。
+
+### `GET /api/tasks/{taskID}` — 任务定义
+
+已有端点（`TaskProgress`，见上文），对比页要的就是它里面的 `task_id / description / domain / status /
+error / goal_type / context_ref / agent_id / created_at / updated_at`。**没有** `context` / `target` /
+`goal` / `expected_state` 这几个字段（`tasks` 表里没有它们，也不为迁移临时加列）：取不到时评测侧降级展示
+「原始内容见 planner 入口 prompt」，其余照常对比。
+
+### `GET /api/meta` — 能力与版本自述
+
+```json
+{ "service": "autonomy", "version": "cabb1e98",
+  "reason_turns": { "cycle_column": "cycle", "raw_output_column": "raw_output" },
+  "has_tasks_table": true, "turns": 12 }
+```
+
+用途：评测侧不用再 `PRAGMA table_info` 猜列名、猜有没有 `tasks` 表。`version` 是部署的 `APP_VERSION`
+（没发过版的 `go run` 是 `dev`）。
+
+### `GET /health` — 已有，多一个 `turns`
+
+健康检查仍是部署平台的探活路径，顺手带上 `turns`（日志条数），这样「探到的库是不是正在写的那个」在
+HTTP 上就能看出来。计数是尽力而为：读不到就不带这个字段，**探活不因 store 读不了而失败**。
 
 ## 服务契约（注解自动登记）
 
