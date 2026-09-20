@@ -40,6 +40,15 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /api/tasks/{taskID}", s.handleTaskProgress},
 		{"GET /api/tasks/{taskID}/agents/{agentID}", s.handleAgentStatus},
 		{"GET /api/tasks/{taskID}/agents/{agentID}/events", s.handleAgentStream},
+		// The data API: the log of reason turns read as data — the evaluation side
+		// (the benchmark tool) reads it here instead of opening the database file
+		// (docs/http-api.md「数据 API」). All of it is read-only.
+		{"GET /api/tasks", s.handleTaskList},
+		{"GET /api/tasks/{taskID}/turns", s.handleTaskTurns},
+		{"GET /api/reason-turns", s.handleReasonTurnList},
+		{"GET /api/reason-turns/facets", s.handleReasonTurnFacets},
+		{"GET /api/reason-turns/{turnID}", s.handleReasonTurn},
+		{"GET /api/meta", s.handleMeta},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -85,6 +94,12 @@ type healthResponse struct {
 	Status     string `json:"status"`
 	LLMBackend string `json:"llm_backend,omitempty"`
 	LLMModel   string `json:"llm_model,omitempty"`
+	// Turns is how many reason turns the store holds: a cheap way to see over HTTP
+	// that the log a probe is talking to is the live one (the failure this API
+	// exists to end was a reader holding a stale database file, docs/http-api.md).
+	// It is best effort — liveness must not depend on the store being readable — so
+	// a runtime that cannot count simply answers without it.
+	Turns *int `json:"turns,omitempty"`
 }
 
 // stopTaskResponse is what a stop answers: the task, and the status it was left in.
@@ -110,11 +125,15 @@ type errResponse struct {
 // @Router   /health [get]
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	backend := defaultAgentBackend()
-	writeJSON(w, http.StatusOK, healthResponse{
+	resp := healthResponse{
 		Status:     "ok",
 		LLMBackend: string(backend),
 		LLMModel:   defaultAgentModel(backend),
-	})
+	}
+	if turns, err := s.Autonomy.TurnCount(); err == nil {
+		resp.Turns = &turns
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleHealthAlias is the same probe under the name callers used before the
@@ -304,6 +323,201 @@ func (s *HTTPServer) handleAgentStream(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, stream)
+}
+
+// handleReasonTurnList is the log read: the reason turns, filtered, ordered and
+// paged, for a list page or a whole-log search (docs/http-api.md「数据 API」). It is
+// the endpoint the evaluation side reads the log through instead of mounting
+// autonomy's database file, so the filters answer exactly what the facets offer and
+// `total` is the count of the *filtered* rows — not of the table, and not of the
+// page. `preview=1` cuts input / output down: a list page does not need whole
+// prompts, and 50 of them are megabytes.
+//
+// @Summary  列 reason turn（过滤 / 排序 / 分页 / 预览）
+// @Tags     data
+// @Produce  json
+// @Param    task_id   query     string  false  "精确匹配 task_id"
+// @Param    mode      query     string  false  "精确匹配 mode（plan / agent）"
+// @Param    model     query     string  false  "精确匹配 model"
+// @Param    status    query     string  false  "精确匹配 status（finished / error / …）"
+// @Param    agent     query     string  false  "精确匹配 agent 名字（agents.name，不是 id）"
+// @Param    q         query     string  false  "在 input / raw_output 里按字面匹配（% 与 _ 是普通字符）"
+// @Param    order     query     string  false  "id（默认）/ created_at / duration_ms / total_tokens；其他值回落 id"
+// @Param    dir       query     string  false  "desc（默认）/ asc"
+// @Param    limit     query     integer false  "每页条数（默认 50，上限 500）"
+// @Param    offset    query     integer false  "跳过多少条（默认 0）"
+// @Param    preview   query     boolean false  "只回 input / output 的前 truncate 个字符"
+// @Param    truncate  query     integer false  "preview 时每种文本的字符数（默认 400）"
+// @Success  200       {object}  autonomy.ReasonTurnListResponse  "turns + total（过滤后的总数）+ 实际生效的 limit / offset"
+// @Failure  500       {object}  errResponse                      "store 读不了这份日志"
+// @Router   /api/reason-turns [get]
+func (s *HTTPServer) handleReasonTurnList(w http.ResponseWriter, req *http.Request) {
+	query := req.URL.Query()
+	// The search term is not trimmed: a space someone typed is a character someone
+	// searched for. Everything else is an identifier, and identifiers travel
+	// without padding.
+	q := TurnQuery{
+		TaskID: strings.TrimSpace(query.Get("task_id")),
+		Mode:   ReasonMode(strings.TrimSpace(query.Get("mode"))),
+		Model:  strings.TrimSpace(query.Get("model")),
+		Status: strings.TrimSpace(query.Get("status")),
+		Agent:  strings.TrimSpace(query.Get("agent")),
+		Search: query.Get("q"),
+		Order:  query.Get("order"),
+		// The direction is the store's call: anything that is not "asc" reads as
+		// the default, newest first.
+		Dir:    query.Get("dir"),
+		Limit:  turnListLimit(query.Get("limit")),
+		Offset: queryInt(query.Get("offset"), 0, 0, 0),
+	}
+	turns, total, err := s.Autonomy.ListReasonTurns(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if preview, chars := previewRequested(query); preview {
+		turns = previewTurns(turns, chars)
+	}
+	if turns == nil {
+		turns = []TurnRecord{}
+	}
+	writeJSON(w, http.StatusOK, ReasonTurnListResponse{Turns: turns, Total: total, Limit: q.Limit, Offset: q.Offset})
+}
+
+// handleReasonTurn is one turn in full: the whole prompt and the whole output, which
+// is what a detail page shows (and what the list endpoint's preview does not).
+//
+// @Summary  单条 reason turn（全文）
+// @Tags     data
+// @Produce  json
+// @Param    turnID  path      integer true  "reason_turns.id"
+// @Success  200     {object}  autonomy.TurnRecord  "prompt / 原文输出 / 归一化输出 / 用量 / 时间"
+// @Failure  400     {object}  errResponse          "turnID 不是数字"
+// @Failure  404     {object}  errResponse          "没有这条 turn"
+// @Failure  500     {object}  errResponse          "store 读不了这条 turn"
+// @Router   /api/reason-turns/{turnID} [get]
+func (s *HTTPServer) handleReasonTurn(w http.ResponseWriter, req *http.Request) {
+	turnID, err := strconv.ParseInt(req.PathValue("turnID"), 10, 64)
+	if err != nil || turnID <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid turn id")
+		return
+	}
+	turn, err := s.Autonomy.ReasonTurn(turnID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if turn == nil {
+		writeErr(w, http.StatusNotFound, "turn not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, turn)
+}
+
+// handleReasonTurnFacets is the filter bar: every value each filter accepts, with
+// how many turns carry it. All six facets in one answer, because the bar renders
+// them together and six round trips to draw one form is five too many.
+//
+// @Summary  筛选下拉的取值（去重 + 计数）
+// @Tags     data
+// @Produce  json
+// @Success  200  {object}  autonomy.TurnFacets  "tasks / agents / modes / models / providers / statuses，各按条数降序"
+// @Failure  500  {object}  errResponse          "store 读不了这份日志"
+// @Router   /api/reason-turns/facets [get]
+func (s *HTTPServer) handleReasonTurnFacets(w http.ResponseWriter, _ *http.Request) {
+	facets, err := s.Autonomy.ReasonTurnFacets()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, facets)
+}
+
+// handleTaskList is the read side of the path POST /api/tasks writes to: the tasks
+// that have a row, and the ones that only ever appear in the log, each with how many
+// turns it has and when it last ran. It is the comparison page's selector — the
+// candidates come from both places because a task whose row is gone still has turns
+// worth comparing.
+//
+// @Summary  任务列表（对比页的选择器）
+// @Tags     data
+// @Produce  json
+// @Success  200  {object}  autonomy.TaskOptionListResponse  "每个 task 一行：id / description / status / turns / last_at"
+// @Failure  500  {object}  errResponse                      "store 读不了任务与日志"
+// @Router   /api/tasks [get]
+func (s *HTTPServer) handleTaskList(w http.ResponseWriter, _ *http.Request) {
+	tasks, err := s.Autonomy.TaskOptions()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tasks == nil {
+		tasks = []TaskOption{}
+	}
+	writeJSON(w, http.StatusOK, TaskOptionListResponse{Tasks: tasks})
+}
+
+// handleTaskTurns is one task's execution series: its turns in the order they ran,
+// which is the order a comparison page lines two runs up in — not id, and not
+// newest-first, because "what happened, in order" is the question here. The series
+// is read in full (no preview): comparing two runs needs the text, not its opening.
+//
+// @Summary  一个 task 的执行序列（按执行顺序）
+// @Tags     data
+// @Produce  json
+// @Param    taskID  path      string  true  "task id"
+// @Param    limit   query     integer false "最多几条（默认 1000，上限 1000）"
+// @Success  200     {object}  autonomy.TaskTurnListResponse  "turns（created_at 升序，全文）+ total + capped（是否被 limit 截断）"
+// @Failure  500     {object}  errResponse                    "store 读不了这个 task 的日志"
+// @Router   /api/tasks/{taskID}/turns [get]
+func (s *HTTPServer) handleTaskTurns(w http.ResponseWriter, req *http.Request) {
+	taskID := req.PathValue("taskID")
+	limit := queryInt(req.URL.Query().Get("limit"), DefaultTaskTurnLimit, 1, MaxTaskTurnLimit)
+	turns, total, err := s.Autonomy.TaskTurns(taskID, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if turns == nil {
+		turns = []TurnRecord{}
+	}
+	writeJSON(w, http.StatusOK, TaskTurnListResponse{
+		TaskID: taskID,
+		Turns:  turns,
+		Total:  total,
+		Capped: len(turns) < total,
+	})
+}
+
+// handleMeta is the runtime describing itself to a data consumer: which build
+// answered, what the turn columns are called, whether tasks have definitions, and
+// how big the log is. It is what saves a consumer from probing the schema — the
+// compatibility code that used to live in the reader this API replaces.
+//
+// The column names are this runtime's own (the engine's DDL, already migrated from
+// the older `step` / `output`: src/sqlite_store.go), and has_tasks_table is true
+// because that schema always has one. They are answers about *this* service, which
+// is the point: nobody outside has to know how the file is shaped.
+//
+// @Summary  能力与版本自述（省掉 schema 探测）
+// @Tags     data
+// @Produce  json
+// @Success  200  {object}  autonomy.MetaResponse  "service / version / reason_turns 列名 / has_tasks_table / turns 条数"
+// @Failure  500  {object}  errResponse             "store 读不了日志条数"
+// @Router   /api/meta [get]
+func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
+	turns, err := s.Autonomy.TurnCount()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, MetaResponse{
+		Service:       "autonomy",
+		Version:       serviceVersion(),
+		ReasonTurns:   ReasonTurnColumns{CycleColumn: "cycle", RawOutputColumn: "raw_output"},
+		HasTasksTable: true,
+		Turns:         turns,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
