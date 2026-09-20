@@ -17,7 +17,7 @@
 reason_turns (1)  ────  run header：provider/status/usage/耗时/run_id（内容列保留）
       │  id
       ├──▶ llm_messages (N) ── user 输入 + thinking/tool 聚合行 + assistant 返回（parent_id 溯源）
-      └──▶ llm_events   (N) ── provider 原始流（逐事件，可选，见 llm-event-stream.md）
+      └──▶ llm_events   (N) ── provider 原始流（逐事件，**默认不写**，`AUTONOMY_LLM_EVENTS=1` 打开，见 llm-event-stream.md）
 ```
 
 - `seq` 是 run 内顺序：`0` = 该 run 的输入；`1..N` = thinking/tool 聚合行（按事件发生顺序）；
@@ -71,13 +71,14 @@ tool 消息开始时结束，tool 消息在它的返回到达时结束），就�
 ```
 BeginLLMTrace(agent, taskID, cycle, mode, input)
   → BeginReasonTurn：建 header，写 user 消息(seq=0)，返回 handle{TurnID, InputMessageID}
-       ↓  Emit(ev) 逐条：llm_events（可选，AUTONOMY_LLM_EVENTS）
+       ↓  Emit(ev) 逐条：llm_events（默认不写，AUTONOMY_LLM_EVENTS=1 打开）
        │                    ＋ 聚合：消息一完成就 AppendLLMMessages(seq 固定为创建序) + 打日志
        ↓  run 结束
 Finish(res)
   → 冲掉仍未闭合的聚合行（尾部 thinking 块、没返回的 tool）
   → FinishReasonTurn(handle, res)：更新 header，
-       读回本 run 的 llm_events 再聚合一遍作为兜底（upsert，(turn_id, seq) 幂等）
+       读回本 run 的 llm_events 再聚合一遍作为兜底（upsert，(turn_id, seq) 幂等；
+       默认不写原始流时这张表读不到东西，就是 no-op）
        写 assistant 消息(seq = 当前最大 seq + 1，parent_id=InputMessageID)
 ```
 
@@ -85,7 +86,7 @@ Finish(res)
 - **一次性路径** `InsertReasonTurn` 在同一事务里写 header + user + assistant 两条消息并互链
   （本地 reasoner 无原始流，故无中间行）。
 - `Store.ListLLMMessages(turnID)` 按 `seq` 返回该 run 的消息。
-- `AUTONOMY_LLM_EVENTS=0` 只关**原始流**（`llm_events`）；聚合出的 `llm_messages` 照写，因为它是
+- `AUTONOMY_LLM_EVENTS` **默认关**（`=1` 才打开）只影响**原始流**（`llm_events`）；聚合出的 `llm_messages` 照写，因为它是
   对话本身而不是回放。
 - 端到端验证（opt-in，真 provider）：`CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=… AUTONOMY_CLINE_MODEL=…
   go test ./src -run TestLLMTraceLiveMessages -v` —— 断言 thinking/tool/assistant 三行都在 `Finish`
@@ -124,7 +125,7 @@ Finish(res)
 
 要点：
 
-- 只聚合、不删原始：`llm_events` 仍保留逐事件（逐 token）全保真流水。
+- 只聚合、不删原始：`llm_events` 打开时仍保留逐事件（逐 token）全保真流水（默认不写，见 [llm-event-stream.md](llm-event-stream.md)）。
 - 顺序按事件发生先后；`seq` 在组创建时就定下（= 创建序），所以边跑边写的 `seq` 与最终派生的一致；
   assistant 永远是最后一行。
 - `content` 是工具**返回**（结果），调用参数放 `normalized_content`。

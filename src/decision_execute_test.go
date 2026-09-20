@@ -225,6 +225,8 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 	t.Setenv("AUTONOMY_REASONER", "llm")
 	t.Setenv("PROJECT_ROOT", filepath.Join("..")) // the shipped agent policy
+	// The raw stream is opt-in: this test is about the stream carrying the reason.
+	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
 
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {

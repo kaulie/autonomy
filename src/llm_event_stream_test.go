@@ -81,6 +81,9 @@ func TestMapNativeLLMEventUnknownProviderIsDropped(t *testing.T) {
 }
 
 func TestLLMTraceRecordsRunStreamAndHeader(t *testing.T) {
+	// The raw stream is opt-in (see llmEventStreamEnabled): this test is the
+	// "turned on" half of the switch.
+	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -225,8 +228,8 @@ func TestLLMTraceWithoutStoreIsNoop(t *testing.T) {
 
 func TestLLMEventStreamEnabledParsing(t *testing.T) {
 	cases := map[string]bool{
-		"": true, "1": true, "true": true, "on": true, "yes": true,
-		"0": false, "false": false, "off": false, "no": false, "OFF": false, "disabled": false,
+		"": false, "0": false, "false": false, "off": false, "no": false, "OFF": false, "disabled": false,
+		"1": true, "true": true, "on": true, "yes": true, "TRUE": true, "enabled": true,
 	}
 	for value, want := range cases {
 		t.Setenv("AUTONOMY_LLM_EVENTS", value)
@@ -290,38 +293,55 @@ WHERE m.type = 'table' AND m.name <> 'llm_events'
 	}
 }
 
-func TestLLMTraceSkipsStreamWhenDisabled(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
-	t.Setenv("AUTONOMY_LLM_EVENTS", "0")
+// TestLLMTraceSkipsStreamByDefault proves the raw stream is off unless it is
+// asked for: with AUTONOMY_LLM_EVENTS unset (the default) or explicitly off, a run
+// still writes its reason_turns header and its llm_messages conversation, but no
+// llm_events rows. That is the whole point of the table being a leaf — replay is
+// the only thing that leaves with it.
+func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
+	for _, value := range []string{"", "0"} {
+		t.Run("AUTONOMY_LLM_EVENTS="+value, func(t *testing.T) {
+			store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			prev := _store
+			_store = store
+			t.Cleanup(func() { _store = prev })
+			t.Setenv("AUTONOMY_LLM_EVENTS", value)
 
-	agent := &Agent{ID: 88, LLMProvider: LLMProviderCursor, Model: "composer-2"}
-	trace := BeginLLMTrace(agent, "task-d", 1, ReasonModePlan, "in")
-	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "x"})
-	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "y"})
-	trace.Finish(LLMRunResult{ProviderRunID: "run-x", Status: LLMStatusFinished, RawOutput: "done"})
+			agent := &Agent{ID: 88, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+			trace := BeginLLMTrace(agent, "task-d", 1, ReasonModePlan, "in")
+			trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "x"})
+			trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "y"})
+			trace.Finish(LLMRunResult{ProviderRunID: "run-x", Status: LLMStatusFinished, RawOutput: "done"})
 
-	var (
-		turnID int64
-		status string
-	)
-	if err := store.db.QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
-		t.Fatal(err)
-	}
-	if status != string(LLMStatusFinished) {
-		t.Fatalf("status=%q, want %q (run header must still be written)", status, LLMStatusFinished)
-	}
-	var count int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("llm_events rows=%d, want 0 when AUTONOMY_LLM_EVENTS=0", count)
+			var (
+				turnID int64
+				status string
+			)
+			if err := store.db.QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
+				t.Fatal(err)
+			}
+			if status != string(LLMStatusFinished) {
+				t.Fatalf("status=%q, want %q (run header must still be written)", status, LLMStatusFinished)
+			}
+			var count int
+			if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("llm_events rows=%d, want 0 with the raw stream off", count)
+			}
+			// The conversation is not the replay: input + assistant are recorded anyway.
+			var messages int
+			if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_messages WHERE turn_id = ?`, turnID).Scan(&messages); err != nil {
+				t.Fatal(err)
+			}
+			if messages < 2 {
+				t.Fatalf("llm_messages rows=%d, want the input and the assistant return at least", messages)
+			}
+		})
 	}
 }

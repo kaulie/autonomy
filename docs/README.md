@@ -18,7 +18,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 8. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界
 9. [runtime.md](runtime.md) / [execution-loop.md](execution-loop.md) — 执行与主循环
 10. [trust.md](trust.md) — 信任与选择（可后置实现）
-11. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流）与多 provider 扩展
+11. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流，原始流默认不写）与多 provider 扩展
 12. [llm-message.md](llm-message.md) — 输入与返回拆成两条独立记录（llm_messages），返回溯源到具体输入
 13. [store.md](store.md) — 存储统一接口与可插拔 engine（sqlite 为默认实现）
 14. [http-api.md](http-api.md) — 对外 HTTP：接受任务、查进展、查 agent 工作状态、轮询增量对话流

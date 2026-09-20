@@ -11,32 +11,36 @@ import (
 // flush, so long streams do not insert one row at a time.
 const llmEventFlushSize = 64
 
-// llmEventStreamDisabledValues lists the AUTONOMY_LLM_EVENTS values that turn
-// off raw stream persistence. Anything else (including unset) keeps it on.
-var llmEventStreamDisabledValues = map[string]bool{
-	"0": true, "false": true, "off": true, "no": true, "disable": true, "disabled": true,
+// llmEventStreamEnabledValues lists the AUTONOMY_LLM_EVENTS values that turn raw
+// stream persistence on. Anything else (including unset) leaves it off.
+var llmEventStreamEnabledValues = map[string]bool{
+	"1": true, "true": true, "on": true, "yes": true, "enable": true, "enabled": true,
 }
 
 // llmEventStreamEnabled reports whether raw llm_events rows should be persisted.
-// Default is enabled; set AUTONOMY_LLM_EVENTS=0 (or false/off/no) to store only
-// the reason_turns run header and skip the stream.
+// Default is off: llm_events is the provider's per-token replay, a leaf table
+// nothing else references, so a run stores its run header (reason_turns) and its
+// conversation (llm_messages) and skips the raw stream. Set
+// AUTONOMY_LLM_EVENTS=1 (or true/on/yes) to store every provider event again.
 func llmEventStreamEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_EVENTS")))
-	return !llmEventStreamDisabledValues[v]
+	return llmEventStreamEnabledValues[v]
 }
 
 // LLMTrace records one LLM interaction. It opens a reason_turns row as the run
-// header and records the user-input llm_message, appends the provider's stream
-// events to llm_events, aggregates the stream into conversation messages
-// (thinking blocks, tool calls with their results) and writes each one as soon as
-// it completes — logging that row to stderr — then finalizes the header with
-// status, usage, and duration and records the assistant llm_message linked to
-// that input.
+// header and records the user-input llm_message, aggregates the stream into
+// conversation messages (thinking blocks, tool calls with their results) and
+// writes each one as soon as it completes — logging that row to stderr — then
+// finalizes the header with status, usage, and duration and records the assistant
+// llm_message linked to that input. The provider's raw stream events go to
+// llm_events only when AUTONOMY_LLM_EVENTS opts in (see llmEventStreamEnabled):
+// that table is a leaf holding a per-token replay nothing else reads, so it is
+// off by default and a run stores its header and conversation instead.
 //
 // Persistence is best-effort: failures are logged and never fail the model
 // call, so observability degrades instead of the run breaking. A trace with no
 // active store is a safe no-op. It writes only the conversation port: the run
-// header, its messages, and its raw event stream (src/store.go).
+// header, its messages, and (opt-in) its raw event stream (src/store.go).
 type LLMTrace struct {
 	store  ConversationStore
 	handle ReasonTurnHandle
@@ -45,8 +49,9 @@ type LLMTrace struct {
 	start  time.Time
 	buf    []LLMEvent
 	active bool
-	// events is false when AUTONOMY_LLM_EVENTS disables raw stream persistence;
-	// the run header is still recorded, only llm_events writes are skipped.
+	// events is true only when AUTONOMY_LLM_EVENTS opts in to raw stream
+	// persistence (off by default); the run header and its messages are written
+	// either way, only llm_events writes are skipped.
 	events bool
 	// aggregator folds the same live events into conversation messages, so the
 	// thinking/tool rows are written (and logged) while the run streams instead of
@@ -107,10 +112,11 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cy
 }
 
 // Emit appends one stream event. Seq, CreatedAt and ElapsedMS are assigned here
-// so adapters only report what the provider actually sent. It is a no-op when
-// raw stream persistence is disabled (AUTONOMY_LLM_EVENTS) — but only for the
-// raw rows: the aggregated messages are still persisted and logged as they
-// complete, because they are the run's conversation rather than its replay.
+// so adapters only report what the provider actually sent. It is a no-op for the
+// raw rows when raw stream persistence is off — the default, turned on with
+// AUTONOMY_LLM_EVENTS — but only for the raw rows: the aggregated messages are
+// still persisted and logged as they complete, because they are the run's
+// conversation rather than its replay.
 func (t *LLMTrace) Emit(ev LLMEvent) {
 	if t == nil || !t.active {
 		return
