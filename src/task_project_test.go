@@ -42,8 +42,9 @@ func detailOf(t *testing.T, task *Task, containers *ContextContainerManager) *Ta
 	return progress
 }
 
-// registryStub serves a project registry with one known project and the organization
-// catalogue it belongs to, so a detail can be asserted without a platform.
+// registryStub serves a project registry with one known project, the organization
+// catalogue it belongs to, and the services that organization registered, so a detail
+// can be asserted without a platform.
 func registryStub(t *testing.T, projectID, name, repoURL, departmentID, departmentName string) {
 	t.Helper()
 	projects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,13 +68,26 @@ func registryStub(t *testing.T, projectID, name, repoURL, departmentID, departme
 	}))
 	t.Cleanup(organization.Close)
 	t.Setenv(context_builder.EnvOrganizationAPIURL, organization.URL)
+
+	services := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if want := "/v1/orgs/" + departmentID + "/services"; r.URL.Path != want {
+			t.Errorf("asked %s, want %s", r.URL.Path, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"services": []map[string]any{
+			{"namespace": "default", "name": name, "gitRepoUrl": repoURL, "version": "abc1234"},
+		}})
+	}))
+	t.Cleanup(services.Close)
+	t.Setenv(context_builder.EnvServiceRegistryAPIURL, services.URL)
 }
 
-// deadRegistries points both registries at a port nothing listens on.
+// deadRegistries points every registry at a port nothing listens on.
 func deadRegistries(t *testing.T) {
 	t.Helper()
 	t.Setenv(context_builder.EnvProjectsAPIURL, "http://127.0.0.1:1")
 	t.Setenv(context_builder.EnvOrganizationAPIURL, "http://127.0.0.1:1")
+	t.Setenv(context_builder.EnvServiceRegistryAPIURL, "http://127.0.0.1:1")
 }
 
 func TestTaskDetailCarriesTheProjectAndItsOrganization(t *testing.T) {
@@ -114,7 +128,10 @@ func TestTaskDetailCarriesTheProjectAndItsOrganization(t *testing.T) {
 		t.Fatalf("organization=%+v, want the department the project belongs to", project.Organization)
 	}
 
-	// The contract is the JSON: the fields a caller reads.
+	// The contract is the JSON: the fields a caller reads. The organization is exactly
+	// the id and name — the services the organization registered are the decision
+	// cycle's context (the prompt's context_entity), not part of "which project is
+	// this task in".
 	raw, err := json.Marshal(progress)
 	if err != nil {
 		t.Fatal(err)

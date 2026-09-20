@@ -199,16 +199,24 @@ func TestRegistriesDegradeToOneAnother(t *testing.T) {
 func TestRegistryDefaults(t *testing.T) {
 	t.Setenv(EnvProjectsAPIURL, "")
 	t.Setenv(EnvOrganizationAPIURL, "")
+	t.Setenv(EnvServiceRegistryAPIURL, "")
 	if got := NewProjectRegistry().BaseURL(); got != DefaultProjectsAPIURL {
 		t.Fatalf("project registry url=%q, want %q", got, DefaultProjectsAPIURL)
 	}
 	if got := NewOrganization().BaseURL(); got != DefaultOrganizationAPIURL {
 		t.Fatalf("organization url=%q, want %q", got, DefaultOrganizationAPIURL)
 	}
+	if got := NewServiceRegistry().BaseURL(); got != DefaultServiceRegistryAPIURL {
+		t.Fatalf("service registry url=%q, want %q", got, DefaultServiceRegistryAPIURL)
+	}
 
 	t.Setenv(EnvProjectsAPIURL, "http://registry.test/")
 	if got := NewProjectRegistry().BaseURL(); got != "http://registry.test" {
 		t.Fatalf("project registry url=%q, want the configured one without its trailing slash", got)
+	}
+	t.Setenv(EnvServiceRegistryAPIURL, "http://services.test/")
+	if got := NewServiceRegistry().BaseURL(); got != "http://services.test" {
+		t.Fatalf("service registry url=%q, want the configured one without its trailing slash", got)
 	}
 	explicit := NewProjectRegistry()
 	explicit.URL = "http://elsewhere.test"
