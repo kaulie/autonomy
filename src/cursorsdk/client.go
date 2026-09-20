@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,11 +31,38 @@ type Model struct {
 	Description string
 }
 
+// DefaultCallTimeout bounds one unary RPC to the bridge — the calls that open,
+// resume, close or delete a session, and the run listings/cancellations around
+// them (see bridgeCallTimeout in transport.go). Streams are the run itself and stay
+// unbounded by this; CURSOR_SDK_CALL_TIMEOUT overrides it, and `0` disables it.
+const DefaultCallTimeout = time.Minute
+
+// callTimeoutFromEnv is the configured call timeout: CURSOR_SDK_CALL_TIMEOUT as a
+// Go duration ("90s", "2m"), empty or unparsable falling back to
+// DefaultCallTimeout, and zero or a negative value disconnecting the bound.
+func callTimeoutFromEnv() time.Duration {
+	v := strings.TrimSpace(os.Getenv("CURSOR_SDK_CALL_TIMEOUT"))
+	if v == "" {
+		return DefaultCallTimeout
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return DefaultCallTimeout
+	}
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
 // Client owns one bridge (spawned lazily) and exposes the SDK surface.
 type Client struct {
 	APIKey    string
 	Workspace string
 	BridgeBin string
+
+	// CallTimeout bounds one unary RPC to the bridge. Zero means unbounded.
+	CallTimeout time.Duration
 
 	// Optional: attach to an already-running bridge instead of spawning.
 	Endpoint  string
@@ -65,6 +93,11 @@ func WithBridgeBin(path string) ClientOption {
 	return func(c *Client) { c.BridgeBin = path }
 }
 
+// WithCallTimeout sets the bound on one unary RPC to the bridge (0: unbounded).
+func WithCallTimeout(d time.Duration) ClientOption {
+	return func(c *Client) { c.CallTimeout = d }
+}
+
 func WithEndpoint(url, token string) ClientOption {
 	return func(c *Client) {
 		c.Endpoint = url
@@ -87,8 +120,9 @@ func mustAbs(p string) string {
 // NewClient constructs a Client. The bridge is started on first RPC.
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
-		APIKey:    os.Getenv("CURSOR_API_KEY"),
-		Workspace: mustAbs("."),
+		APIKey:      os.Getenv("CURSOR_API_KEY"),
+		Workspace:   mustAbs("."),
+		CallTimeout: callTimeoutFromEnv(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -128,9 +162,9 @@ func (c *Client) ensure() error {
 
 	c.http = newBridgeHTTPClient(ep.AuthToken)
 	c.baseURL = ep.URL
-	c.agentRPC = sdkv1connect.NewSdkAgentServiceClient(c.http, c.baseURL, connectOpts()...)
-	c.ctrlRPC = sdkv1connect.NewSdkBridgeControlServiceClient(c.http, c.baseURL, connectOpts()...)
-	c.curRPC = sdkv1connect.NewSdkCursorServiceClient(c.http, c.baseURL, connectOpts()...)
+	c.agentRPC = sdkv1connect.NewSdkAgentServiceClient(c.http, c.baseURL, connectOpts(c.CallTimeout)...)
+	c.ctrlRPC = sdkv1connect.NewSdkBridgeControlServiceClient(c.http, c.baseURL, connectOpts(c.CallTimeout)...)
+	c.curRPC = sdkv1connect.NewSdkCursorServiceClient(c.http, c.baseURL, connectOpts(c.CallTimeout)...)
 	c.ready = true
 	return nil
 }

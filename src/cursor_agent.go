@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/cursorsdk"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 // AttachCursor binds a Cursor SDK session to this autonomy agent (registered in AgentFactory).
@@ -30,7 +31,7 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 
 	client := sharedCursorClient()
 	if err := client.Ping(ctx); err != nil {
-		return fmt.Errorf("cursor bridge ping: %w", err)
+		return fmt.Errorf("cursor bridge ping: %w", bridgeCallErr(ctx, err))
 	}
 
 	var (
@@ -41,7 +42,7 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	if resumed {
 		cAgent, err = client.Agents().Resume(ctx, a.LLMAgentID, model)
 		if err != nil {
-			return fmt.Errorf("resume cursor agent: %w", err)
+			return fmt.Errorf("resume cursor agent: %w", bridgeCallErr(ctx, err))
 		}
 	} else {
 		cAgent, err = client.Agents().Create(ctx, cursorsdk.CreateOptions{
@@ -49,7 +50,7 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 			CWD:   cwd,
 		})
 		if err != nil {
-			return fmt.Errorf("create cursor agent: %w", err)
+			return fmt.Errorf("create cursor agent: %w", bridgeCallErr(ctx, err))
 		}
 	}
 	a.cursorAgent = cAgent
@@ -63,6 +64,23 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	a.Model = model
 	persistAgent(a)
 	return nil
+}
+
+// bridgeCallErr is a failed session-setup call on the bridge, read against the
+// context this run gave it. When the call ended because that context ended, the
+// reason it ended is the answer — a run cut for being idle says "run idle for
+// 3m0s: no provider activity", where the transport can only report the bare
+// cancellation it saw ("context canceled"), which reads like the caller's own
+// doing and hides three minutes of silence behind it. It is the same reading the
+// stream paths already make (src/cursorsdk/run.go → llmrun.CtxErr).
+//
+// A call that failed while the run was still alive keeps its own error: that is
+// the bridge's word about the bridge, and nothing here improves on it.
+func bridgeCallErr(ctx context.Context, err error) error {
+	if err == nil || ctx == nil || ctx.Err() == nil {
+		return err
+	}
+	return llmrun.CtxErr(ctx)
 }
 
 // PromptCursor sends a prompt on the attached Cursor session and waits for the result.
