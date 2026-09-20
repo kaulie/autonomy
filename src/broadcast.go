@@ -1,7 +1,6 @@
 package autonomy
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -244,7 +243,7 @@ func (r *Autonomy) deliverBroadcast(target broadcastTarget, content string) Broa
 		delivery.Reason = target.Skip
 		return delivery
 	}
-	agent, msg, err := r.instruction(context.Background(), target.Task, content)
+	agent, msg, err := r.instruction(target.Task, content)
 	if err != nil {
 		delivery.Status = BroadcastFailed
 		delivery.Reason = err.Error()

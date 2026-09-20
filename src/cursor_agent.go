@@ -136,12 +136,19 @@ func (a *Agent) PromptCursorStream(ctx context.Context, prompt string, onEvent f
 	return text, meta, nil
 }
 
-// ensureCursorSession attaches Cursor for LLMReasoner (reuses AttachCursor).
+// ensureCursorSession attaches Cursor for LLMReasoner. It is the turn's door onto
+// resumeCursorSession (reuses AttachCursor): the session the agent was recorded
+// with when the provider still has it, a fresh one when it is gone — an agent whose
+// session expired while the runtime was idle is a reason to start talking again,
+// not a reason to fail the turn.
 func (a *Agent) ensureCursorSession(ctx context.Context, model, cwd string) (*cursorsdk.Agent, error) {
 	if cwd != "" {
 		a.Workspace = cwd
 	}
-	if err := a.AttachCursor(ctx, model); err != nil {
+	if model != "" {
+		a.Model = model
+	}
+	if _, err := a.resumeCursorSession(ctx); err != nil {
 		return nil, err
 	}
 	return a.cursorAgent, nil

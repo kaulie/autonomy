@@ -62,8 +62,9 @@ planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方�
 |---|---|
 | 1 | `AgentFactory.ForTask(taskID)`：本进程已经拿着它（上一条指令留下的 handle）→ 直接用它，同一段对话继续 |
 | 2 | 否则读**任务自己的行**：`tasks.agent_id` → `agents` 行（`store.GetAgent`）。行还在（`deleted_at` 为空）→ 用它重建 handle：同一个 `id` / `name` / workspace / `llm_agent_id`，身份是 planner；`AgentFactory.Adopt(...)` 把它登记回 factory（后续指令由 factory 维护这一个 handle） |
-| 3 | 重新挂 provider 会话（`resumeAgentSession`）：Cursor 按 `agents.llm_agent_id` **真 Resume**；provider 已经不认它了（会话过期，或那个 id 属于别的进程/后端）→ 退化成新建一个 session，任务继续，不下线。Cline 桥的 session 活在它自己的进程里、没有 re-attach 这回事，所以重启后是同一个 agent 上的**新 session**（agent 自己的对话历史在库里，frame 会重发一次） |
-| 4 | 都找不到（这条 Task 第一次被处理，或它对接的 agent 已被 let go）→ `AgentFactory.Create`：新 planner agent |
+| 3 | 都找不到（这条 Task 第一次被处理，或它对接的 agent 已被 let go）→ `AgentFactory.Create`：新 planner agent |
+
+**这一步不挂 provider 会话**，所以这里没有第「挂会话」步：接收一条指令只是把它放进队列（应答要快 —— 广播就是一次 fan-out，一个目标一次 accept），挂会话属于**需要它的那一轮**（`LLMSession.Say` → `ensureLLMSession`），跑在这轮自己的 context 上：桥打不通是**这一轮 run** 的失败，而不是「指令被拒」；会话过期了就在那一轮退化成新建（Cursor：`resumeCursorSession` 按 `agents.llm_agent_id` 真 Resume，provider 已不认它时退化成新 session；Cline 桥的 session 活在它自己的进程里、没有 re-attach 这回事，所以重启后是同一个 agent 上的**新 session**，agent 自己的对话历史在库里，frame 会重发一次）。
 
 不变式：
 
@@ -71,7 +72,7 @@ planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方�
 2. **配对写在行里**：`tasks.agent_id` 是「这条 Task 对接谁」的事实来源，所以一次不携带 agent id 的 task 写入**不会**把它抹掉（`UpsertTask`）。
 3. **默认不删**：只有明确 `ephemeral` 的 agent 会在结束时被软删；其余的留着 —— 留着才谈得上 Resume。
 
-实现：`src/agent_resume.go`（`resumeAgentForTask` / `storedAgentForTask` / `restoredAgent` / `resumeAgentSession`）、`src/agent.go`（`AgentFactory.ForTask` / `Adopt`）。
+实现：`src/agent_resume.go`（`resumeAgentForTask` / `storedAgentForTask` / `restoredAgent` / `resumeCursorSession`）、`src/agent.go`（`AgentFactory.ForTask` / `Adopt`）。
 
 一条指令不是直接「跑这个 task」，而是**放进这只 agent 的 inbox**（`instruction` 消息），由它自己按顺序处理 —— 见 [inbox.md](inbox.md)。
 

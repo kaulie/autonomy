@@ -17,10 +17,15 @@ import (
 //	this process already holds the task's agent (AgentFactory.ForTask)
 //	      → the same handle, and so the same conversation
 //	the task row names an agent (tasks.agent_id) and that row is live
-//	      → rebuild the handle from the row, register it (AgentFactory.Adopt),
-//	        and re-attach its provider session (resumeAgentSession)
+//	      → rebuild the handle from the row and register it (AgentFactory.Adopt)
 //	nothing to resume (the first instruction for this task)
 //	      → AgentFactory.Create, a new planner agent
+//
+// Opening the provider session is not on that list: it belongs to the turn that
+// needs it (LLMSession.Say → ensureLLMSession, idempotent). Accepting an
+// instruction is queueing it — one accept per instruction, and a broadcast is one
+// accept per agent it reaches — so it must not wait on a bridge, and a bridge that
+// will not answer must fail the run rather than refuse the instruction.
 //
 // Agents being kept by default (AgentLifecyclePersistent — see NewAgent) is what
 // makes the middle branch reachable at all: an agent that was deleted when its
@@ -30,10 +35,14 @@ import (
 // one it was paired with when a previous instruction (in this process) or a
 // previous process created it.
 //
-// Only an agent rebuilt from the store is attached here. A freshly created one
-// still attaches on its first turn (LLMSession.Say), which is what lets a run
-// with no provider at all — the local reasoner — take its cycles.
-func (r *Autonomy) resumeAgentForTask(ctx context.Context, task *Task) (*Agent, error) {
+// What it hands back is that agent's record — its row, its task, the provider
+// session it was recorded with — and no live provider session: this is the accept
+// path, and opening a session here would make POST /api/tasks (and every accept a
+// broadcast fans out) wait on the bridge. The first cycle of the run attaches,
+// on the run's own context, where a bridge that cannot be reached is the run's
+// failure and a session that has since expired becomes a fresh one
+// (resumeCursorSession, attachClineMode).
+func (r *Autonomy) resumeAgentForTask(task *Task) (*Agent, error) {
 	if r == nil || r.AgentFactory == nil {
 		return nil, fmt.Errorf("agent factory not ready")
 	}
@@ -62,13 +71,9 @@ func (r *Autonomy) resumeAgentForTask(ctx context.Context, task *Task) (*Agent, 
 	if agent == nil {
 		return nil, fmt.Errorf("adopt agent %d for task %s", stored.ID, task.ID)
 	}
-	resumed, err := agent.resumeAgentSession(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("resume agent %s for task %s: %w", agent.Name, task.ID, err)
-	}
-	if resumed {
-		fmt.Fprintf(os.Stderr, "[autonomy] resumed agent %s (%s session %s) on task %s\n",
-			agent.Name, agent.effectiveBackend(), agent.LLMAgentID, task.ID)
+	if stored.LLMAgentID != "" {
+		fmt.Fprintf(os.Stderr, "[autonomy] agent %s (%s) continues task %s on the session %s it was left with\n",
+			agent.Name, agent.effectiveBackend(), task.ID, stored.LLMAgentID)
 	} else {
 		fmt.Fprintf(os.Stderr, "[autonomy] agent %s (%s) continues task %s on a new session\n",
 			agent.Name, agent.effectiveBackend(), task.ID)
@@ -112,8 +117,9 @@ func storedAgentForTask(store Store, task *Task) (*Agent, error) {
 // restoredAgent is the runtime handle for an agent row: the same identity (id,
 // name, provider, model, the provider session it was recorded with) with the
 // runtime state a process has to make for itself left to be made — the provider
-// handle and the session are exactly what a restart has to re-establish, and
-// resumeAgentSession does.
+// handle and the live session are exactly what a restart has to re-establish, and
+// the turn that needs them does (resumeCursorSession / attachClineMode), not the
+// accept that read this row.
 //
 // The lifecycle is this runtime's policy rather than the row's: an agent is kept,
 // which is what a task needs to be continuable. A row written by a build that
@@ -133,43 +139,11 @@ func restoredAgent(stored *Agent, task *Task) *Agent {
 	}
 }
 
-// resumeAgentSession re-opens this agent's provider session after a restart, and
-// reports whether the backend resumed the session the agent was recorded with. A
-// false means a fresh session, which has to be told the agent's frame again (see
-// Agent.needsLLMFrame) — so the frame is reset here for the callers that only look
-// at the error.
-func (a *Agent) resumeAgentSession(ctx context.Context) (bool, error) {
-	if a == nil {
-		return false, fmt.Errorf("nil agent")
-	}
-	switch a.effectiveBackend() {
-	case AgentBackendCline:
-		// The Cline bridge keeps its sessions inside its own process and has no way
-		// to re-attach to one, so a restarted runtime continues this agent on a
-		// fresh session. What carries over is the agent itself — its row, its task,
-		// its workspace — and the conversation it already had is on the record
-		// (llm_messages), which the next turn is written against.
-		//
-		// The session is opened in the mode this agent's turns run in (a planner's
-		// cycles decide), because that is the one it will keep using.
-		a.resetLLMFrame()
-		mode := clineModeFor(ReasonModeAgent)
-		if a.Role == AgentRolePlanner {
-			mode = clineModeFor(ReasonModePlan)
-		}
-		return false, a.attachClineMode(ctx, mode)
-	case AgentBackendLocal:
-		// No provider session to open: a local agent's turns come from its host.
-		return false, nil
-	default:
-		return a.resumeCursorSession(ctx)
-	}
-}
-
-// resumeCursorSession re-attaches the Cursor agent this one was recorded with and
-// — when the provider no longer has it — continues on a fresh session instead of
-// failing: a session that expired while the runtime was down is a reason to start
-// talking again, not a reason to give up the task it is here to continue.
+// resumeCursorSession opens this agent's Cursor session for the turn that needs it:
+// re-attaching the provider agent it was recorded with, and — when the provider no
+// longer has it — continuing on a fresh session instead of failing, because a
+// session that expired while the runtime was down is a reason to start talking
+// again, not a reason to give up the task it is here to continue.
 func (a *Agent) resumeCursorSession(ctx context.Context) (bool, error) {
 	model := a.Model
 	if model == "" {

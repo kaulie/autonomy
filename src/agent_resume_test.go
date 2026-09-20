@@ -59,7 +59,7 @@ func TestASecondInstructionForATaskReusesItsAgent(t *testing.T) {
 	store := resumeTestStore(t)
 	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
 
-	first, err := auto.resumeAgentForTask(context.Background(), &Task{ID: "t-reused", Description: "d"})
+	first, err := auto.resumeAgentForTask(&Task{ID: "t-reused", Description: "d"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestASecondInstructionForATaskReusesItsAgent(t *testing.T) {
 	}
 	// The second instruction arrives as its own Task value, the way AcceptTask
 	// builds one from a request that names the same task id.
-	second, err := auto.resumeAgentForTask(context.Background(), &Task{ID: "t-reused", AgentID: first.ID})
+	second, err := auto.resumeAgentForTask(&Task{ID: "t-reused", AgentID: first.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +79,8 @@ func TestASecondInstructionForATaskReusesItsAgent(t *testing.T) {
 
 // TestAfterARestartATaskResumesTheAgentItsRowNames is the restart flow: a process
 // that holds nothing takes an instruction, finds the agent by the task's own row,
-// rebuilds the handle, registers it in the factory and re-opens its provider
-// session.
+// rebuilds the handle, and registers it in the factory — without opening a provider
+// session, which is the first turn's job (see the test below).
 func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 	store := resumeTestStore(t)
 	installFakeClineClient(t)
@@ -91,7 +91,7 @@ func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 	// A fresh process: nothing in memory, only what the store kept.
 	f := NewAgentFactory()
 	restarted := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
-	got, err := restarted.resumeAgentForTask(context.Background(), &Task{ID: task.ID})
+	got, err := restarted.resumeAgentForTask(&Task{ID: task.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +104,52 @@ func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 	if f.Get(got.Name) != got {
 		t.Fatal("the resumed handle is not the one the factory maintains")
 	}
+	// The handle is the row's record and nothing more: no provider session was
+	// opened, and the session id on the row is untouched — which is what keeps an
+	// accept (and a broadcast's many accepts) from waiting on a bridge.
+	if got.LLMAgentID != agent.LLMAgentID {
+		t.Fatalf("LLMAgentID=%q, want the recorded session %q: accepting an instruction opens no session",
+			got.LLMAgentID, agent.LLMAgentID)
+	}
+	if got.cursorAgent != nil || got.clineAgent != nil || got.Session != nil {
+		t.Fatal("the accept path attached a provider session: it belongs to the turn")
+	}
+	stored, err := store.GetAgent(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LLMAgentID != agent.LLMAgentID {
+		t.Fatalf("agents.llm_agent_id=%q, want the recorded session %q: the row is rewritten when a session is opened, not before",
+			stored.LLMAgentID, agent.LLMAgentID)
+	}
+}
+
+// TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone: what the accept path gave up is
+// the turn's to do — the first cycle attaches the agent's backend session (a fresh
+// one for Cline, which cannot re-attach) and records it, so the next restart has a
+// session to resume.
+func TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone(t *testing.T) {
+	store := resumeTestStore(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+
+	task, agent := pairedTask(t, store, "t-restarted-turn")
+
+	f := NewAgentFactory()
+	restarted := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+	got, err := restarted.resumeAgentForTask(&Task{ID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := got.ensureLLMSession(context.Background(), "", got.Workspace, ReasonModePlan); err != nil {
+		t.Fatalf("the first turn could not open the session the accept left alone: %v", err)
+	}
+	if got.clineAgent == nil {
+		t.Fatal("the turn ran without attaching the agent's session")
+	}
 	if got.LLMAgentID == "" || got.LLMAgentID == agent.LLMAgentID {
-		t.Fatalf("LLMAgentID=%q, want the live session of this process, not the dead one", got.LLMAgentID)
+		t.Fatalf("LLMAgentID=%q, want the live session of this process, not the dead one (%q)",
+			got.LLMAgentID, agent.LLMAgentID)
 	}
 	if !got.needsLLMFrame() {
 		t.Fatal("a session this process started has no frame yet: the next cycle must send it")
@@ -116,7 +160,7 @@ func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.LLMAgentID != got.LLMAgentID {
-		t.Fatalf("agents.llm_agent_id=%q, want the resumed session %q", stored.LLMAgentID, got.LLMAgentID)
+		t.Fatalf("agents.llm_agent_id=%q, want the attached session %q", stored.LLMAgentID, got.LLMAgentID)
 	}
 }
 
@@ -231,7 +275,7 @@ func TestATaskWhoseAgentWasLetGoGetsANewOne(t *testing.T) {
 	}
 
 	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
-	got, err := auto.resumeAgentForTask(context.Background(), &Task{ID: task.ID})
+	got, err := auto.resumeAgentForTask(&Task{ID: task.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

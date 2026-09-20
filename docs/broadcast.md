@@ -67,7 +67,8 @@
 1. **一条一条，各回各家**：广播不新造投递机制 —— 每个目标收到的就是一条普通 `instruction` 消息，
    落在它自己的队里，由它自己的消费者按到达顺序处理；它忙就排在它正在做的事后面（指令可以持续接收）。
    目标 agent 若不在本进程手上（重启之后），跟单条指令一样按 `tasks.agent_id` resume（同一个
-   `resumeAgentForTask`，会话重新挂上，见 [agent.md](agent.md)）。
+   `resumeAgentForTask`，重建 handle 并登记回 factory；**配对本身不开会话**，会话属于那一轮，
+   见 [agent.md](agent.md)）。
 2. **范围从事实算出来，不从请求猜**：目标来自 `tasks` 行本身（`context_ref` 的 project、`agent_id` 的 agent），
    不是调用方给的一份名单；同一个 project 的 agent 集合是"这个 project 的 task 们现在由谁负责"。
 3. **不发就不发，不为了发而造**：目标投不了（没有 agent / agent 已 let go）就报 `skipped`，

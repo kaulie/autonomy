@@ -272,7 +272,7 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 			task.ContextRef = stored.ContextRef
 		}
 	}
-	agent, msg, err := r.instruction(context.Background(), task, desc)
+	agent, msg, err := r.instruction(task, desc)
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
 	}
