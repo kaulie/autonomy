@@ -174,12 +174,13 @@ type cycleDone struct {
 // message here — HTTP's AcceptTask and Autonomy.Run — so an instruction is the same
 // message wherever it came from. Accepting an instruction queues it, so the task is
 // written as pending — the agent's consumer is what marks it running.
-func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) (*Agent, AgentMessage, error) {
+//
+// Nothing here opens the agent's provider session, so nothing here can wait on a
+// bridge: that is the turn's job (LLMSession.Say), which is what keeps both doors —
+// and a broadcast, which is one accept per agent — answering promptly.
+func (r *Autonomy) instruction(task *Task, content string) (*Agent, AgentMessage, error) {
 	if task == nil {
 		return nil, AgentMessage{}, fmt.Errorf("nil task")
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	text := strings.TrimSpace(content)
 	if text == "" {
@@ -200,7 +201,7 @@ func (r *Autonomy) instruction(ctx context.Context, task *Task, content string) 
 	// The agent before the task row: which agent a task is paired with is read off
 	// that row (src/agent_resume.go), so the instruction finds it before this write
 	// — which carries a Task value that need not know the agent — touches it.
-	agent, err := r.resumeAgentForTask(ctx, task)
+	agent, err := r.resumeAgentForTask(task)
 	if err != nil {
 		// The instruction could not be picked up at all, so the task says so
 		// instead of being left claiming to run.
