@@ -83,6 +83,9 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   **谁是它自己（`{{AGENT}}`：role / id / name / backend / model / lifecycle / workspace）属于 frame**：
   这些东西整个会话不变，而"这一轮是第几轮"（`cycle`）每轮都变、留在 delta —— 见 [agent.md](agent.md)。
   frame 里的 per-cycle 占位符渲染成 `reasoningDeltaMarker`，所以 frame 整段字节不变、能吃到 prompt cache。
+  delta 里的 **Context Entity 不是引用字符串**：每个 cycle 在渲染 prompt 之前，runtime 先用 task 的 `context_ref` 走一遍 context builder
+  （[context-builder.md](context-builder.md)），把 id 解析成世界（本进程的容器 + 平台的 project / organization 注册表），解析结果随
+  `DecisionContext.ContextSections` 进这一轮的 delta；解析不到就只报引用本身，不影响这次决策（`Agent.decide` → `fillContextSections`）。
   是否发 frame 由 `Agent.needsLLMFrame()` 决定：新会话（Cursor `Create` / Cline 新 handle（含 mode|cwd 变化））
   为真，且只有 run **成功之后**才 `markLLMFrameSent()` —— 首轮失败会重发 frame，不会让会话裸着没有指令；
   `Resume` 回来的会话视为已有 frame。见 `src/prompt.go` / `src/reasoner.go` / `src/llm_frame_test.go`。

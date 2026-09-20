@@ -426,33 +426,36 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 	})
 }
 
+// formatContextEntitiesJSON is the decision context's `context_entity` block (and the
+// {{CONTEXT_ENTITY}} placeholder): what the task's context_ref names, one entry per
+// container, as the context builder resolved it before this cycle's prompt
+// (src/context_builder) — the project and the organization it belongs to, not just the
+// id the task stated.
 func formatContextEntitiesJSON(ctx DecisionContext) []byte {
-	type contextEntityJSON struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Type        string `json:"type"`
-		Domain      string `json:"domain"`
-	}
-	entries := []contextEntityJSON{}
+	entries := []map[string]any{}
 	if ctx.Task != nil && ctx.Task.ContextRef != nil {
 		for ctype, id := range ctx.Task.ContextRef {
-			if id == "" {
+			if strings.TrimSpace(id) == "" {
 				continue
 			}
-			entry := contextEntityJSON{ID: id, Type: string(ctype)}
-			if _autonomy != nil && _autonomy.ContextContainerManager != nil {
-				if c, ok := _autonomy.ContextContainerManager.ContextContainers[id]; ok {
-					entry.Name = c.Name
-					entry.Description = c.Description
-					entry.Domain = string(c.DomainType)
-				}
-			}
-			entries = append(entries, entry)
+			entries = append(entries, contextSectionFields(ctx.ContextSections, runtimeContextContainers(), string(ctype), id))
 		}
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	sort.Slice(entries, func(i, j int) bool { return contextSectionID(entries[i]) < contextSectionID(entries[j]) })
 	return mustJSON(entries)
+}
+
+// runtimeContextContainers is this process's registered world, or nil when there is
+// none (a runtime assembled by hand).
+func runtimeContextContainers() *ContextContainerManager {
+	if _autonomy == nil {
+		return nil
+	}
+	return _autonomy.ContextContainerManager
+}
+
+func contextSectionID(section map[string]any) string {
+	return contextSectionString(section["id"])
 }
 
 func formatRuntimeContextContainersJSON(ctx DecisionContext) []byte {

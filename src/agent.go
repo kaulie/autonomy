@@ -322,14 +322,19 @@ func (a *Agent) DecideAtCycle(cycle int, history []Result) (Decision, error) {
 // the message it answers (the inbox message being processed — see DecisionContext.
 // Input).
 func (a *Agent) decide(ctx context.Context, cycle int, history []Result, input string) (Decision, error) {
-	decision, err := a.DecideMaker.Decide(DecisionContext{
+	decisionContext := DecisionContext{
 		Context: ctx,
 		Task:    a.CurrentTask,
 		Agent:   a,
 		Cycle:   cycle,
 		Input:   input,
 		History: history,
-	})
+	}
+	// The world this cycle reasons about is resolved first: the task's context_ref,
+	// through the context builder (src/context_resolver.go) — the prompt is built from
+	// what that found, not from the reference string.
+	fillContextSections(&decisionContext)
+	decision, err := a.DecideMaker.Decide(decisionContext)
 	if err != nil {
 		return Decision{}, err
 	}

@@ -28,6 +28,12 @@ type DecisionContext struct {
 	// ("step:<name>.output.<key>", src/plan_lineage.go). It is empty outside an
 	// execution: a plan's bindings only ever read the same plan.
 	StepOutputs []ActionResult
+	// ContextSections is the task's context_ref, resolved before this cycle's prompt
+	// was built (src/context_resolver.go, src/context_builder): the ref type -> the
+	// fields known about the container it names, its own id and type included. The
+	// prompt renders it as context_entity; it is nil when nothing resolved it (a task
+	// that names no world, the builder switched off, a context assembled by hand).
+	ContextSections map[string]map[string]any
 }
 
 type DecisionMaker struct {
