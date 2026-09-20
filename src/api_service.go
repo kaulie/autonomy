@@ -72,15 +72,19 @@ type TaskPlanProgress struct {
 
 // TaskPlanStepProgress is one planned step and, when it has run, what happened.
 // Status is pending until an execution_step row exists, then that row's ok|failed.
+//
+// The three raw fields are arbitrary JSON (a step's planned input, and what it was
+// actually called with and answered). swaggertype says so to swag, which cannot infer
+// a definition for json.RawMessage; the tag is inert at runtime — nothing imports swag.
 type TaskPlanStepProgress struct {
 	Idx            int             `json:"idx"`
 	Name           string          `json:"name,omitempty"`
 	Capability     string          `json:"capability,omitempty"`
 	ExpectedEffect string          `json:"expected_effect,omitempty"`
-	PlannedInput   json.RawMessage `json:"planned_input,omitempty"`
+	PlannedInput   json.RawMessage `json:"planned_input,omitempty" swaggertype:"object"`
 	Status         string          `json:"status"`
-	Input          json.RawMessage `json:"input,omitempty"`
-	Output         json.RawMessage `json:"output,omitempty"`
+	Input          json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	Output         json.RawMessage `json:"output,omitempty" swaggertype:"object"`
 	Error          string          `json:"error,omitempty"`
 	DurationMS     int64           `json:"duration_ms,omitempty"`
 }

@@ -44,5 +44,12 @@ data/
 # Deployment package produced by build.sh
 outputs/
 
+# swag 产物（scripts/register-contract.sh 生成后上报服务中心）——注解才是契约的真源，
+# 产物手工改没有意义，也没必要提交（见 docs/http-api.md「服务契约」）。只产 swagger.json，
+# 所以不会有 docs.go（那会把 swaggo 拖成运行期依赖）。
+docs/swagger.json
+docs/swagger.yaml
+docs/docs.go
+
 
 .DS_Store
