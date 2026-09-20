@@ -28,7 +28,7 @@
 | 调用 ≠ run | 开会话那几次 bridge 调用（Ping / Create / Resume）是**调用**：`CURSOR_SDK_CALL_TIMEOUT`（默认 1m）一过就放弃它（`no answer from the bridge within 1m0s`），不会拿 run 的空闲预算去等一个卡住的桥；而**流**不受这个上限约束 |
 | 结束原因要留下来 | 这个 run 的上下文自己结束时（空闲被掐、被 stop），报的是它带着的原因（`run idle for 3m0s: no provider activity`），不是传输层的 `context canceled`（`bridgeCallErr` / `llmrun.CtxErr`） |
 | 开 run header | `BeginLLMTraceFrom`：`reason_turns` 一行（task / agent / round / mode / provider / model）＋ 输入 `llm_messages` 行（role 见上表） |
-| provider 流 | `Agent.PromptLLMStream`：事件落 `llm_events`、折成对话消息落 `llm_messages`、写一行 stderr |
+| provider 流 | `Agent.PromptLLMStream`：折成对话消息落 `llm_messages`、写一行 stderr；原始事件落 `llm_events`（叶子表，默认不写，`AUTONOMY_LLM_EVENTS=1` 打开） |
 | 收尾 | `trace.Finish`：status / usage / tokens / duration 写回 run header；成功的轮才 `markLLMFrameSent()`（首轮发的 frame 算送达） |
 | 被截断 | provider 在输出上限处掐掉这一轮（`max-tokens`、没有完成的 tool call）：**在同一个会话上再问一次**，附 `src/agent_policy/TURN_TRUNCATED.md`（`AUTONOMY_LLM_TURN_RETRIES`，默认 1）。失败的原始轮与重试**各自一行** `reason_turns`，且**同一个 round**（重试不是新的决策轮）。其它失败（provider 报错 / 余额不足 / 会话丢了）不重试 |
 

@@ -9,6 +9,11 @@
 - 可分析：token/耗时/工具调用、失败原因可查询。
 - **可扩展**：持久化层只依赖与 provider 无关的中立模型，接入新的 LLM 不改表、不改 trace。
 
+> **默认不写原始流**：`llm_events` 一行一个 provider 事件（逐 token），而它是一张叶子表 —— 只服务回放，
+> 没有别的表读它。所以默认只落 run header（`reason_turns`）与对话（`llm_messages`），
+> `llm_events` 保持空表；需要回放/分析时显式打开 `AUTONOMY_LLM_EVENTS=1`（见 [开关](#开关autonomy_llm_events)）。
+> 本文其余部分描述的都是**打开之后**的行为。
+
 ## 数据模型
 
 三张表：一个 run header + 消息记录 + 一条事件流：
@@ -25,7 +30,7 @@ reason_turns (1)  ────  run header：provider/status/usage/耗时/run_id
 - `llm_messages` 是 **新增** 子表，把「用户输入」和「LLM 返回」拆成两条独立记录，返回通过
   `parent_id` 溯源到具体输入 —— 详见 [llm-message.md](llm-message.md)。
 - `llm_events` 是 **新增** 子表，`turn_id` 指向 header，按 `seq` 排序，`payload` 保留 provider
-  原始事件 JSON。
+  原始事件 JSON。**默认不写**（`AUTONOMY_LLM_EVENTS=1` 才写）：它是叶子表，回放是它唯一的下游。
 
 ## 引用关系：`llm_events` 是一张叶子表
 
@@ -49,11 +54,10 @@ reason_turns                llm_events                 其它表
   （`AppendLLMEvents` / `ListLLMEvents`）：写方只有 `LLMTrace`，读方是 store 自己的聚合兜底
   （`FinishReasonTurn` 的再聚合、`backfillReasonTurnMessages`）。HTTP 读接口目前只读
   `llm_messages`，本表还没有对外出口。
-- **行为上也独立**：`AUTONOMY_LLM_EVENTS=0` 时整张表可以不写，`reason_turns` 头与 `llm_messages`
+- **行为上也独立**：`AUTONOMY_LLM_EVENTS` **默认关**，整张表默认不写（`=1` 才写），`reason_turns` 头与 `llm_messages`
   照常（见下文开关），说明没有别的表把「这次 run 发生过什么」寄托在 `llm_events` 上。
-- **所以**：换 / 删 / 重建 `llm_events` 只影响原始事件流的回放（含 `AUTONOMY_LLM_EVENTS=0` 下
-  已存在的行为），不影响任何别的表的完整性；它自身的完整性也**没有任何人保证**——没有级联、
-  没有清理任务、`turn_id` 指向一行已不存在的 header 时也没有报错。
+- **所以**：换 / 删 / 重建 / 清空 `llm_events` 只影响原始事件流的回放，不影响任何别的表的完整性；
+  它自身的完整性也**没有任何人保证**——没有级联、没有清理任务、`turn_id` 指向一行已不存在的 header 时也没有报错。
 
 自查任意一个库（两条都应为空）：
 
@@ -136,10 +140,11 @@ LLMTrace.Emit(LLMEvent)                            → 缓冲，按批写 llm_ev
 LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合行 + 回写 header + 写 assistant 消息（link input）+ 回填 run_id
 ```
 
-- 事件按 `llmEventFlushSize`（默认 64）批量落库，`Finish` 时强制 flush。
+- 事件按 `llmEventFlushSize`（默认 64）批量落库，`Finish` 时强制 flush；**原始流默认关闭**，
+  此时 `Emit` 不缓冲、不写表。
 - `llm_messages` **始终写**（user 输入、thinking/tool 聚合行、assistant 返回），而且是**边跑边写**：
   长 run 中途就能查表/看日志，不必等 `Finish`（见 [llm-message.md](llm-message.md)）。
-  `AUTONOMY_LLM_EVENTS` 只控制 `llm_events`。
+  `AUTONOMY_LLM_EVENTS` 只控制 `llm_events`（默认不写，需显式打开）。
 - 落库是 **best-effort**：失败只打 stderr，绝不让模型调用失败。没有 store 时 trace 是安全 no-op。
 - 日志就是"消息"：每条 `llm_messages` 落库行打一行 `[autonomy] llm seq=… <role> …`
   （`src/llm_message_log.go`，`AUTONOMY_LLM_TRACE=0` 可关，`AUTONOMY_LLM_TRACE_MAX` 限宽）；
@@ -151,11 +156,14 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 
 | 取值 | 行为 |
 |------|------|
-| 未设置 / `1` / `true` / `on` / `yes` | **默认**：header + 全部原始事件都落库 |
-| `0` / `false` / `off` / `no` / `disable` / `disabled`（大小写不敏感） | 只写 `reason_turns` run header，跳过 `llm_events`（不缓冲、不写入） |
+| 未设置 / `0` / `false` / `off` / `no` / `disable` / `disabled`（大小写不敏感） | **默认**：只写 `reason_turns` run header 与 `llm_messages`，跳过 `llm_events`（不缓冲、不写入） |
+| `1` / `true` / `on` / `yes` / `enable` / `enabled` | 打开原始流：header + 全部 provider 事件都落库 |
 
-关闭时 `reason_turns` 与 `llm_messages` 仍照常记录（前者是 run header，后者是输入/返回记录，其它消费方依赖），
-`event_count` 保持 0。开关在 `BeginLLMTrace` 时读取一次。
+关闭（默认）时 `reason_turns` 与 `llm_messages` 仍照常记录（前者是 run header，后者是输入/返回记录，其它消费方依赖），
+`event_count` 保持 0。开关在 `BeginLLMTrace` 时读取一次——一次 run 的中途改环境变量不会影响它。
+
+「独立表」这件事因此是**默认行为**，不是特例：平时就没有人在写 `llm_events`，打开它只为回放/分析
+（见 [引用关系](#引用关系llm_events-是一张叶子表)）。
 
 代码位置：
 
@@ -269,7 +277,7 @@ FROM llm_events WHERE json_extract(payload,'$.call_id') = ? ORDER BY seq;
 **粒度差异（已归一）**：Cursor 一条消息给整块思考，Cline 给逐 token 增量，块结束时重复整块文本。聚合层因此
 把连续 thought 事件拼成 **1 条 thinking 消息**，并屏蔽 `content_end:reasoning` 的重复文本（否则内容会翻倍）。
 
-**尚未打通的一环**：autonomy 目前只把这些事件**落库**（`llm_events`/`llm_messages`），还没有面向 UI 的实时
+**尚未打通的一环**：autonomy 目前只把这些事件**落库**（`llm_messages`，以及打开开关后的 `llm_events`），还没有面向 UI 的实时
 出口（SSE/WebSocket）。UI 要从 autonomy 实时显示"还在 thinking"，需要补这个出口（或在 UI 侧读库）。这属于
 "core 迁到 autonomy" 的下一步，见 `docs/cline-reasoner.md` 的边界小节。
 
@@ -277,5 +285,11 @@ FROM llm_events WHERE json_extract(payload,'$.call_id') = ? ORDER BY seq;
 
 ## 保留策略
 
-当前**不做清理**（先保留）。后续如需控制体积，可基于 `channel` 做策略，例如只在长期保留非
-`assistant` 增量事件，或对 `text_delta` 做压缩/合并；届时再加清理任务与索引。
+原始流**默认就不写**（`AUTONOMY_LLM_EVENTS` 未设置），所以这张表默认不再增长：写入量最大的 `assistant`
+逐 token 增量不会落库，只有显式打开回放/分析时才有数据。
+
+已经写下的历史行当下**不做清理**（先保留）。因为它是叶子表 —— 没有入边、没有级联、没有别的消费者
+（见 [引用关系](#引用关系llm_events-是一张叶子表)）——清空它只需要 `DELETE FROM llm_events`（或
+`VACUUM` 回收空间）：`reason_turns` / `llm_messages` 与其余表都不受影响，只是这些旧 run 不再有逐事件回放。
+后续如需进一步控制体积，可基于 `channel` 做策略，例如只在长期保留非 `assistant` 增量事件，或对
+`text_delta` 做压缩/合并；届时再加清理任务与索引。

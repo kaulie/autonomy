@@ -66,6 +66,9 @@ AUTONOMY_REASONER=llm
 # AUTONOMY_CLINE_MODEL=deepseek-v4-pro
 # AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/autonomy/src/clinesdk/bridge/bridge.mjs
 # AUTONOMY_MAX_STEPS=4
+# provider 原始事件流（llm_events，一行一个逐 token 事件）默认不落库：它是一张叶子表，
+# 只服务回放，run header（reason_turns）与对话（llm_messages）照常记录。需要回放/分析时再打开：
+# AUTONOMY_LLM_EVENTS=1
 # cursor bridge 默认用发版包自带的（bin/cursor-sdk-bridge，本脚本自动指过去）。
 # 想换桥（或指向别处的下载产物）在这里覆盖；外部桥用
 # CURSOR_SDK_BRIDGE_URL + CURSOR_SDK_BRIDGE_TOKEN。
