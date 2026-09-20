@@ -55,7 +55,8 @@ go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tas
 { "task_id": "task-…", "agent_id": 10001, "status": "pending", "message_id": 7, "queued": 2 }
 ```
 
-`message_id` 是这条指令在 inbox 里的消息 id，`queued` 是它前面还有几条（`0` = 下一条就是它）。
+`message_id` 是这条指令在 inbox 里的消息 id；`queued` 是这只 agent **前面**还有几条没处理完的消息（`queued` 或正在处理，
+**含正在跑的那条**）：`0` = 这条就是它正在做或马上要做的，`n` = 前面还有 n 条要先过。
 
 同一个入口也有进程内的同步版本：`Autonomy.Run(AcceptTaskRequest)`（测试用它）。它走的是同一条 accept 路径（同一个 task、
 同一条指令消息、同一只 agent），区别只在于它会等这次运行结束才返回，返回这次运行的错误和同一份接受信息

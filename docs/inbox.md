@@ -29,7 +29,8 @@
 - **队是持久的**：消息是 `agent_messages` 的行，重启后上一个进程 claim 过的 `running` 消息会被新进程放回队里继续处理
   （与 agent 本身被 resume 是同一件事，见 [agent.md](agent.md)）。
 - **用户指令可以持续接收**：指令到达时 agent 正忙 → 照样接受，排在它正在做的那件事后面
-  （以前是拒绝：`task %s is already running`）。`POST /api/tasks` 的响应里给出这条消息的 id（`message_id`）和它前面还有几条（`queued`）。
+  （以前是拒绝：`task %s is already running`）。`POST /api/tasks` 的响应里给出这条消息的 id（`message_id`）和它前面还有几条
+  （`queued`：`queued` 或正在处理的、id 更小的消息数，含正在跑的那条；`0` = 下一条就是它）。
 
 ## 三种消息各自意味着什么
 

@@ -66,6 +66,12 @@ type InboxStore interface {
 	// CountQueuedMessages is how many messages are waiting for an agent (queued,
 	// not being processed): what "is there anything behind this one" asks.
 	CountQueuedMessages(agentID int64) (int, error)
+	// CountMessagesAhead is how many messages are still in front of one message: the
+	// agent's messages that arrived before it and have not finished — queued, or
+	// being processed right now. 0 means the agent is on that message, or is about to
+	// take it next. What "how long until the agent gets to this one" asks (the
+	// acceptance both task entry points answer with).
+	CountMessagesAhead(agentID, messageID int64) (int, error)
 }
 
 // ConversationStore is one LLM interaction: a reason_turns row is the header
