@@ -107,6 +107,92 @@ func TestBuildIsBoundedByItsTimeout(t *testing.T) {
 	}
 }
 
+// stubExpander is a resolver that also names a further ref — the shape a task resolver
+// has: the task, and the project its world is in.
+type stubExpander struct {
+	stubResolver
+	// forType limits what it expands: a ref of another type is not its business.
+	forType string
+	extra   Ref
+}
+
+func (s *stubExpander) ExtraRefs(_ context.Context, refType, _ string, _ map[string]any) Ref {
+	if s.forType != "" && s.forType != refType {
+		return nil
+	}
+	return s.extra
+}
+
+func TestBuildFollowsAnExpansionOneHop(t *testing.T) {
+	// A task ref names the project its world is in; the project is resolved with the same
+	// chain, and nothing beyond it is (one hop).
+	project := &stubResolver{name: "project_registry", ok: true, fields: map[string]any{"name": "autonomy"}}
+	// This one would expand a project — but the project here came from an expansion, so it
+	// is never asked, and the team it would have named stays out of the result.
+	projectExpander := &stubExpander{
+		stubResolver: stubResolver{name: "project_expander"},
+		forType:      RefTypeProject, extra: Ref{RefTypeTeam: "team-1"},
+	}
+	task := &stubExpander{
+		stubResolver: stubResolver{name: "task_store", ok: true, fields: map[string]any{"description": "do it"}},
+		forType:      RefTypeTask, extra: Ref{RefTypeProject: "project-749a0238"},
+	}
+
+	result := New(task, project, projectExpander).Build(context.Background(), Ref{RefTypeTask: "task-1"})
+	if len(result.Errors) != 0 {
+		t.Fatalf("errors=%v, want none", result.Errors)
+	}
+	if result.Sections[RefTypeTask]["description"] != "do it" {
+		t.Fatalf("sections=%v, want the ref the caller named", result.Sections)
+	}
+	if result.Sections[RefTypeProject]["name"] != "autonomy" {
+		t.Fatalf("sections=%v, want the ref the expansion named", result.Sections)
+	}
+	if _, found := result.Sections[RefTypeTeam]; found {
+		t.Fatalf("sections=%v, want an expansion's own expansion not followed", result.Sections)
+	}
+}
+
+func TestBuildResolvesARefOnceEvenWhenAnExpansionNamesItBack(t *testing.T) {
+	// A ref that names itself back: a ref already resolved is not resolved twice, so this
+	// terminates.
+	reads := &countingResolver{
+		name: "task_store", ok: true, fields: map[string]any{"description": "do it"},
+		forType: RefTypeTask, extra: Ref{RefTypeTask: "task-1"},
+	}
+
+	result := New(reads).Build(context.Background(), Ref{RefTypeTask: "task-1"})
+	if len(result.Sections) != 1 || reads.calls() != 1 {
+		t.Fatalf("sections=%v calls=%d, want the ref resolved once", result.Sections, reads.calls())
+	}
+}
+
+// countingResolver is an expander that counts how many times it was asked.
+type countingResolver struct {
+	name    string
+	fields  map[string]any
+	ok      bool
+	forType string
+	extra   Ref
+	asked   int
+}
+
+func (c *countingResolver) Name() string { return c.name }
+
+func (c *countingResolver) Resolve(context.Context, string, string, map[string]any) (map[string]any, bool, error) {
+	c.asked++
+	return c.fields, c.ok, nil
+}
+
+func (c *countingResolver) calls() int { return c.asked }
+
+func (c *countingResolver) ExtraRefs(_ context.Context, refType, _ string, _ map[string]any) Ref {
+	if c.forType != "" && c.forType != refType {
+		return nil
+	}
+	return c.extra
+}
+
 func TestBuildOfNothingIsEmpty(t *testing.T) {
 	resolver := &stubResolver{name: "world", ok: true, fields: map[string]any{"name": "x"}}
 	builder := New(resolver)

@@ -6,16 +6,18 @@
 引用只有被解析才有用。`context_builder` 就是这个解析器，而且**独立**：它不知道 task、agent、prompt、runtime，只收一个 `Ref`
 （`{"<类型>": "<id>"}`），按顺序问每个 `Resolver`「这个容器你知道什么」。
 
-- 代码：`src/context_builder/`（模块本体 + 平台侧三个 resolver：project / organization / service registry）、`src/context_resolver.go`（runtime 自己的 resolver、接线、挂点）。
+- 代码：`src/context_builder/`（模块本体 + 平台侧四个 resolver：project / organization / service / task）、`src/context_resolver.go`（runtime 自己的 resolver、接线、挂点）。
 - 时机：**每个决策周期、在 prompt 生成之前**（`Agent.decide` 里 `fillContextSections`，见 [execution-loop.md](execution-loop.md)）。
-- 结果：注入 prompt 的 `context_entity` 块 —— planner（以及被委托 worker 的 frame）看到的是**解析后的世界**，不是一个 id 字符串。
+- 结果：注入 prompt 的 `context_entity` 块 —— planner（以及被委托 worker 的 frame）看到的是**解析后的世界**，不是一个 id 字符串；
+  引用指向一条 task 时，给出的就是**那条 task 与它所在的世界**（task → project → organization → services，见下「resolver 有哪些」）。
 
 ## 契约
 
 ```go
-Ref        map[string]string   // {"project": "project-749a0238"}
+Ref        map[string]string   // {"project": "project-749a0238"} / {"task": "task-2ecd5e15ae3047f0"}
 Resolver   interface { Name() string
                        Resolve(ctx, refType, id string, built map[string]any) (fields map[string]any, ok bool, err error) }
+Expander   interface { ExtraRefs(ctx, refType, id string, fields map[string]any) Ref }  // Resolver 的可选加强：说出这个世界还由哪些引用组成
 Builder    New(resolvers...).WithTimeout(d).Build(ctx, Ref) Result
 Result     { Sections map[string]map[string]any,  // 类型 -> 合并后的字段（含 id/type）
              Errors   []error }                    // 失败被记下，不致命
@@ -24,6 +26,10 @@ Result     { Sections map[string]map[string]any,  // 类型 -> 合并后的字�
 - 每个 `(类型, id)` 按**注册顺序**问所有 resolver，**后者按字段覆盖**；`built` 是前面已合并的结果 —— resolver 可以在别人的答案上继续
   （organization 就是这么拿到 project 的部门 id 的）。
 - **`id` / `type` 永远是 task 自己说的那个**：resolver 改不了引用的身份。
+- **引用可以展开一跳**：`Expander` 能在答完自己之后再说出「这个世界还由哪些引用组成」（task 说出它在哪个 project），
+  builder 用**同一条 resolver 链**解析它们，section 就出现在那个引用旁边。只跟一跳（展开出来的引用不再展开），
+  已解析过的 `(类型, id)` 不再解析 —— 引用链因此不会绕圈；这是为什么 `{"task": …}` 能落到 prompt 里的
+  *task 那一条 + 它所在 world 的那几条*。
 - **永不失败调用方**：单次调用有预算（`AUTONOMY_CONTEXT_TIMEOUT`，默认 3s），失败的 resolver 只是「没说」，别人的答案仍然成立，
   失败只进 `Result.Errors`（runtime 打一次 `[autonomy] context: …`，不按周期刷屏）。
 
@@ -32,9 +38,11 @@ Result     { Sections map[string]map[string]any,  // 类型 -> 合并后的字�
 | resolver | 来源 | 贡献 |
 |---|---|---|
 | `world`（runtime 提供，`src/context_resolver.go`） | 本进程注册的 context container（`RegisterContextContainer`） | `name` / `description` / `domain` —— 只有这个进程知道的那些 |
+| `task_store`（runtime 提供） | 本进程的 `tasks` 表（`GetTask`）：任务的 world 写在行里（`tasks.context_ref`） | `description` / `goal_type`；并**展开**出那条 task 的 project 引用（`ExtraRefs`） |
 | `project_registry`（模块提供） | 控制面 `GET /api/projects`（`PROJECTS_API_URL`，默认 `http://127.0.0.1:4211`） | `name` / `git_repo_url` / `organization{id,name}` |
 | `organization`（模块提供） | 组织服务 `GET /api/v1/departments/{id}`（`ORGANIZATION_API_URL`，默认 `http://127.0.0.1:4244`） | 补上 `organization{id,name,type}`（部门目录） |
 | `service_registry`（模块提供） | 服务中心 `GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://127.0.0.1:4240`） | `organization.services[]` —— 这个组织登记的服务：`name` / `description` / `git_repo_url` / `version` |
+| `task_registry`（模块提供） | 控制面 `GET /api/tasks/{taskId}`（`TASKS_API_URL`，默认同控制面 `http://127.0.0.1:4211`） | `title` / `description` / `goal` / `task_type`；并**展开**出那条 task 的 project 引用 |
 
 顺序即优先级：平台注册表答的 `name` 赢过进程里那份，而进程独有的 `description` / `domain` 留着；部门目录答不了（服务没起）时，
 project 注册表里的 `organization{id,name}` 仍然在。部门**成员**故意不注入 —— 谁在这个部门是身份问题（组织服务的地盘），不是每个决策周期都需要。
@@ -44,13 +52,22 @@ project 注册表里的 `organization{id,name}` 仍然在。部门**成员**故�
 是服务中心的事实，autonomy 里不再登记一份。service registry 自己的账（`namespace`、`owner`、审计字段）留在它那边 ——
 一次决策周期要的是"有这个服务、它是什么、代码在哪"。project 没有组织时没有列表可查：不说，也不是失败。
 
-三个注册表都**读得很省**：成功缓存 30s、失败缓存 5s（按 resolver 实例，服务列表按组织分别缓存），一次 run 的多个 cycle 基本只读一次。
+`task_store` 与 `task_registry` 是**入口那一跳**：`{"task": "<id>"}` 说的是"这条 task 的世界，跟着那条 task 走"。
+task 的 world 写在它自己的行里（`tasks.context_ref`），所以本进程先答（`task_store`，`GetTask`）；这个进程没有的 task
+（面板 owns、本 runtime 没跑过的那条）由平台答（`task_registry`，`GET /api/tasks/{id}`，404 = 没有这条 task，不说也不报错）。
+两者都只做一件事：**说出那条 task 的 project 引用**（`ExtraRefs`），于是 `project_registry → organization → service_registry`
+这条链原样接上 —— 「某个 task 在哪个 project、哪个组织、那个组织有哪些服务」不需要第二套解析。
+平台对一条 task 的账（workspace / provider / model / agent id / PR 链接 / 时间戳 / token 统计）留在平台那边：
+一次决策周期要的是"这条 task 是什么、它的世界在哪"。
+
+四个注册表都**读得很省**：成功缓存 30s、失败缓存 5s（按 resolver 实例，服务列表按组织、task 按 id 分别缓存），一次 run 的多个 cycle 基本只读一次。
 
 ## 环境变量
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
 | `PROJECTS_API_URL` | project 注册表地址 | `http://127.0.0.1:4211`（控制面） |
+| `TASKS_API_URL` | task 注册表地址（控制面按 task id 答 project；与 project 注册表同一个服务） | 同上，`http://127.0.0.1:4211` |
 | `ORGANIZATION_API_URL` | 组织服务地址 | `http://127.0.0.1:4244` |
 | `SERVICE_REGISTRY_API_URL` | 服务中心（服务注册表）地址 | `http://127.0.0.1:4240` |
 | `AUTONOMY_CONTEXT_BUILDER` | `0` / `off` / `false` / `no` 关掉整个 builder | 开 |
@@ -80,14 +97,28 @@ project 注册表里的 `organization{id,name}` 仍然在。部门**成员**故�
 
 组织里登记了哪些服务（以及每个服务的代码在哪）随 `organization.services` 进 prompt，planner 不用先知道仓库地址再去找。
 
+引用指向一条 task 时，进 prompt 的是**两条**：那条 task 自己，以及它所在的世界（展开出来的 project，连同组织与服务）——
+读 prompt 的人看到的是世界，不是"它怎么会在这儿"：
+
+```json
+"context_entity": [
+  {"id": "task-2ecd5e15ae3047f0", "type": "task", "title": "想增加一个广播的功能",
+   "description": "同时对某个 project 下面的所有 agent 投递消息", "goal": "merge", "task_type": "general"},
+  {"id": "project-749a0238", "type": "project", "name": "autonomy", "git_repo_url": "https://github.com/kaulie/autonomy",
+   "organization": {"id": "D0005", "name": "AI研发部", "type": "研发", "services": [ … ]}}
+]
+```
+
 同一个解析也是 `GET /api/tasks/{id}` 里 `project` / `project.organization` 的来源（[http-api.md](http-api.md)、[project.md](project.md)）：
-一个 resolver，两个消费者，答案一致。那份视图停在组织本身（`project.organization{id,name}`）—— `services` 是决策周期的世界，
-不属于"这条 task 在哪个 project"的回答。
+一个 resolver，两个消费者，答案一致 —— 任务详情同样跟着 `{"task": …}` 的引用走（`TaskProjectOf`，见 `src/task_project.go`），
+只是那份视图停在组织本身（`project.organization{id,name}`）：`services` 是决策周期的世界，不属于"这条 task 在哪个 project"的回答。
 
 ## 不变式
 
 1. **引用是 task 的，解析是 runtime 的**：`context_ref` 写什么由调用方说，解析出什么由 resolver 决定；解析不了就只报引用本身。
 2. **不致命**：注册表挂了、超时了、不认识了，都不改变这次运行的结果 —— prompt 变薄，不改判。
-3. **不另立注册表**：project / organization 是平台的事实（控制面 + 组织服务），autonomy 只读；进程内那份只补充自己的知识。
-4. **顺序即优先级**：注册顺序决定字段归属，也是**流水线**：加一个新来源就是加一个 resolver，它可以读前面 resolver 写下的字段。
-   `service_registry` 就是这么加进来的 —— 它读 `organization.id`（前面两个 resolver 找到的那个组织），再去问服务中心那个组织的服务列表。
+3. **不另立注册表**：project / organization / service / task 是平台的事实（控制面 + 组织服务 + 服务中心），autonomy 只读；进程内那份只补充自己的知识。
+4. **顺序即优先级**：注册顺序决定字段归属，也是**流水线**：加一个新来源就是加一个 resolver，它可以读前面 resolver 写下的字段，
+   也可以（`Expander`）说出"这个世界还由哪些引用组成"，让链自己接下去。
+   `service_registry` 就是这么加进来的 —— 它读 `organization.id`（前面两个 resolver 找到的那个组织），再去问服务中心那个组织的服务列表；
+   `task_store` / `task_registry` 则把那句话用在入口：task 说出它的 project，之后三个 resolver 照常答那个 project。

@@ -47,22 +47,26 @@ func (r contextWorldResolver) Resolve(_ context.Context, _, id string, _ map[str
 	return fields, true, nil
 }
 
-// newContextBuilder is the runtime's resolver chain: this process's own world, then the
-// platform's project registry (name, repository, the project's organization), the
-// organization catalogue (the department itself) and the service registry (the services
-// that department has, each with its repository). Order is the pipeline: the service
-// registry asks for the department id the two before it found. It returns nil when the
-// builder is switched off (AUTONOMY_CONTEXT_BUILDER=0) — an offline deployment then
-// answers from what the process knows, exactly as it did before there was a builder.
+// newContextBuilder is the runtime's resolver chain: this process's own world and its own
+// task rows, then the platform's registries — the project registry (name, repository, the
+// project's organization), the organization catalogue (the department itself), the service
+// registry (the services that department has, each with its repository) and the task
+// registry (a task id the panel owns: what it is, and which project it is in). Order is the
+// pipeline: a task ref is expanded into the project ref the platform answered, so the two
+// resolvers after it answer that project. It returns nil when the builder is switched off
+// (AUTONOMY_CONTEXT_BUILDER=0) — an offline deployment then answers from what the process
+// knows, exactly as it did before there was a builder.
 func newContextBuilder(autonomy *Autonomy) *context_builder.Builder {
 	if !contextBuilderEnabled() {
 		return nil
 	}
 	return context_builder.New(
 		contextWorldResolver{autonomy: autonomy},
+		contextTaskResolver{autonomy: autonomy},
 		context_builder.NewProjectRegistry(),
 		context_builder.NewOrganization(),
 		context_builder.NewServiceRegistry(),
+		context_builder.NewTaskRegistry(),
 	).WithTimeout(contextBuilderTimeout())
 }
 
@@ -89,6 +93,61 @@ func contextBuilderTimeout() time.Duration {
 		}
 	}
 	return context_builder.DefaultTimeout
+}
+
+// contextTaskResolver answers a task ref from this process's own store: a task's world is
+// written on its row (`tasks.context_ref`, docs/task.md), so the task that names another
+// task gets the world that row names. What it contributes is the task's own facts
+// (description, goal type); the project is named as a further ref (ExtraRefs), so the
+// platform's project registry answers it — the same project resolution a project ref gets.
+//
+// The platform's task registry answers the ids this process does not have (a task the
+// panel owns and this runtime never ran): registration order is the pipeline, so a row
+// here is answered first, and the platform's answer fills in whatever it says the same id
+// is.
+type contextTaskResolver struct{ autonomy *Autonomy }
+
+func (r contextTaskResolver) Name() string { return "task_store" }
+
+func (r contextTaskResolver) Resolve(_ context.Context, refType, id string, _ map[string]any) (map[string]any, bool, error) {
+	task, err := r.task(refType, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if task == nil {
+		return nil, false, nil
+	}
+	fields := map[string]any{}
+	if task.Description != "" {
+		fields["description"] = task.Description
+	}
+	if task.GoalType != "" {
+		fields["goal_type"] = string(task.GoalType)
+	}
+	return fields, true, nil
+}
+
+// ExtraRefs names the project the task's own row points at: that is what "this task shares
+// that task's world" means for a ref that names a task.
+func (r contextTaskResolver) ExtraRefs(_ context.Context, refType, id string, _ map[string]any) context_builder.Ref {
+	task, err := r.task(refType, id)
+	if err != nil || task == nil {
+		return nil
+	}
+	projectID := projectRefOf(task)
+	if projectID == "" {
+		return nil
+	}
+	return context_builder.Ref{context_builder.RefTypeProject: projectID}
+}
+
+// task reads one of this process's task rows for a task ref. A task this process does not
+// have is not an error: the platform's registry may still know it.
+func (r contextTaskResolver) task(refType, id string) (*Task, error) {
+	if refType != context_builder.RefTypeTask || r.autonomy == nil || r.autonomy.Store == nil {
+		return nil, nil
+	}
+	return r.autonomy.taskStore().GetTask(id)
 }
 
 // activeContextBuilder is the builder this process resolves context with: nil when the

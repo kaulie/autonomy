@@ -34,6 +34,10 @@ import (
 const (
 	RefTypeProject = "project"
 	RefTypeTeam    = "team"
+	// RefTypeTask names a task whose world this task shares: what that task is, and —
+	// because a task's world is the world it names — the project it is in, with that
+	// project's organization and services (docs/task.md, docs/context.md).
+	RefTypeTask = "task"
 )
 
 // Ref is a task's context_ref: the container type -> the id it names.
@@ -49,6 +53,34 @@ type Ref map[string]string
 type Resolver interface {
 	Name() string
 	Resolve(ctx context.Context, refType, id string, built map[string]any) (fields map[string]any, ok bool, err error)
+}
+
+// Expander is a Resolver that also names the refs a container's world is made of. A task
+// is the case this exists for: a task says which world it is in on its own row, so a ref
+// that names a task is a ref that names a project too — and then that project's
+// organization, and that organization's services, are the same resolution a project ref
+// gets (docs/context-builder.md).
+//
+// What an expander names is resolved with the same resolver chain, so its sections appear
+// next to the ref that named it. It is **one hop**: what an expansion names is resolved
+// but not expanded again (a ref names a handful of containers, not a graph), and a ref
+// already resolved is never resolved twice — so a chain of references cannot loop. An
+// expander that cannot name a further referee names none; it returns no error, because
+// naming one is not what the section promised.
+type Expander interface {
+	ExtraRefs(ctx context.Context, refType, id string, fields map[string]any) Ref
+}
+
+// maxContextRefs bounds one build. A ref names a container, an expansion names a handful
+// more — the cap is a safety valve, not a limit a resolution should reach.
+const maxContextRefs = 8
+
+// pendingRef is one ref to resolve: the ones the caller named (which may expand), then the
+// ones those named (which may not).
+type pendingRef struct {
+	refType string
+	id      string
+	expand  bool
 }
 
 // Result is what a build found.
@@ -87,9 +119,11 @@ func (b *Builder) WithTimeout(d time.Duration) *Builder {
 	return b
 }
 
-// Build resolves every container the Ref names. It returns what could be resolved and
-// never an error: a decision cycle reasons about the world it could read, and a
-// registry that is down means a thinner prompt, not a failed run.
+// Build resolves every container the Ref names — and, one hop further, the containers
+// those names expand into (an Expander: a task names the project its world is in) — with
+// the same resolver chain. It returns what could be resolved and never an error: a
+// decision cycle reasons about the world it could read, and a registry that is down means
+// a thinner prompt, not a failed run.
 func (b *Builder) Build(ctx context.Context, ref Ref) Result {
 	result := Result{Sections: map[string]map[string]any{}}
 	if b == nil {
@@ -98,27 +132,30 @@ func (b *Builder) Build(ctx context.Context, ref Ref) Result {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	types := make([]string, 0, len(ref))
-	for refType, id := range ref {
-		refType = strings.TrimSpace(refType)
-		if refType == "" || strings.TrimSpace(id) == "" {
+	queue := namedRefs(ref)
+	seen := map[string]bool{}
+	for i := 0; i < len(queue); i++ {
+		item := queue[i]
+		key := item.refType + "\x00" + item.id
+		if seen[key] {
 			continue
 		}
-		types = append(types, refType)
-	}
-	sort.Strings(types)
-	for _, refType := range types {
-		id := strings.TrimSpace(ref[refType])
+		seen[key] = true
+		if len(result.Sections) >= maxContextRefs {
+			// The safety valve: expansions are followed in the order they were named, and
+			// a ref that names this many containers is not a resolution any more.
+			break
+		}
 		fields := map[string]any{}
 		for _, resolver := range b.resolvers {
 			if resolver == nil {
 				continue
 			}
 			callCtx, cancel := context.WithTimeout(ctx, b.timeout)
-			found, ok, err := resolver.Resolve(callCtx, refType, id, fields)
+			found, ok, err := resolver.Resolve(callCtx, item.refType, item.id, fields)
 			cancel()
 			if err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("%s (%s %s): %w", resolver.Name(), refType, id, err))
+				result.Errors = append(result.Errors, fmt.Errorf("%s (%s %s): %w", resolver.Name(), item.refType, item.id, err))
 				continue
 			}
 			if !ok {
@@ -133,9 +170,49 @@ func (b *Builder) Build(ctx context.Context, ref Ref) Result {
 		}
 		// The ref's own identity is not something a resolver gets a say in: the task
 		// named this id, of this type.
-		fields["id"] = id
-		fields["type"] = refType
-		result.Sections[refType] = fields
+		fields["id"] = item.id
+		fields["type"] = item.refType
+		result.Sections[item.refType] = fields
+		if !item.expand {
+			continue
+		}
+		for _, resolver := range b.resolvers {
+			expander, ok := resolver.(Expander)
+			if !ok {
+				continue
+			}
+			callCtx, cancel := context.WithTimeout(ctx, b.timeout)
+			extra := expander.ExtraRefs(callCtx, item.refType, item.id, fields)
+			cancel()
+			for refType, id := range extra {
+				refType, id = strings.TrimSpace(refType), strings.TrimSpace(id)
+				if refType == "" || id == "" || seen[refType+"\x00"+id] {
+					continue
+				}
+				queue = append(queue, pendingRef{refType: refType, id: id})
+			}
+		}
 	}
 	return result
+}
+
+// namedRefs is the refs a caller named, in a stable order and without the ones that name
+// nothing. They are the refs that may expand: what they expand to is resolved, not
+// expanded again.
+func namedRefs(ref Ref) []pendingRef {
+	refs := make([]pendingRef, 0, len(ref))
+	for refType, id := range ref {
+		refType, id = strings.TrimSpace(refType), strings.TrimSpace(id)
+		if refType == "" || id == "" {
+			continue
+		}
+		refs = append(refs, pendingRef{refType: refType, id: id, expand: true})
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].refType != refs[j].refType {
+			return refs[i].refType < refs[j].refType
+		}
+		return refs[i].id < refs[j].id
+	})
+	return refs
 }

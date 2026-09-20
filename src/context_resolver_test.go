@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -18,18 +19,35 @@ import (
 // carrying.
 
 // withRuntime installs a runtime as this process's runtime — the globals the prompt and
-// the hook read — with a context builder wired the way BootstrapAutonomy wires one.
-func withRuntime(t *testing.T, containers *ContextContainerManager) *Autonomy {
+// the hook read — with a context builder wired the way BootstrapAutonomy wires one. Tasks
+// are this process's own rows, for the tests that resolve a ref naming a task; without
+// them the runtime has no store, exactly as a hand-assembled one does not.
+func withRuntime(t *testing.T, containers *ContextContainerManager, tasks ...*Task) *Autonomy {
 	t.Helper()
 	previous := _autonomy
 	runtime := &Autonomy{ContextContainerManager: containers}
+	if len(tasks) > 0 {
+		store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { store.Close() })
+		for _, task := range tasks {
+			if err := store.UpsertTask(task); err != nil {
+				t.Fatal(err)
+			}
+		}
+		runtime.Store = store
+	}
 	runtime.ContextBuilder = newContextBuilder(runtime)
 	_autonomy = runtime
 	t.Cleanup(func() { _autonomy = previous })
 	return runtime
 }
 
-// registriesStub points the builder's three registries at stubs and counts their reads.
+// registriesStub points the builder's registries at stubs and counts their reads. The task
+// registry answers for whatever id it is asked about — a task the panel has, in the project
+// this stub's project registry knows — because a task id is what those resolvers are given.
 func registriesStub(t *testing.T, projectID, departmentID string) *counter {
 	t.Helper()
 	reads := &counter{}
@@ -67,8 +85,35 @@ func registriesStub(t *testing.T, projectID, departmentID string) *counter {
 	}))
 	t.Cleanup(services.Close)
 	t.Setenv(context_builder.EnvServiceRegistryAPIURL, services.URL)
+
+	tasks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads.hit()
+		if want := "/api/tasks/" + panelTaskID; r.URL.Path != want {
+			// A task this process has and the panel does not: the panel says so, and the
+			// row this process owns is the whole answer.
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"task": map[string]any{
+				"taskId": panelTaskID, "projectId": projectID, "status": "active",
+				"title": "面板上的那条任务", "description": "面板上的那条任务的原话",
+				"taskType": "general", "goal": "merge",
+			},
+			"project": map[string]any{
+				"projectId": projectID, "name": "autonomy", "gitRepoUrl": "https://github.com/kaulie/autonomy",
+				"department": map[string]string{"departmentId": departmentID, "departmentName": "AI研发部"},
+			},
+		})
+	}))
+	t.Cleanup(tasks.Close)
+	t.Setenv(context_builder.EnvTaskRegistryAPIURL, tasks.URL)
 	return reads
 }
+
+// panelTaskID is the one task the stub task registry has: a task the panel owns.
+const panelTaskID = "task-from-the-panel"
 
 // counter counts calls, shared for the two stubs of one test.
 type counter struct {
@@ -204,6 +249,93 @@ func promptServices(t *testing.T, organization map[string]any) []map[string]any 
 		services = append(services, service)
 	}
 	return services
+}
+
+// byType reads the prompt's context_entity block the way a reader does: one entry per
+// container the task's ref named and resolved to.
+func byType(entries []map[string]any) map[string]map[string]any {
+	indexed := map[string]map[string]any{}
+	for _, entry := range entries {
+		if refType, ok := entry["type"].(string); ok {
+			indexed[refType] = entry
+		}
+	}
+	return indexed
+}
+
+// TestATaskRefResolvesIntoTheWorldTheTaskNames is the requirement at the prompt: a ref that
+// names a task answers what that task is (its row in this process), and — because a task's
+// world is written on its row — the project it is in, that project's organization and the
+// services that organization has.
+func TestATaskRefResolvesIntoTheWorldTheTaskNames(t *testing.T) {
+	registriesStub(t, "project-749a0238", "D0005")
+	withRuntime(t, NewContextContainerManager(), &Task{
+		ID: "task-b", Description: "上线窗口那件事", Status: TaskStatusCompleted,
+		Domain: TaskDomainSoftwareDevelopment, GoalType: GoalType_FEATURE,
+		ContextRef: map[ContextContainerType]string{ContextContainerTypeProject: "project-749a0238"},
+	})
+
+	reasoner := &captureContextReasoner{}
+	agent := &Agent{
+		CurrentTask: &Task{ID: "task-a", ContextRef: map[ContextContainerType]string{context_builder.RefTypeTask: "task-b"}},
+		DecideMaker: &DecisionMaker{reasoner: reasoner},
+	}
+	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := byType(contextEntityBlock(t, reasoner.seen))
+	task := entries[context_builder.RefTypeTask]
+	if task == nil || task["id"] != "task-b" || task["description"] != "上线窗口那件事" || task["goal_type"] != "dev_feature" {
+		t.Fatalf("task=%v, want the row of the task the ref named", task)
+	}
+	project := entries[context_builder.RefTypeProject]
+	if project == nil || project["id"] != "project-749a0238" || project["name"] != "autonomy" {
+		t.Fatalf("context_entity=%v, want the project that task's row names", entries)
+	}
+	organization, ok := project["organization"].(map[string]any)
+	if !ok || organization["id"] != "D0005" || organization["type"] != "研发" {
+		t.Fatalf("organization=%v, want the project's organization", project["organization"])
+	}
+	if prompted := promptServices(t, organization); len(prompted) != 1 || prompted[0]["name"] != "agent-control-plane" {
+		t.Fatalf("services=%v, want the organization's services in the prompt", organization["services"])
+	}
+}
+
+// TestATaskRefThisProcessDoesNotHaveIsAnsweredByThePlatform: a task the panel owns and this
+// runtime never ran is answered by the platform's task registry, and its world resolves the
+// same way — the registration order is the pipeline, not a second mechanism.
+func TestATaskRefThisProcessDoesNotHaveIsAnsweredByThePlatform(t *testing.T) {
+	registriesStub(t, "project-749a0238", "D0005")
+	withRuntime(t, NewContextContainerManager())
+
+	reasoner := &captureContextReasoner{}
+	agent := &Agent{
+		CurrentTask: &Task{ID: "task-c", ContextRef: map[ContextContainerType]string{
+			context_builder.RefTypeTask: panelTaskID,
+		}},
+		DecideMaker: &DecisionMaker{reasoner: reasoner},
+	}
+	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := byType(contextEntityBlock(t, reasoner.seen))
+	task := entries[context_builder.RefTypeTask]
+	if task == nil || task["id"] != panelTaskID || task["description"] != "面板上的那条任务的原话" {
+		t.Fatalf("task=%v, want the task the platform has", task)
+	}
+	project := entries[context_builder.RefTypeProject]
+	if project == nil || project["id"] != "project-749a0238" || project["name"] != "autonomy" {
+		t.Fatalf("context_entity=%v, want the project the platform put that task in", entries)
+	}
+	organization, ok := project["organization"].(map[string]any)
+	if !ok || organization["id"] != "D0005" {
+		t.Fatalf("organization=%v, want the project's organization", project["organization"])
+	}
+	if prompted := promptServices(t, organization); len(prompted) != 1 || prompted[0]["name"] != "agent-control-plane" {
+		t.Fatalf("services=%v, want the organization's services in the prompt", organization["services"])
+	}
 }
 
 func TestThePromptFallsBackToThisProcessWorld(t *testing.T) {
