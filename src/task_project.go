@@ -49,9 +49,17 @@ func (r *Autonomy) TaskProject(projectID string) *TaskProject {
 	}
 	ref := context_builder.Ref{context_builder.RefTypeProject: projectID}
 	fields := contextSectionFields(r.buildContextSections(ref), containers, context_builder.RefTypeProject, projectID)
+	return taskProjectOf(fields)
+}
 
+// taskProjectOf is the project a resolved section answers: the id it was resolved as, and
+// whatever the process's world and the platform's registries know about it.
+func taskProjectOf(fields map[string]any) *TaskProject {
+	if len(fields) == 0 {
+		return nil
+	}
 	project := &TaskProject{
-		ID:          projectID,
+		ID:          contextSectionString(fields["id"]),
 		Name:        contextSectionString(fields["name"]),
 		Description: contextSectionString(fields["description"]),
 		Domain:      contextSectionString(fields["domain"]),
@@ -64,6 +72,23 @@ func (r *Autonomy) TaskProject(projectID string) *TaskProject {
 		}
 	}
 	return project
+}
+
+// TaskProjectOf is the project the *task's own context_ref* resolves to: the project the
+// task names itself, or — when the ref names a task instead — the project that resolution
+// expanded to, because a task's world is the world written on the row it names. It is the
+// same resolution a decision cycle gets (fillContextSections), so the detail and the prompt
+// answer alike; with no builder (a test, or AUTONOMY_CONTEXT_BUILDER=0) it falls back to
+// the project the task's ref names, answered from this process's own world.
+func (r *Autonomy) TaskProjectOf(task *Task) *TaskProject {
+	if task == nil {
+		return nil
+	}
+	sections := r.buildContextSections(contextRefOf(task))
+	if section, ok := sections[context_builder.RefTypeProject]; ok && section != nil {
+		return taskProjectOf(section)
+	}
+	return r.TaskProject(projectRefOf(task))
 }
 
 // buildContextSections resolves a ref now: the task detail's way in. A decision cycle

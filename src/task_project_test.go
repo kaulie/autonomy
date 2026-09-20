@@ -80,6 +80,24 @@ func registryStub(t *testing.T, projectID, name, repoURL, departmentID, departme
 	}))
 	t.Cleanup(services.Close)
 	t.Setenv(context_builder.EnvServiceRegistryAPIURL, services.URL)
+
+	tasks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if want := "/api/tasks/task-2"; r.URL.Path != want {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"task": map[string]any{
+				"taskId": "task-2", "projectId": projectID,
+				"title": "面板上的那条任务", "description": "面板上的那条任务的原话",
+				"taskType": "general", "goal": "merge",
+			},
+			"project": map[string]any{"projectId": projectID},
+		})
+	}))
+	t.Cleanup(tasks.Close)
+	t.Setenv(context_builder.EnvTaskRegistryAPIURL, tasks.URL)
 }
 
 // deadRegistries points every registry at a port nothing listens on.
@@ -88,6 +106,7 @@ func deadRegistries(t *testing.T) {
 	t.Setenv(context_builder.EnvProjectsAPIURL, "http://127.0.0.1:1")
 	t.Setenv(context_builder.EnvOrganizationAPIURL, "http://127.0.0.1:1")
 	t.Setenv(context_builder.EnvServiceRegistryAPIURL, "http://127.0.0.1:1")
+	t.Setenv(context_builder.EnvTaskRegistryAPIURL, "http://127.0.0.1:1")
 }
 
 func TestTaskDetailCarriesTheProjectAndItsOrganization(t *testing.T) {
@@ -141,6 +160,30 @@ func TestTaskDetailCarriesTheProjectAndItsOrganization(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("json=%s, want %s", raw, want)
 		}
+	}
+}
+
+func TestTaskDetailFollowsATaskRefToItsProject(t *testing.T) {
+	registryStub(t, "project-1", "autonomy", "https://github.com/kaulie/autonomy", "D0005", "AI研发部")
+
+	// The ref names a task instead of a project: the detail answers the world that task is
+	// in — the same project resolution, entered one step earlier (docs/context-builder.md).
+	progress := detailOf(t, &Task{
+		ID: "task-ref", Description: "接着那条 task 的世界", Status: TaskStatusPending,
+		ContextRef: map[ContextContainerType]string{"task": "task-2"},
+	}, NewContextContainerManager())
+
+	project := progress.Project
+	if project == nil || project.ID != "project-1" || project.Name != "autonomy" ||
+		project.GitRepoURL != "https://github.com/kaulie/autonomy" {
+		t.Fatalf("project=%+v, want the project the task it names is in", project)
+	}
+	if project.Organization == nil || project.Organization.ID != "D0005" || project.Organization.Name != "AI研发部" {
+		t.Fatalf("organization=%+v, want the organization that project belongs to", project.Organization)
+	}
+	// What the ref named is still what the detail says it named.
+	if progress.ContextRef["task"] != "task-2" {
+		t.Fatalf("context_ref=%v, want the ref the task carries", progress.ContextRef)
 	}
 }
 

@@ -429,17 +429,35 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 // formatContextEntitiesJSON is the decision context's `context_entity` block (and the
 // {{CONTEXT_ENTITY}} placeholder): what the task's context_ref names, one entry per
 // container, as the context builder resolved it before this cycle's prompt
-// (src/context_builder) — the project and the organization it belongs to, not just the
-// id the task stated.
+// (src/context_builder) — the project and the organization it belongs to, not just the id
+// the task stated.
+//
+// A ref is resolved into more than itself when the container names a world of its own: a
+// ref naming a task carries that task *and* the world the task is written in (its project,
+// with that project's organization and services). Those are the sections the builder
+// resolved — the refs the task named, and what they expanded to — so the prompt shows the
+// world, not the way it was reached.
 func formatContextEntitiesJSON(ctx DecisionContext) []byte {
 	entries := []map[string]any{}
-	if ctx.Task != nil && ctx.Task.ContextRef != nil {
-		for ctype, id := range ctx.Task.ContextRef {
-			if strings.TrimSpace(id) == "" {
-				continue
+	if ctx.Task == nil || len(ctx.Task.ContextRef) == 0 {
+		return mustJSON(entries)
+	}
+	if len(ctx.ContextSections) > 0 {
+		for _, section := range ctx.ContextSections {
+			if section != nil {
+				entries = append(entries, section)
 			}
-			entries = append(entries, contextSectionFields(ctx.ContextSections, runtimeContextContainers(), string(ctype), id))
 		}
+		sort.Slice(entries, func(i, j int) bool { return contextSectionID(entries[i]) < contextSectionID(entries[j]) })
+		return mustJSON(entries)
+	}
+	// No builder (a runtime assembled by hand, or AUTONOMY_CONTEXT_BUILDER=0): the refs the
+	// task named, answered from this process's own world.
+	for ctype, id := range ctx.Task.ContextRef {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		entries = append(entries, contextSectionFields(nil, runtimeContextContainers(), string(ctype), id))
 	}
 	sort.Slice(entries, func(i, j int) bool { return contextSectionID(entries[i]) < contextSectionID(entries[j]) })
 	return mustJSON(entries)

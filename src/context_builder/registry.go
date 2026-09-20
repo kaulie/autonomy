@@ -27,25 +27,43 @@ const (
 
 func defaultHTTPClient() *http.Client { return &http.Client{Timeout: httpTimeout} }
 
-// fetchJSON is one registry read.
+// fetchJSON is one registry read. A registry that serves a list answers 200; one that
+// serves a row by id is read with fetchJSONFound, where a 404 means "no such row".
 func fetchJSON(ctx context.Context, client *http.Client, url string, out any) error {
+	found, err := fetchJSONFound(ctx, client, url, out)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("GET %s: %s", url, http.StatusText(http.StatusNotFound))
+	}
+	return nil
+}
+
+// fetchJSONFound is fetchJSON for a registry read **by id**: `404 Not Found` is not a
+// failure but the same silence a list-based lookup gives for an id it does not have (the
+// caller decides what to do with "nobody has this one"), and any other non-2xx status is.
+func fetchJSONFound(ctx context.Context, client *http.Client, url string, out any) (bool, error) {
 	if client == nil {
 		client = defaultHTTPClient()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return false, fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	return true, json.NewDecoder(resp.Body).Decode(out)
 }
 
 func envOr(key, fallback string) string {

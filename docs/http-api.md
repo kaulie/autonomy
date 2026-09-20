@@ -128,7 +128,7 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 | 字段 | 含义 |
 |------|------|
 | `goal_type` | 受理时的目标类型（`tasks.goal_type`） |
-| `context_ref` | 它引用的世界，如 `{"project": "project-749a0238"}` |
+| `context_ref` | 它引用的世界，如 `{"project": "project-749a0238"}`，或 `{"task": "task-2ecd5e15ae3047f0"}`（跟着那条 task 的世界） |
 | `project` | **所属 project**：`{"id", "name", "description", "domain", "git_repo_url", "organization"}` |
 | `project.organization` | **project 所属的组织（部门）**：`{"id": "D0005", "name": "AI研发部"}` |
 
@@ -137,6 +137,10 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 仓库与**所属部门** —— 一个 project 属于哪个组织是平台的事实，autonomy 只读、不另立一份注册表。注册表读不到（未启动/超时 2s）
 不影响这个接口：详情照常返回，`project` 只剩 id（和本进程世界知道的那点信息），不会因为一个注册表挂了而失败。注册表结果缓存 30s
 （失败缓存 5s），所以每次读详情不会真的每次都去问。
+
+`context_ref` 指向的是一条 **task** 时，`project` 是**那条 task 的** project：本进程先按 `GetTask` 读它的行（world 写在行里），
+本进程没有那条 task 时问平台的 **task 注册表**（控制面 `GET /api/tasks/{taskId}`，`TASKS_API_URL` 覆盖，默认同控制面）——
+和决策周期用的是同一次解析（[context-builder.md](context-builder.md)），所以详情与 prompt 答案一致。
 
 进展：状态、错误，以及每一份 execution plan 和其中每一步的执行情况。
 

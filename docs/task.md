@@ -33,6 +33,10 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 目标类型与它所在的世界。跟 `tasks.agent_id` 同理，后来的指令不携带它们时不会把它们抹掉 —— 受理时从行里读回，所以一条
 只说得出 task id 的指令仍然在同一个世界里跑（见 [store.md](store.md)、[http-api.md](http-api.md)）。
 
+**世界也可以指向另一条 task**：`context_ref: {"task": "<id>"}` 说的是"这条 task 的世界，跟着那条 task 走"。那条 task 的 world
+同样写在**它的**行里，所以解析从它出发（本进程先答，本进程没有的由平台按 task id 答，见 [context-builder.md](context-builder.md)）：
+拿到它的 project，再照常往下走 —— project → organization → 那个组织登记的服务。于是"接着某条 task 干"不需要重述仓库、组织与服务。
+
 **运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点，取值就是**收束这次运行的
 那个决策**：`running`（还在跑）→ `completed`（`done` **且验证通过**：完成契约的每条判据都被权威来源证实，
 见 [verification.md](verification.md)）／`unverified`（运行结束时最后一个答复是 `done`，而它始终没通过验证 ——

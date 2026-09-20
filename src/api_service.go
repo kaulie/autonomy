@@ -310,7 +310,7 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 		UpdatedAt:   task.UpdatedAt,
 		GoalType:    string(task.GoalType),
 		ContextRef:  formatContextRefMap(task.ContextRef),
-		Project:     r.TaskProject(projectRefOf(task)),
+		Project:     r.TaskProjectOf(task),
 		Plans:       []TaskPlanProgress{},
 	}
 	plans, err := r.executionStore().ListExecutionPlans(taskID)

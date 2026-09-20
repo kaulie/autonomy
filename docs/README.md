@@ -25,7 +25,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 15. [deployment-monitor.md](deployment-monitor.md) — `deployment.monitor` 能力参考（跟随部署、定位问题；概念边界见 [capability.md](capability.md)）
 16. [inbox.md](inbox.md) — 每个 agent 的消息队列：用户 / 别的 agent / runtime 发的消息，按到达顺序一条条处理
 17. [execution-step.md](execution-step.md) — 计划与执行两层记录（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`）：计划先写、不可改、结果派生，且按 message id 追溯到是哪条回复、哪条输入
-18. [context-builder.md](context-builder.md) — `context_ref` 的解析器（独立模块）：在 prompt 之前把引用解析成世界（本进程的容器 + 平台的 project / organization / service 注册表），失败不致命
+18. [context-builder.md](context-builder.md) — `context_ref` 的解析器（独立模块）：在 prompt 之前把引用解析成世界（本进程的容器 + 平台的 project / organization / service / task 注册表），失败不致命
 19. [broadcast.md](broadcast.md) — 广播：一句话投递给某个 project 下的、或所有 project 下的所有 agent（`AcceptTask` 的复数，消息本身还是一条普通指令）
 
 ## 终局四对象
