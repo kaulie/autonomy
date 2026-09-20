@@ -7,14 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaulie/autonomy/src/context_builder"
 )
 
 // A task detail answers "which project is this task in, and which organization is
-// that project in" from the two places that know: this runtime's own world (a
-// registered context container) and the platform's project registry. Neither is
-// required — the id is always what the task itself named.
+// that project in" from the same resolution a decision cycle gets: this runtime's own
+// world (a registered context container) and the platform's registries (the project
+// registry, and the organization catalogue it points at).
 
-// detailOf is the progress a caller would get for this task, through a store.
+// detailOf is the progress a caller would get for this task, through a store and a
+// runtime wired the way bootstrap wires one.
 func detailOf(t *testing.T, task *Task, containers *ContextContainerManager) *TaskProgress {
 	t.Helper()
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
@@ -26,6 +29,9 @@ func detailOf(t *testing.T, task *Task, containers *ContextContainerManager) *Ta
 		t.Fatal(err)
 	}
 	runtime := &Autonomy{Store: store, ContextContainerManager: containers}
+	// Fresh resolvers per test: the registries' caches are per resolver instance, so a
+	// stub is never answered from another test's read.
+	runtime.ContextBuilder = newContextBuilder(runtime)
 	progress, err := runtime.TaskProgress(task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -36,31 +42,46 @@ func detailOf(t *testing.T, task *Task, containers *ContextContainerManager) *Ta
 	return progress
 }
 
-// registryStub serves a project registry with one known project.
-func registryStub(t *testing.T, projectID, name, repoURL, departmentID, departmentName string) *httptest.Server {
+// registryStub serves a project registry with one known project and the organization
+// catalogue it belongs to, so a detail can be asserted without a platform.
+func registryStub(t *testing.T, projectID, name, repoURL, departmentID, departmentName string) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	projects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/projects" {
-			t.Errorf("asked %s, want the registry's project list", r.URL.Path)
+			t.Errorf("asked %s, want the project registry's list", r.URL.Path)
 		}
 		row := map[string]any{"projectId": projectID, "name": name, "gitRepoUrl": repoURL,
 			"department": map[string]string{"departmentId": departmentID, "departmentName": departmentName}}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]any{row})
 	}))
-	t.Cleanup(server.Close)
-	t.Setenv(EnvProjectsAPIURL, server.URL)
-	forgetRegistryProjects()
-	t.Cleanup(forgetRegistryProjects)
-	return server
+	t.Cleanup(projects.Close)
+	t.Setenv(context_builder.EnvProjectsAPIURL, projects.URL)
+
+	organization := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if want := "/api/v1/departments/" + departmentID; r.URL.Path != want {
+			t.Errorf("asked %s, want %s", r.URL.Path, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": departmentID, "name": departmentName, "type": "研发"})
+	}))
+	t.Cleanup(organization.Close)
+	t.Setenv(context_builder.EnvOrganizationAPIURL, organization.URL)
+}
+
+// deadRegistries points both registries at a port nothing listens on.
+func deadRegistries(t *testing.T) {
+	t.Helper()
+	t.Setenv(context_builder.EnvProjectsAPIURL, "http://127.0.0.1:1")
+	t.Setenv(context_builder.EnvOrganizationAPIURL, "http://127.0.0.1:1")
 }
 
 func TestTaskDetailCarriesTheProjectAndItsOrganization(t *testing.T) {
 	registryStub(t, "project-1", "autonomy", "https://github.com/kaulie/autonomy", "D0005", "AI研发部")
 
-	// The runtime has the container registered too: what the registry does not say
-	// (its description and domain) comes from here, and the registry still wins on
-	// what a project *is* (its name).
+	// The runtime has the container registered too: what the registries do not say (its
+	// description and domain) comes from here, and the registry still wins on what a
+	// project *is* (its name).
 	containers := NewContextContainerManager()
 	containers.Upsert(ContextContainer{
 		ID: "project-1", Name: "the container's own name", Description: "Project 1 description",
@@ -130,11 +151,9 @@ func TestTaskDetailNamesTheProjectItCannotResolve(t *testing.T) {
 	}
 }
 
-func TestTaskDetailSurvivesARegistryThatIsDown(t *testing.T) {
+func TestTaskDetailSurvivesRegistriesThatAreDown(t *testing.T) {
 	// Nothing is listening there: the detail is the runtime's own answer, not an error.
-	t.Setenv(EnvProjectsAPIURL, "http://127.0.0.1:1")
-	forgetRegistryProjects()
-	t.Cleanup(forgetRegistryProjects)
+	deadRegistries(t)
 
 	containers := NewContextContainerManager()
 	containers.Upsert(ContextContainer{
@@ -151,12 +170,5 @@ func TestTaskDetailSurvivesARegistryThatIsDown(t *testing.T) {
 	}
 	if project.Organization != nil {
 		t.Fatalf("organization=%+v, want none without a registry", project.Organization)
-	}
-}
-
-func TestProjectsRegistryReadsTheControlPlaneByDefault(t *testing.T) {
-	t.Setenv(EnvProjectsAPIURL, "")
-	if got := projectsAPIURL(); got != DefaultProjectsAPIURL {
-		t.Fatalf("registry url=%q, want %q", got, DefaultProjectsAPIURL)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kaulie/autonomy/src/capability"
+	"github.com/kaulie/autonomy/src/context_builder"
 )
 
 type Autonomy struct {
@@ -19,7 +20,13 @@ type Autonomy struct {
 	// used to manage domain entities registration
 	DomainEntityManager *DomainEntityManager
 	// used to manage context references for a task
-	TaskCtxManager    *TaskCtxManager
+	TaskCtxManager *TaskCtxManager
+	// ContextBuilder resolves a task's context_ref into the world its cycles reason
+	// about (src/context_resolver.go, src/context_builder): this process's own
+	// registered context, plus the platform's registries — the project and the
+	// organization it belongs to. It is nil when the builder is switched off
+	// (AUTONOMY_CONTEXT_BUILDER=0).
+	ContextBuilder    *context_builder.Builder
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	World             *World
@@ -93,6 +100,10 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	TaskCtxManager := NewTaskCtxManager()
 	_autonomy.TaskCtxManager = TaskCtxManager
+
+	// The context builder is wired here, after the managers it reads: every decision
+	// cycle resolves its task's context_ref through it (fillContextSections).
+	_autonomy.ContextBuilder = newContextBuilder(_autonomy)
 
 	bootstrapFlag = true
 	return _autonomy, nil

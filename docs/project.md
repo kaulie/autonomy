@@ -35,9 +35,12 @@ Project 是人类理解和组织世界的一种 **Context**：Context Container 
 
 一条 task 用 `context_ref`（`{"project": "<id>"}`）说自己在哪个 project 里。这个 id 的名字、仓库与**所属组织（部门）**
 不重新在 autonomy 里登记一份：它们是平台的注册表事实 —— 控制面 `GET /api/projects` 答 `{projectId, name, gitRepoUrl, department{departmentId, departmentName}}`
-（组织目录本体在 organization 服务，控制面存的是「这个 project 属于哪个部门」）。所以 `GET /api/tasks/{id}` 的 `project` / `project.organization`
-是**读**出来的，注册表不在时字段缺失而不是报错（见 [http-api.md](http-api.md)）。本进程自己注册过的 context container 只补充
+（组织目录本体在 organization 服务，控制面存的是「这个 project 属于哪个部门」）。本进程自己注册过的 context container 只补充
 它知道的部分（描述、领域）。
+
+解析这件事只有一个实现：**context builder**（[context-builder.md](context-builder.md)）—— 每个决策周期在 prompt 之前解析一次，
+结果进 prompt 的 `context_entity`；`GET /api/tasks/{id}` 的 `project` / `project.organization` 是同一个解析的另一种读法
+（见 [http-api.md](http-api.md)）。注册表不在时字段缺失而不是报错。
 
 ## 不变式
 
