@@ -120,8 +120,12 @@ export AUTONOMY_LLM_MODEL=composer-2
 # one by then is wedged, and the call is given up on with "no answer from the bridge
 # within 1m0s" instead of holding its run until AUTONOMY_LLM_TIMEOUT fires. Streams
 # are untouched by it. 0 (or a negative value) disables the bound.
-# Keep HTTPS_PROXY if you need it for Cursor API egress. The Go client already
-# disables proxy for loopback Bridge RPCs; unsetting proxy can make CreateAgent hang.
+# The bridge is given none of this process's proxy variables (HTTP_PROXY/HTTPS_PROXY/
+# ALL_PROXY/NO_PROXY): its egress is the Cursor API, and a proxy it was never
+# configured for is how CreateAgent comes to hang with no error at all. A deployment
+# whose Cursor egress really does need one names it for the bridge alone:
+#   CURSOR_SDK_BRIDGE_PROXY=http://127.0.0.1:7897
+# The Go client already disables proxy for loopback bridge RPCs.
 # Stage timing logs go to stderr by default. AUTONOMY_LLM_DEBUG=0 silences SDK traces;
 # AUTONOMY_LLM_DEBUG=1 also dumps prompt body and assistant chunk sizes.
 # Optional: AUTONOMY_LLM_EVENTS=0 stores only the reason_turns run header and skips
