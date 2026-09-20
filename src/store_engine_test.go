@@ -153,14 +153,30 @@ func TestRegisterStoreEngineRejectsBlankNilAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestSQLiteEngineDefaultDSNUsesProjectRoot(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("PROJECT_ROOT", root)
+func TestSQLiteEngineDefaultDSNUsesDataDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvDataDir, dir)
 	dsn, err := sqliteEngine{}.DefaultDSN()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(root, "data", "autonomy.db")
+	if want := filepath.Join(dir, "autonomy.db"); dsn != want {
+		t.Fatalf("default DSN=%q, want %q", dsn, want)
+	}
+}
+
+// Unset, the default is the one database this machine keeps:
+// ~/database/autonomy/autonomy.db. Every consumer — the deployed runtime, a dev
+// run, the benchmark tool — reads that file, not one per checkout.
+func TestSQLiteEngineDefaultDSNFallsBackToHomeDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvDataDir, "")
+	t.Setenv("HOME", home)
+	dsn, err := sqliteEngine{}.DefaultDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "database", "autonomy", "autonomy.db")
 	if dsn != want {
 		t.Fatalf("default DSN=%q, want %q", dsn, want)
 	}
@@ -187,9 +203,12 @@ func TestOpenDefaultStoreHonoursEnv(t *testing.T) {
 	}
 }
 
-func TestOpenDefaultStoreDefaultsToProjectRoot(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("PROJECT_ROOT", root)
+func TestOpenDefaultStoreDefaultsToTheMachinesDatabase(t *testing.T) {
+	dir := t.TempDir()
+	// PROJECT_ROOT is set (as a deployment sets it) and must NOT be what picks
+	// the database: the machine has one.
+	t.Setenv("PROJECT_ROOT", dir)
+	t.Setenv(EnvDataDir, dir)
 	t.Setenv(EnvStoreEngine, "")
 	t.Setenv(EnvStoreDSN, "")
 
@@ -200,7 +219,7 @@ func TestOpenDefaultStoreDefaultsToProjectRoot(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "data", "autonomy.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "autonomy.db")); err != nil {
 		t.Fatalf("expected default sqlite file: %v", err)
 	}
 }
