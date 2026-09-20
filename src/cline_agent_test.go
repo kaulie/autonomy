@@ -175,6 +175,12 @@ func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 			t.Errorf("error %q does not mention %q", err.Error(), want)
 		}
 	}
+	// An empty answer is the one failure no prompt can fix (quota, a limit, a
+	// model that is gone), so the error names where its fix is: the backend a
+	// runtime runs on is a runtime setting.
+	if !strings.Contains(err.Error(), "AUTONOMY_LLM_BACKEND") {
+		t.Errorf("error %q does not name the backend setting", err.Error())
+	}
 	if meta.Status != LLMStatusError {
 		t.Errorf("status=%q want error: an empty answer is not a finished run", meta.Status)
 	}

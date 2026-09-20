@@ -74,6 +74,15 @@ runtime → bridge
 
 所以：**只要这台机器 `cline auth` 过，`AUTONOMY_LLM_BACKEND=cline` 一个变量就能跑**（桥会打印解析结果）。
 
+### 切到 Cline 是 runtime 的事（不是客户端的事）
+
+真正打给模型的是 **runtime 进程**（`cmd/autonomyd`，部署时 `bin/autonomyd`）；`cmd/autonomy`
+只是 HTTP 客户端，所以 `AUTONOMY_LLM_BACKEND=cline go run ./cmd/autonomy` 什么也切不了——要切的是
+runtime 的环境。当前在哪个后端可以直接问：`curl -s 127.0.0.1:4300/health` →
+`{"status":"ok","llm_backend":"cursor","llm_model":"composer-2"}`（本地 / 部署两条切换路径、
+部署包**不含** Cline 桥这个边界、以及那条 `empty model response … You're out of usage` 报错怎么读，
+都在 [llm-backend.md](llm-backend.md)）。
+
 ## 会话语义
 
 - 一个 autonomy `Agent` ↔ **一个常驻 Cline session**：第一次 `send` 由 `ClineCore.start` 起会话，
@@ -172,6 +181,9 @@ go run ./cmd/autonomyd                     # LLMReasoner 与 code_edit 现在都
 ```
 
 - 无 Node 的单元/集成测试：`go test ./src/...`（用 `src/clinesdk/fakebridge` 假桥覆盖协议与映射）。
+- **起来之后先看是哪个后端**：`curl -s 127.0.0.1:4300/health` 应报 `"llm_backend":"cline"`，
+  `backend/server.log`（或 runtime stderr）里应出现 `[cline-bridge] …`；还是 `cursor` 就说明这个
+  runtime 没吃到你设的变量（[llm-backend.md](llm-backend.md)）。
 - **真实链路**（需要 Node + 依赖 + 凭据）：
   ```bash
   CLINE_LIVE=1 AUTONOMY_CLINE_PROVIDER=deepseek AUTONOMY_CLINE_MODEL=deepseek-v4-pro \
