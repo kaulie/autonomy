@@ -20,6 +20,8 @@ go run ./cmd/autonomy -description "开放服务契约的前端入口"     # POS
 go run ./cmd/autonomy -task task-28 -description "接着上次那条"  # 同一个 task 再给一条指令
 go run ./cmd/autonomy -task task-28 -progress                    # GET /api/tasks/{id}，看一眼
 go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tasks/{id}/stop
+go run ./cmd/autonomy -broadcast project-749a0238 -description "上线窗口挪到今晚"  # POST /api/broadcast
+go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演练"        # 所有 project
 ```
 
 默认对着 `http://127.0.0.1:4300`（契约里 autonomy 的端口；`-server` / `AUTONOMY_API_URL` 可改，本地手起的 runtime 用它指过去）。不给任何参数时发的是演示指令
@@ -64,6 +66,48 @@ go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tas
 `POST /api/tasks` 拿到接受信息，再用 `GET /api/tasks/{id}` 轮询到状态不再是 `running` / `pending`（`-wait`，默认开），
 运行的结局就是命令的退出码。请求里的 `description` 为空时，指令内容取这条 task 行已有的描述（`tasks.description`）；
 `goal_type` / `context_ref` 同理：不带就用行里已有的（`tasks.goal_type` / `tasks.context_ref`，见 [task.md](task.md)）。
+
+### `POST /api/broadcast`
+
+一次广播：把**同一句话**投递给一批 agent —— **某个 project 下面的**所有 agent，或**所有 project 下面的**所有 agent
+（概念与不变式见 [broadcast.md](broadcast.md)）。
+
+它不新造投递机制：每个目标收到的消息与 `POST /api/tasks` 投给它的**逐字段相同**（`user` 发的 `instruction`，
+由那只 agent 自己的消费者按顺序处理，忙就排队），区别只是这次一次说给多个目标听，并每个目标答一行结果。
+
+```json
+{ "content": "上线窗口挪到今晚 20:00", "project_id": "project-749a0238" }
+{ "content": "今天 18:00 全员停服演练", "all_projects": true }
+```
+
+| 字段 | 含义 |
+|------|------|
+| `content` | 说的话本身（必填），逐字成为每个目标那一轮运行的输入 |
+| `project_id` | 只发给这个 project 的 agent（= 这个 project 的 task 的 owner agent） |
+| `all_projects` | 发给所有 project 的 agent（要说出来，不能靠省略猜） |
+
+`project_id` 与 `all_projects` **二选一**：两个都给，或都不给（没说清范围），返回 `400`；`content` 为空同样 `400`。
+
+响应 `200`：`scope`（`project` / `all`）+ 计数 + **每个目标一行** `deliveries[]`：
+
+```json
+{
+  "scope": "project", "project_id": "project-749a0238",
+  "targets": 3, "delivered": 2, "skipped": 1, "failed": 0,
+  "deliveries": [
+    { "task_id": "task-a", "agent_id": 10001, "project_id": "project-749a0238",
+      "status": "delivered", "message_id": 42, "queued": 0 },
+    { "task_id": "task-b", "status": "skipped", "reason": "the task has no agent" }
+  ]
+}
+```
+
+- `status: delivered` 时 `message_id` / `queued` 与 `POST /api/tasks` 的答复同义（这条消息在队里的 id，以及它前面还有几条）；
+- `status: skipped` 表示这个目标投不了，`reason` 是目标自己的事实：那条 task 还没有 agent，或它的 agent 已经被 let go
+  —— 不为了一次广播去复活它；
+- `status: failed` 表示这次投递失败（`reason` 是 runtime 自己的话），**其余目标不受影响**。
+
+广播不等运行：消息进队就返回，各只 agent 各自按顺序处理（要跟进用 `GET /api/tasks/{id}`，要停用 `POST /api/tasks/{id}/stop`）。
 
 ### `POST /api/tasks/{task_id}/stop`
 

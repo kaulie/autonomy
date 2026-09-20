@@ -203,6 +203,64 @@ func TestStopAndProgressAreTheTaskPaths(t *testing.T) {
 	}
 }
 
+func TestBroadcastPostsTheDocumentedRequest(t *testing.T) {
+	var got broadcastRequest
+	var method, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"scope":"project","project_id":"project-1","targets":2,"delivered":1,"skipped":1,"failed":0,
+			"deliveries":[
+				{"task_id":"task-a","agent_id":10001,"project_id":"project-1","status":"delivered","message_id":9,"queued":1},
+				{"task_id":"task-b","status":"skipped","reason":"the task has no agent"}
+			]}`)
+	}))
+	defer srv.Close()
+
+	var out, errOut bytes.Buffer
+	code := cli([]string{"-server", srv.URL, "-broadcast", "project-1", "-description", "上线窗口挪到今晚"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, errOut.String())
+	}
+	if method != http.MethodPost || path != "/api/broadcast" {
+		t.Errorf("asked %s %s, want POST /api/broadcast", method, path)
+	}
+	if got.Content != "上线窗口挪到今晚" || got.ProjectID != "project-1" || got.AllProjects {
+		t.Errorf("request = %+v", got)
+	}
+	for _, line := range []string{
+		"broadcast to project project-1: 2 targets, 1 delivered, 1 skipped, 0 failed",
+		"  task task-a agent 10001 message 9 queued 1",
+		"  task task-b skipped: the task has no agent",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("-broadcast stdout missing %q: %s", line, out.String())
+		}
+	}
+
+	// "all" is the whole runtime — the scope the runtime asks to hear out loud.
+	out.Reset()
+	errOut.Reset()
+	got = broadcastRequest{}
+	if code := cli([]string{"-server", srv.URL, "-broadcast", "all", "-description", "全员停服演练"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, errOut.String())
+	}
+	if !got.AllProjects || got.ProjectID != "" {
+		t.Errorf("request = %+v, want every project", got)
+	}
+
+	// A broadcast with nothing to say is refused before it is sent: the demo
+	// instruction is for the demo, not for everyone's inbox.
+	if code := cli([]string{"-server", srv.URL, "-broadcast", "all"}, &out, &errOut); code != 2 {
+		t.Errorf("-broadcast without a message exit = %d, want 2", code)
+	}
+	if code := cli([]string{"-server", srv.URL, "-task", "task-1", "-broadcast", "all", "-description", "hi"}, &out, &errOut); code != 2 {
+		t.Errorf("-broadcast with -task exit = %d, want 2", code)
+	}
+}
+
 func TestParseDefaultsAreTheDocumentedDemo(t *testing.T) {
 	t.Setenv("AUTONOMY_API_URL", "")
 	t.Setenv("AUTONOMY_TASK_ID", "")

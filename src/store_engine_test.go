@@ -67,6 +67,7 @@ func (fakeStore) ListAgentMessages(int64, int) ([]AgentMessage, error)       { r
 func (fakeStore) CountQueuedMessages(int64) (int, error)                     { return 0, nil }
 func (fakeStore) CountMessagesAhead(int64, int64) (int, error)               { return 0, nil }
 func (fakeStore) GetTask(string) (*Task, error)                              { return nil, nil }
+func (fakeStore) ListTasks() ([]*Task, error)                                { return nil, nil }
 func (fakeStore) GetAgent(int64) (*Agent, error)                             { return nil, nil }
 func (fakeStore) ActiveReasonTurn(string, int64) (*ReasonTurn, error) {
 	return nil, nil
