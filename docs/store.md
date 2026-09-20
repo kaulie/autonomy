@@ -83,18 +83,21 @@ StoreEngine（Name / DefaultDSN / Open）
 |----------|------|------|
 | `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感） | `sqlite` |
 | `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径） | 未设置时用 engine 的 `DefaultDSN()` |
+| `AUTONOMY_DATA_DIR` | 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
 
 `OpenDefaultStore()` 读取以上变量并分发到对应 engine：
 
-- `sqlite` 的 `DefaultDSN()` = `$PROJECT_ROOT/data/autonomy.db`。
+- `sqlite` 的 `DefaultDSN()` = `$AUTONOMY_DATA_DIR/autonomy.db`，默认 `~/database/autonomy/autonomy.db` ——
+  **一份库**：部署的 autonomy、开发时 `go run`、评测工具、SQL 编辑器看的是同一个文件，所以「我现在读的是哪个库」
+  只有一个答案（目录不存在时 engine 会建）。
 - 未设置 `AUTONOMY_STORE_DSN` 且 engine 无默认 DSN（如网络数据库）→ 报错，要求显式配置。
 
 ```bash
-# 默认：sqlite @ $PROJECT_ROOT/data/autonomy.db
+# 默认：sqlite @ ~/database/autonomy/autonomy.db（全机一份）
 go run ./cmd/autonomyd
 
-# 指定 engine / DSN
-export AUTONOMY_STORE_ENGINE=sqlite
+# 换目录 / 换文件
+export AUTONOMY_DATA_DIR=/Users/gaolei/database/autonomy
 export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 ```
 

@@ -16,7 +16,7 @@
 #   scripts/*.sh            本目录（来自发版包）
 #   src/agent_policy/       决策策略（来自发版包；PROJECT_ROOT 指到 runtimeDir）
 #   backend/.env            可选覆盖项（首次启动自动生成，权限 600）
-#   backend/data/           SQLite（autonomy.db）
+#   backend/data/           pid / 日志（库在 ~/database/autonomy/autonomy.db，全机一份）
 #   backend/runtime.pid     进程号
 #   backend/server.log      标准输出/错误
 set -euo pipefail
@@ -26,12 +26,16 @@ RUNTIME_DIR="${RUNTIME_DIR:-$(cd "${DIR}/.." && pwd)}"
 PORT="${SERVICE_PORT:-${PORT:-4300}}"
 APP_VERSION="${APP_VERSION:-dev}"
 
+# DATA_DIR 只放 pid/日志；库不在 backend/data 里了 —— 全机只有一份库，
+# 见下面的 AUTONOMY_STORE_DSN。
 BIN="${RUNTIME_DIR}/bin/autonomyd"
 BACKEND="${RUNTIME_DIR}/backend"
 ENV_FILE="${BACKEND}/.env"
 DATA_DIR="${BACKEND}/data"
 PID_FILE="${BACKEND}/runtime.pid"
 LOG_FILE="${BACKEND}/server.log"
+# 单库位置：$AUTONOMY_STORE_DSN > $AUTONOMY_DATA_DIR/autonomy.db > ~/database/autonomy/autonomy.db
+DB_PATH="${AUTONOMY_STORE_DSN:-${AUTONOMY_DATA_DIR:-${HOME}/database/autonomy}/autonomy.db}"
 
 log() { echo "[start] $*"; }
 die() { echo "[start][错误] $*" >&2; exit 1; }
@@ -55,6 +59,10 @@ if [ ! -f "${ENV_FILE}" ]; then
   cat > "${ENV_FILE}" <<EOF
 # autonomy 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
 # 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4300。
+# 数据库：全机只有一份（默认 ~/database/autonomy/autonomy.db），autonomy、
+# 评测工具、SQL 编辑器看的是同一个文件。要换位置就设这里（或 AUTONOMY_DATA_DIR
+# 只换目录）；没有特殊原因不要改，改了就等于换一个库。
+# AUTONOMY_STORE_DSN=/Users/gaolei/database/autonomy/autonomy.db
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——
@@ -83,7 +91,9 @@ set -a; . "${ENV_FILE}"; set +a
 
 # 平台注入的端口优先：不让 .env 里的 AUTONOMY_HTTP_ADDR 把服务钉在旧端口。
 export AUTONOMY_HTTP_ADDR="127.0.0.1:${PORT}"
-export AUTONOMY_STORE_DSN="${DATA_DIR}/autonomy.db"
+# 单库：.env / 环境里显式给了就听它的，否则就是全机那一份（脚本开头算好的 DB_PATH）。
+export AUTONOMY_STORE_DSN="${AUTONOMY_STORE_DSN:-${DB_PATH}}"
+mkdir -p "$(dirname "${AUTONOMY_STORE_DSN}")"
 export PROJECT_ROOT="${RUNTIME_DIR}"
 export APP_VERSION
 

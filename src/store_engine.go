@@ -28,6 +28,10 @@ const (
 	// EnvStoreDSN overrides the selected engine's default data source name
 	// (for sqlite, the database file path).
 	EnvStoreDSN = "AUTONOMY_STORE_DSN"
+	// EnvDataDir is the directory the sqlite engine's default database lives in
+	// (`<dir>/autonomy.db`). Unset means ~/database/autonomy, the one database
+	// every consumer on the machine shares.
+	EnvDataDir = "AUTONOMY_DATA_DIR"
 )
 
 // StoreEngine is the SPI a database backend implements to back a Store. One
@@ -113,7 +117,8 @@ func OpenStore(engineName, dsn string) (Store, error) {
 
 // OpenDefaultStore opens the configured engine, honouring AUTONOMY_STORE_ENGINE
 // and AUTONOMY_STORE_DSN. By default it is a SQLite file at
-// $PROJECT_ROOT/data/autonomy.db.
+// $AUTONOMY_DATA_DIR/autonomy.db (~/database/autonomy/autonomy.db) — the one
+// database this machine keeps.
 func OpenDefaultStore() (Store, error) {
 	return OpenStore(os.Getenv(EnvStoreEngine), os.Getenv(EnvStoreDSN))
 }
