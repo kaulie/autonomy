@@ -88,3 +88,10 @@ provider 报错、余额不足都不重试（`src/llm_turn_retry.go`）。
 
 再接别的 provider 是 `LLMStreamAdapter`（[llm-event-stream.md](llm-event-stream.md)）的事，
 不是这条路径的事。
+
+## 别和 web-cursor 的 `provider=cursor` 搞混
+
+`AUTONOMY_LLM_BACKEND=cursor` 说的是 **本 runtime 进程**里打模型走哪座桥。
+控制面任务上的 `provider=cursor` 说的是另一件事：这条 task 由 **web-cursor agent**
+在独立 workspace 里改代码、开 PR（分支名带 task id，合入走 GitHub）。两条路径都叫
+cursor，但一个是 LLM 后端，一个是任务执行器；改这边的环境变量不会让那边换人。
