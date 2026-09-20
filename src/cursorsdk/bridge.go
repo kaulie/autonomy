@@ -74,6 +74,55 @@ func defaultBridgeBinary() string {
 	return filepath.Join("third_party", "bin", name)
 }
 
+// CURSOR_SDK_BRIDGE_PROXY is the one proxy a bridge is given: set it to the URL of
+// the proxy this deployment's Cursor egress goes through, and the bridge child runs
+// with it (and with nothing else of this process's proxy environment — see
+// bridgeEnv). Unset means the bridge talks to the Cursor API directly.
+const BridgeProxyEnv = "CURSOR_SDK_BRIDGE_PROXY"
+
+// bridgeProxy is the proxy this bridge is configured with, if any.
+func bridgeProxy() string {
+	return strings.TrimSpace(os.Getenv(BridgeProxyEnv))
+}
+
+// bridgeEnv is the environment a bridge child runs with: this process's, minus the
+// proxy it was handed, plus the bridge's own when one is configured.
+//
+// The proxy variables of a gateway or deployment process are there for that
+// process's own egress — git, package managers, its own HTTP clients — and a bridge
+// is not that process: its egress is the Cursor API alone. Handing it an ambient
+// proxy it was never configured for is how a create comes to hang forever with no
+// error at all (an ESTABLISHED socket to the proxy and nothing ever coming back:
+// the same CreateAgent answers in 2.4s with no proxy env). So the default is no
+// proxy, and a deployment whose Cursor egress really does need one names it for the
+// bridge alone (CURSOR_SDK_BRIDGE_PROXY).
+func bridgeEnv(environ []string, proxy string) []string {
+	out := make([]string, 0, len(environ)+5)
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if isProxyEnv(name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "CURSOR_SDK_CLIENT_LANGUAGE=go")
+	if proxy != "" {
+		out = append(out, "HTTPS_PROXY="+proxy, "HTTP_PROXY="+proxy, "ALL_PROXY="+proxy)
+	}
+	return out
+}
+
+// isProxyEnv reports whether name is one of the proxy variables a child inherits:
+// the HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY family, either case.
+func isProxyEnv(name string) bool {
+	switch strings.ToLower(name) {
+	case "http_proxy", "https_proxy", "all_proxy", "no_proxy":
+		return true
+	default:
+		return false
+	}
+}
+
 // Start spawns the bridge and blocks until the ready-line handshake completes.
 func (m *BridgeManager) Start() (*BridgeEndpoint, error) {
 	m.mu.Lock()
@@ -93,7 +142,7 @@ func (m *BridgeManager) Start() (*BridgeEndpoint, error) {
 	workspace, _ = filepath.Abs(workspace)
 
 	cmd := exec.Command(bin, "--workspace", workspace)
-	env := append(os.Environ(), "CURSOR_SDK_CLIENT_LANGUAGE=go")
+	env := bridgeEnv(os.Environ(), bridgeProxy())
 	if m.APIKey != "" {
 		env = append(env, "CURSOR_API_KEY="+m.APIKey)
 	}
