@@ -106,71 +106,9 @@ func turnWhere(q TurnQuery) (string, []any) {
 	return " WHERE " + strings.Join(conds, " AND "), args
 }
 
-// turnSearchPattern turns a search term into the LIKE pattern that matches it
-// literally: the wildcards are characters the caller searched for, and so is the
-// escape character itself.
-func turnSearchPattern(term string) string {
-	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term)
-	return "%" + escaped + "%"
-}
-
-// turnOrderColumn is the whitelist behind the list's `order`: sorting is by one of
-// four columns, and anything else reads as id. That is also why no caller string
-// reaches the SQL text — an unknown order cannot become an injected one.
-func turnOrderColumn(order string) string {
-	switch strings.ToLower(strings.TrimSpace(order)) {
-	case "created_at":
-		return "t.created_at"
-	case "duration_ms":
-		return "t.duration_ms"
-	case "total_tokens":
-		return "t.total_tokens"
-	default:
-		return "t.id"
-	}
-}
-
-// turnSortDirection is the direction the list is sorted in: ascending only when the
-// caller says "asc", and descending otherwise — the reading order, newest first, is
-// what an unqualified request means. Like turnOrderColumn, it answers with SQL this
-// file names rather than with caller text.
-func turnSortDirection(dir string) string {
-	if strings.EqualFold(strings.TrimSpace(dir), "asc") {
-		return "ASC"
-	}
-	return "DESC"
-}
-
-// turnPageLimit / turnPageOffset clamp a page request to a page that may exist: the
-// bounds are the contract's (src/store.go), and clamping here as well as in the HTTP
-// layer means a caller that clamped — and one that did not — get the same page.
-func turnPageLimit(limit int) int {
-	if limit <= 0 {
-		return DefaultTurnPageLimit
-	}
-	if limit > MaxTurnPageLimit {
-		return MaxTurnPageLimit
-	}
-	return limit
-}
-
-func turnPageOffset(offset int) int {
-	if offset < 0 {
-		return 0
-	}
-	return offset
-}
-
-// taskTurnLimit clamps one task's execution series the same way.
-func taskTurnLimit(limit int) int {
-	if limit <= 0 {
-		return DefaultTaskTurnLimit
-	}
-	if limit > MaxTaskTurnLimit {
-		return MaxTaskTurnLimit
-	}
-	return limit
-}
+// turnOrderColumn / turnSortDirection / turnPageLimit / turnPageOffset /
+// taskTurnLimit / turnSearchPattern are the contract's page rules and live in
+// src/turn_query_page.go, because every engine reads a TurnQuery by them.
 
 // scanTurnRecord reads one row of turnColumns. agent_id is read as the driver's own
 // value rather than straight into an int64 because this column was TEXT (an agents

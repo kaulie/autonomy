@@ -705,48 +705,9 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-// taskContextRefJSON is a task's context references as its row keeps them: the
-// container type -> container id map as a JSON object. No references is "{}", so
-// "this write gave none" and "there are none" are the same row value (UpsertTask
-// reads it back to decide whether a write may overwrite what is there).
-func taskContextRefJSON(ref map[ContextContainerType]string) string {
-	out := map[string]string{}
-	for ctype, id := range ref {
-		if id == "" {
-			continue
-		}
-		out[string(ctype)] = id
-	}
-	if len(out) == 0 {
-		return "{}"
-	}
-	raw, err := json.Marshal(out)
-	if err != nil {
-		return "{}"
-	}
-	return string(raw)
-}
-
-// parseTaskContextRef is the read side of taskContextRefJSON (src/sqlite_query.go).
-// A row that says nothing — no column value, or "{}" — carries no references.
-func parseTaskContextRef(text string) (map[ContextContainerType]string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" || text == "{}" || text == "null" {
-		return nil, nil
-	}
-	var raw map[string]string
-	if err := json.Unmarshal([]byte(text), &raw); err != nil {
-		return nil, fmt.Errorf("context_ref: %w", err)
-	}
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	out := make(map[ContextContainerType]string, len(raw))
-	for k, v := range raw {
-		out[ContextContainerType(k)] = v
-	}
-	return out, nil
-}
+// taskContextRefJSON / parseTaskContextRef (a task's context references as its row
+// keeps them) live in src/store_row_text.go: both engines write that column the same
+// way.
 
 func (s *SQLiteStore) UpsertTask(task *Task) error {
 	if task == nil {
@@ -872,14 +833,6 @@ func reasonTurnInsertArgs(turn ReasonTurn) []any {
 	}
 }
 
-// llmMessageSeqUser is the seq of a run's user-input message. The assistant
-// (final return) row is placed one past the aggregated thinking/tool rows, so
-// with no aggregated rows it keeps the original seq 1 layout.
-const (
-	llmMessageSeqUser      = 0
-	llmMessageSeqAssistant = 1
-)
-
 // insertReasonTurnTx writes the run header inside tx and returns its id.
 func insertReasonTurnTx(tx *sql.Tx, turn ReasonTurn) (int64, error) {
 	args := reasonTurnInsertArgs(turn)
@@ -930,30 +883,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		return 0, fmt.Errorf("insert llm message id: %w", err)
 	}
 	return id, nil
-}
-
-// inputMessage builds a run's input llm_messages row. Its role names who authored
-// the prompt: the user (the default) for the runtime's own prompts, agent when
-// another agent delegated this run to the agent that is running it.
-func inputMessage(turnID int64, turn ReasonTurn) LLMMessage {
-	role := turn.InputRole
-	if role == "" {
-		role = LLMMessageRoleUser
-	}
-	return LLMMessage{
-		TurnID:      turnID,
-		TaskID:      turn.TaskID,
-		AgentID:     turn.AgentID,
-		Cycle:       turn.Cycle,
-		Seq:         llmMessageSeqUser,
-		Role:        role,
-		Content:     turn.Input,
-		LLMProvider: turn.LLMProvider,
-		Model:       turn.Model,
-		RunID:       turn.RunID,
-		Status:      turn.Status,
-		CreatedAt:   turn.CreatedAt,
-	}
 }
 
 // InsertReasonTurn writes a complete interaction in one shot: the run header plus

@@ -106,12 +106,5 @@ FROM verification WHERE task_id = ? ORDER BY id`, taskID)
 	return out, rows.Err()
 }
 
-// orJSONObjectText keeps a JSON object column as the JSON it is: the text if it parses
-// as an object, an empty object otherwise (a column nobody can read is not a value).
-func orJSONObjectText(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
-		return "{}"
-	}
-	return trimmed
-}
+// orJSONObjectText (a JSON object column kept as an object) lives in
+// src/store_row_text.go, because both engines write that column the same way.

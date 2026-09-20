@@ -10,6 +10,8 @@ MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并�
   `VerificationStore` / `TurnQueryStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
 - **引擎 SPI**：`StoreEngine`（`src/store_engine.go`）——一个 engine 对应一种数据库/方言。
 - **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_*.go`），默认启用。
+- **PostgreSQL 引擎**：`postgres`（`src/postgres_engine.go` + `src/postgres_*.go`）——
+  同一份 `Store` 契约的第二套实现，靠 `AUTONOMY_STORE_ENGINE=postgres` 启用（见下文「PostgreSQL」）。
 
 ## 分层
 
@@ -25,7 +27,7 @@ TaskStore  AgentStore  ConversationStore  ExecutionStore  VerificationStore  Tur
         │
 StoreEngine（Name / DefaultDSN / Open）
         ├── sqliteEngine   （内建，默认）→ SQLiteStore
-        └── 未来的 postgresEngine / mysqlEngine / …
+        └── postgresEngine （PostgreSQL）→ PostgresStore
 ```
 
 谁依赖哪个端口，就是「它到底需要什么数据」的说明：
@@ -52,26 +54,35 @@ StoreEngine（Name / DefaultDSN / Open）
 「上层不认识数据库」不只是约定，`src/store_ports_test.go` 会失败：
 
 - **`TestOnlyTheStorageEngineMayImportADriver`**：遍历仓库里所有**非 engine 的生产 .go 文件**
-  （engine 文件 = `sqlite_*.go`），任何一个
+  （engine 文件 = `sqlite_*.go` / `postgres_*.go`），任何一个
   1. import 了 `database/sql`、`modernc.org/sqlite`、`lib/pq`、`go-sql-driver/mysql`、`pgx` …，
-  2. 或提到了 `SQLiteStore` / `OpenSQLiteStore` / `sqliteEngine` / `sql.Open(`，
+  2. 或提到了 `SQLiteStore` / `OpenSQLiteStore` / `sqliteEngine` / `PostgresStore` / `OpenPostgresStore` /
+     `postgresEngine` / `sql.Open(`，
 
-  即视为越界 → 测试失败。driver 只能活在 engine 里，`sqlite_engine.go` 也不带 driver
-  （它调用 `OpenSQLiteStore`）。
+  即视为越界 → 测试失败。driver 只能活在 engine 里，`sqlite_engine.go` 与 `postgres_engine.go` 自己都不带
+  driver（它们分别调用 `OpenSQLiteStore` / `OpenPostgresStore`）。
 - **`TestTheUpperLayerWritesThroughItsPorts`**：用一个**不是 SQLite** 的 store（`recordingStore`）
   驱动全部上层写入（task / agent / run / plan+step+interaction / verdict / contract），
   断言它们只以端口调用的形式落地、字段与顺序不变。
-- 编译期断言（同文件）：`SQLiteStore` 满足每一个端口与 `Store`。
+- 编译期断言（同文件）：`SQLiteStore` **与** `PostgresStore` 各自满足每一个端口与 `Store`。
 
 关键不变式：
 
 - **上层只认识端口**，不认识 SQL、方言、表名；所有 DB 访问都经 `activeStore()` 及其端口切片。
-- **engine 独占其 schema 与迁移**：DDL、`ON CONFLICT`、`INSERT OR IGNORE`、占位符（`?`）、
-  `PRAGMA`、以及「Go 字段 ↔ 列值」的编码（`src/sqlite_encoding.go`）全部封装在 engine 内。
+- **engine 独占其 schema 与迁移**：DDL、`ON CONFLICT`、`INSERT OR IGNORE`、占位符（`?` / `$n`）、
+  `PRAGMA`、`RETURNING`、以及「Go 字段 ↔ 列值」的编码（`src/sqlite_encoding.go` / `src/postgres_encoding.go`）
+  全部封装在 engine 内。
 - **数据模型中立**：`LLMEvent` / `LLMUsage` / `ReasonTurn` / `AgentMessage` 等模型本身与数据库无关，engine 不参与解释。
 - **写者不止一个**：runtime 有多个 goroutine 在写（一轮自己的记录、inbox 消费者在跑同一条 task 的下一条消息）。
-  engine 把 `_pragma=busy_timeout(10000)` 放进 DSN（对每条连接生效），让第二个写者**等锁**而不是拿到
-  `SQLITE_BUSY`；`journal_mode=WAL` 让读者不被写者挡住。
+  sqlite engine 把 `_pragma=busy_timeout(10000)` 放进 DSN（对每条连接生效），让第二个写者**等锁**而不是拿到
+  `SQLITE_BUSY`；`journal_mode=WAL` 让读者不被写者挡住。postgres 不需要这些：并发写是数据库自己的事，engine
+  只把连接池设成一个小池（`SetMaxOpenConns(10)`），让多个写者各自拿到连接。
+- **同一个值在哪个 engine 里都一样**：JSON 列保持有效（空则是 `{}` / `[]`）、0 号外键写成 NULL、任务的
+  「世界」（`context_ref`）编成那个 JSON 对象——这些是契约层面的写法，住在 `src/store_row_text.go`，两个 engine
+  都调它，而不是各留一份。**时间不一样**：sqlite 存 RFC3339 文本，postgres 存 `timestamptz`（会话用哪个时区，
+  取回来就是哪个时区）；但 engine 读出来一律**归一到 UTC**，所以对外（`time.Time`、`TurnRecord`、
+  数据 API 的 JSON）说法一致 —— 一条日志不会因为换库而换了渲染方式。
+  `src/store_engines_test.go` 把这句话做成了测试：同一串写入走同一个端口，两个 engine 的答案逐行比对。
 - **表之间的引用是软链**：schema 里没有一条 `FOREIGN KEY`，链接写在列名与注释里（`llm_messages.turn_id`
   → `reason_turns.id`、`execution_step_interaction.reason_turn_id` → `reason_turns.id` …），因此没有级联。
   其中 `llm_events` 是**叶子**：只有出边、没有入边，删/重建它只影响原始事件回放
@@ -82,15 +93,18 @@ StoreEngine（Name / DefaultDSN / Open）
 
 | 环境变量 | 含义 | 默认 |
 |----------|------|------|
-| `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感） | `sqlite` |
-| `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径） | 未设置时用 engine 的 `DefaultDSN()` |
-| `AUTONOMY_DATA_DIR` | 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
+| `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感）：`sqlite` / `postgres` | `sqlite` |
+| `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()` |
+| `AUTONOMY_DATA_DIR` | sqlite 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
+| `AUTONOMY_POSTGRES_DSN` | postgres 的默认 DSN（`DATABASE_URL` 亦可） | 两个都空且 `AUTONOMY_STORE_DSN` 也空 → 报错 |
 
 `OpenDefaultStore()` 读取以上变量并分发到对应 engine：
 
 - `sqlite` 的 `DefaultDSN()` = `$AUTONOMY_DATA_DIR/autonomy.db`，默认 `~/database/autonomy/autonomy.db` ——
   **一份库**：部署的 autonomy、开发时 `go run`、评测工具、SQL 编辑器看的是同一个文件，所以「我现在读的是哪个库」
   只有一个答案（目录不存在时 engine 会建）。
+- `postgres` 的 `DefaultDSN()` 取 `$AUTONOMY_POSTGRES_DSN`，其次 `$DATABASE_URL`；都没有就报错 ——
+  网络数据库没有「合理默认」，猜一个本地库正是把一次正式运行写进笔记本库的那条路。
 - 未设置 `AUTONOMY_STORE_DSN` 且 engine 无默认 DSN（如网络数据库）→ 报错，要求显式配置。
 
 ```bash
@@ -100,7 +114,38 @@ go run ./cmd/autonomyd
 # 换目录 / 换文件
 export AUTONOMY_DATA_DIR=/Users/gaolei/database/autonomy
 export AUTONOMY_STORE_DSN=/tmp/autonomy.db
+
+# 换引擎：postgres（新库，老数据仍在 sqlite 文件里）
+export AUTONOMY_STORE_ENGINE=postgres
+export AUTONOMY_POSTGRES_DSN="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable"
+# 或显式给出连接串（覆盖 DefaultDSN）
+export AUTONOMY_STORE_ENGINE=postgres
+export AUTONOMY_STORE_DSN="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable"
 ```
+
+## PostgreSQL
+
+`postgres` engine 是同一份 `Store` 契约的第二套实现（pgx 的 `database/sql` 驱动），SQL、schema、占位符与
+「取回刚插入的 id」的方式都是它自己的：
+
+| 关注点 | sqlite | postgres |
+|--------|--------|----------|
+| 自增主键 | `INTEGER PRIMARY KEY AUTOINCREMENT`（`agents` 从 10000 起） | `BIGINT GENERATED BY DEFAULT AS IDENTITY`（`agents` 的序列同样从 10000 起，`ensureAgentsIDSequence`） |
+| 拿 id | `LastInsertId()` | `RETURNING id` |
+| 幂等写 | `INSERT OR IGNORE` | `ON CONFLICT … DO NOTHING`（同样的唯一键） |
+| 参数 | `?` | `$1, $2, …` |
+| 时间列 | `TEXT`（RFC3339，`formatTime`） | `TIMESTAMPTZ`（`pgTime(…)` / `pgNullTime(…)`） |
+| JSON 列 | `TEXT`，原样 | `TEXT`，原样（**不用 `jsonb`**：契约就是「原文」，`jsonb` 会重排/重写文档） |
+| 收件箱抢占 | 先查队首、再带 `status = queued` 条件 UPDATE | 一条语句：`UPDATE … WHERE id = (SELECT … LIMIT 1) AND status = $n RETURNING …` |
+| 列表搜索 | `LIKE … ESCAPE '\'`（SQLite 的 LIKE 对 ASCII 大小写不敏感） | `ILIKE … ESCAPE '\'`（保持与 sqlite 同样的匹配行为，不让「同一个搜索」有两套语义） |
+
+行为上两者对齐的地方，正是 `TurnRecord`、`AgentMessage`、`ExecutionPlan` 这些**契约形状**：时间对外一律
+RFC3339 UTC 文本，`cost_cents` 是 NULL 还是 0 仍然区分，`llm_messages` 的 seq 规则（输入 0、聚合 1..N、
+返回 N+1）一致，`completion_contract` 的首写即定稿一致。
+
+测试（`src/postgres_store_test.go`）跑在**真的 PostgreSQL** 上：每个用例自己建一个库、跑完删掉，
+`AUTONOMY_POSTGRES_TEST_DSN` 指定服务器（默认 `postgres://localhost:5432/postgres?sslmode=disable`），
+连不上就 skip。SQL 是这里要测的东西，所以不拿 mock 测。
 
 ## 扩展：接入一种新数据库
 
@@ -190,5 +235,14 @@ export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 | sqlite 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/sqlite_turns.go` |
 | 数据 API 的读取与响应（`TurnQueryStore` 的使用方） | `src/turn_api.go`、`src/http_server.go` |
 | sqlite 列值编码（时间 / NULL / JSON） | `src/sqlite_encoding.go` |
+| postgres engine（默认 DSN / 注册） | `src/postgres_engine.go` |
+| postgres 实现（schema / 读写） | `src/postgres_store.go`、`src/postgres_query.go`、`src/postgres_execution.go`、`src/postgres_verification.go`、`src/postgres_inbox.go` |
+| postgres 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/postgres_turns.go` |
+| postgres 列值编码（时间 / NULL / 参数占位） | `src/postgres_encoding.go` |
+| 两个 engine 共用的行文本写法（JSON 保持有效、0 号外键 → NULL、`context_ref`） | `src/store_row_text.go` |
+| 两个 engine 共用的 TurnQuery 分页 / 排序 / 搜索规则 | `src/turn_query_page.go` |
+| 两个 engine 共用的「一条 run 的输入消息长什么样」 | `src/conversation_records.go` |
+| postgres engine 的测试（真库、每例一库） | `src/postgres_store_test.go` |
+| 两个 engine 答案一致的测试（同一串写入逐行比对） | `src/store_engines_test.go` |
 | 端口边界与上层可插拔性的测试 | `src/store_ports_test.go` |
 | 进程内单例与 bootstrap | `src/autonomy.go`（`activeStore()`，`BootstrapAutonomy`） |

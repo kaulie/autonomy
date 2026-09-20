@@ -313,27 +313,6 @@ SELECT id, status, error FROM execution_step
 	return out, true, nil
 }
 
-// nullID writes 0 as SQL NULL: "no such message" and "message 0" are not the same
-// thing, and the traceability columns are empty when there was nothing to point at.
-func nullID(id int64) any {
-	if id <= 0 {
-		return nil
-	}
-	return id
-}
-
-// orJSONArray / orJSONObject keep a JSON column valid even when the caller left it
-// empty, so a reader never has to guess what an empty string means.
-func orJSONArray(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return "[]"
-	}
-	return text
-}
-
-func orJSONObject(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return "{}"
-	}
-	return text
-}
+// nullID / orJSONArray / orJSONObject (how a zero id and an empty JSON column become
+// column values) live in src/store_row_text.go, because both engines write them the
+// same way.
