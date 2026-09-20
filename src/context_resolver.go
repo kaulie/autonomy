@@ -48,10 +48,12 @@ func (r contextWorldResolver) Resolve(_ context.Context, _, id string, _ map[str
 }
 
 // newContextBuilder is the runtime's resolver chain: this process's own world, then the
-// platform's project registry (name, repository, the project's organization) and the
-// organization catalogue (the department itself). It returns nil when the builder is
-// switched off (AUTONOMY_CONTEXT_BUILDER=0) — an offline deployment then answers from
-// what the process knows, exactly as it did before there was a builder.
+// platform's project registry (name, repository, the project's organization), the
+// organization catalogue (the department itself) and the service registry (the services
+// that department has, each with its repository). Order is the pipeline: the service
+// registry asks for the department id the two before it found. It returns nil when the
+// builder is switched off (AUTONOMY_CONTEXT_BUILDER=0) — an offline deployment then
+// answers from what the process knows, exactly as it did before there was a builder.
 func newContextBuilder(autonomy *Autonomy) *context_builder.Builder {
 	if !contextBuilderEnabled() {
 		return nil
@@ -60,6 +62,7 @@ func newContextBuilder(autonomy *Autonomy) *context_builder.Builder {
 		contextWorldResolver{autonomy: autonomy},
 		context_builder.NewProjectRegistry(),
 		context_builder.NewOrganization(),
+		context_builder.NewServiceRegistry(),
 	).WithTimeout(contextBuilderTimeout())
 }
 

@@ -38,9 +38,13 @@ Project 是人类理解和组织世界的一种 **Context**：Context Container 
 （组织目录本体在 organization 服务，控制面存的是「这个 project 属于哪个部门」）。本进程自己注册过的 context container 只补充
 它知道的部分（描述、领域）。
 
+**这个组织里有哪些服务**（以及每个服务的代码在哪个仓库）同理是平台的事实：autonomy 从 project id 走到组织 id，再去问服务中心
+`GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://127.0.0.1:4240`）—— 这就是 Project「相关服务与端点」
+这条逻辑字段在运行时被填上的那一跳。
+
 解析这件事只有一个实现：**context builder**（[context-builder.md](context-builder.md)）—— 每个决策周期在 prompt 之前解析一次，
-结果进 prompt 的 `context_entity`；`GET /api/tasks/{id}` 的 `project` / `project.organization` 是同一个解析的另一种读法
-（见 [http-api.md](http-api.md)）。注册表不在时字段缺失而不是报错。
+结果进 prompt 的 `context_entity`（project → organization → 它的 services）；`GET /api/tasks/{id}` 的 `project` / `project.organization`
+是同一个解析的另一种读法（见 [http-api.md](http-api.md)）。注册表不在时字段缺失而不是报错。
 
 ## 不变式
 

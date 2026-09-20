@@ -29,7 +29,7 @@ func withRuntime(t *testing.T, containers *ContextContainerManager) *Autonomy {
 	return runtime
 }
 
-// registriesStub points the builder's two registries at stubs and counts their reads.
+// registriesStub points the builder's three registries at stubs and counts their reads.
 func registriesStub(t *testing.T, projectID, departmentID string) *counter {
 	t.Helper()
 	reads := &counter{}
@@ -51,6 +51,22 @@ func registriesStub(t *testing.T, projectID, departmentID string) *counter {
 	}))
 	t.Cleanup(departments.Close)
 	t.Setenv(context_builder.EnvOrganizationAPIURL, departments.URL)
+
+	// The service registry answers for whatever organization it is asked about: the
+	// department the two stubs above named, which is the point of the chain.
+	services := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads.hit()
+		if want := "/v1/orgs/" + departmentID + "/services"; r.URL.Path != want {
+			t.Errorf("asked %s, want %s", r.URL.Path, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"services": []map[string]any{{
+			"namespace": "default", "name": "agent-control-plane", "type": "service",
+			"description": "控制面", "gitRepoUrl": "https://github.com/kaulie/agent-control-plane.git", "version": "f8d53f2d",
+		}}})
+	}))
+	t.Cleanup(services.Close)
+	t.Setenv(context_builder.EnvServiceRegistryAPIURL, services.URL)
 	return reads
 }
 
@@ -131,6 +147,13 @@ func TestADecisionCycleResolvesItsContextBeforeThePrompt(t *testing.T) {
 	if !ok || organization["id"] != "D0005" || organization["name"] != "AI研发部" || organization["type"] != "研发" {
 		t.Fatalf("organization=%v, want the department the project belongs to", section["organization"])
 	}
+	// And the services that department registered, with the repository each one's code
+	// lives in: project -> organization -> service registry, in one resolution.
+	services, ok := organization["services"].([]map[string]any)
+	if !ok || len(services) != 1 || services[0]["name"] != "agent-control-plane" ||
+		services[0]["git_repo_url"] != "https://github.com/kaulie/agent-control-plane.git" {
+		t.Fatalf("services=%v, want the services the project's organization has", organization["services"])
+	}
 	if reads.calls() == 0 {
 		t.Fatal("no registry was read, want the platform asked")
 	}
@@ -155,6 +178,32 @@ func TestADecisionCycleResolvesItsContextBeforeThePrompt(t *testing.T) {
 	if !ok || blockOrganization["id"] != "D0005" || blockOrganization["name"] != "AI研发部" || blockOrganization["type"] != "研发" {
 		t.Fatalf("entry=%v, want the organization in the prompt", entry)
 	}
+	// The services ride along into the prompt: what the planner reads is the world —
+	// which services this organization has, and where each one's code lives.
+	prompted := promptServices(t, blockOrganization)
+	if len(prompted) != 1 || prompted[0]["name"] != "agent-control-plane" ||
+		prompted[0]["git_repo_url"] != "https://github.com/kaulie/agent-control-plane.git" {
+		t.Fatalf("entry=%v, want the organization's services in the prompt", entry)
+	}
+}
+
+// promptServices is a section's services as the prompt's JSON carries them: everything
+// went through encoding/json, so a list of objects reads back as []any.
+func promptServices(t *testing.T, organization map[string]any) []map[string]any {
+	t.Helper()
+	rows, ok := organization["services"].([]any)
+	if !ok {
+		t.Fatalf("organization=%v, want the services in the prompt", organization)
+	}
+	services := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		service, ok := row.(map[string]any)
+		if !ok {
+			t.Fatalf("service=%v, want an object", row)
+		}
+		services = append(services, service)
+	}
+	return services
 }
 
 func TestThePromptFallsBackToThisProcessWorld(t *testing.T) {
