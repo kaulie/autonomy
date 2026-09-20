@@ -34,8 +34,10 @@ ENV_FILE="${BACKEND}/.env"
 DATA_DIR="${BACKEND}/data"
 PID_FILE="${BACKEND}/runtime.pid"
 LOG_FILE="${BACKEND}/server.log"
-# 单库位置：$AUTONOMY_STORE_DSN > $AUTONOMY_DATA_DIR/autonomy.db > ~/database/autonomy/autonomy.db
-DB_PATH="${AUTONOMY_STORE_DSN:-${AUTONOMY_DATA_DIR:-${HOME}/database/autonomy}/autonomy.db}"
+# 数据库引擎：sqlite（默认）或 postgres。sqlite 的库路径在下面 .env 载入之后推导
+# （$AUTONOMY_STORE_DSN > $AUTONOMY_DATA_DIR/autonomy.db > ~/database/autonomy/autonomy.db）；
+# postgres 的连接串由 .env / 环境给出（AUTONOMY_STORE_DSN 或 AUTONOMY_POSTGRES_DSN），
+# 本脚本不推导、也不动它 —— 「全机一份库」只对 sqlite 的文件路径成立。
 
 log() { echo "[start] $*"; }
 die() { echo "[start][错误] $*" >&2; exit 1; }
@@ -63,6 +65,11 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 评测工具、SQL 编辑器看的是同一个文件。要换位置就设这里（或 AUTONOMY_DATA_DIR
 # 只换目录）；没有特殊原因不要改，改了就等于换一个库。
 # AUTONOMY_STORE_DSN=/Users/gaolei/database/autonomy/autonomy.db
+# 换引擎（postgres）：老数据留在上面那个 sqlite 文件里，不迁移；postgres 那边是新建的库，
+# 连接串由 AUTONOMY_STORE_DSN 或 AUTONOMY_POSTGRES_DSN 给出（后者是它的默认 DSN）。改完走平台
+# 重启，再用 /health 确认，见 docs/store.md「两个引擎，两份数据」。
+# AUTONOMY_STORE_ENGINE=postgres
+# AUTONOMY_POSTGRES_DSN=postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——
@@ -91,9 +98,14 @@ set -a; . "${ENV_FILE}"; set +a
 
 # 平台注入的端口优先：不让 .env 里的 AUTONOMY_HTTP_ADDR 把服务钉在旧端口。
 export AUTONOMY_HTTP_ADDR="127.0.0.1:${PORT}"
-# 单库：.env / 环境里显式给了就听它的，否则就是全机那一份（脚本开头算好的 DB_PATH）。
-export AUTONOMY_STORE_DSN="${AUTONOMY_STORE_DSN:-${DB_PATH}}"
-mkdir -p "$(dirname "${AUTONOMY_STORE_DSN}")"
+# 引擎与库：sqlite（默认）走「全机一份库」那条推导，显式给了就听显式的；postgres 的连接串
+# 原样传下去，脚本不为它建目录、也不猜它。
+STORE_ENGINE="${AUTONOMY_STORE_ENGINE:-sqlite}"
+if [ "${STORE_ENGINE}" = "sqlite" ]; then
+  DB_PATH="${AUTONOMY_STORE_DSN:-${AUTONOMY_DATA_DIR:-${HOME}/database/autonomy}/autonomy.db}"
+  export AUTONOMY_STORE_DSN="${DB_PATH}"
+  mkdir -p "$(dirname "${AUTONOMY_STORE_DSN}")"
+fi
 export PROJECT_ROOT="${RUNTIME_DIR}"
 export APP_VERSION
 
@@ -122,7 +134,11 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
-log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+if [ "${STORE_ENGINE}" = "sqlite" ]; then
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=sqlite 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+else
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=${STORE_ENGINE} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+fi
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

@@ -9,21 +9,32 @@ import (
 	"testing"
 )
 
-// The persistence contract is a union of five ports (src/store.go), and these
-// tests pin the split from both ends: the engine satisfies every port, the
-// runtime drives its own record-keeping through the ports alone, and no file
-// outside the engine may reach for a database driver or the concrete engine.
+// The persistence contract is a union of seven ports (src/store.go), and these tests
+// pin the split from both ends: every engine satisfies every port, the runtime drives
+// its own record-keeping through the ports alone, and no file outside an engine may
+// reach for a database driver or a concrete engine.
 
-// The built-in engine implements each port, so an engine can also be built port
-// by port (or be a decorator over one port) and still compose with Store.
+// Both engines implement each port, so an engine can also be built port by port (or be
+// a decorator over one port) and still compose with Store. The two implementations are
+// independent — different SQL, different schema, different drivers — and they answer to
+// the same contract, which is what makes the database a configuration choice.
 var (
 	_ TaskStore         = (*SQLiteStore)(nil)
 	_ AgentStore        = (*SQLiteStore)(nil)
 	_ ConversationStore = (*SQLiteStore)(nil)
 	_ ExecutionStore    = (*SQLiteStore)(nil)
 	_ VerificationStore = (*SQLiteStore)(nil)
+	_ InboxStore        = (*SQLiteStore)(nil)
 	_ TurnQueryStore    = (*SQLiteStore)(nil)
 	_ Store             = (*SQLiteStore)(nil)
+	_ TaskStore         = (*PostgresStore)(nil)
+	_ AgentStore        = (*PostgresStore)(nil)
+	_ ConversationStore = (*PostgresStore)(nil)
+	_ ExecutionStore    = (*PostgresStore)(nil)
+	_ VerificationStore = (*PostgresStore)(nil)
+	_ InboxStore        = (*PostgresStore)(nil)
+	_ TurnQueryStore    = (*PostgresStore)(nil)
+	_ Store             = (*PostgresStore)(nil)
 	_ Store             = fakeStore{}
 )
 
@@ -143,9 +154,9 @@ func TestOnlyTheStorageEngineMayImportADriver(t *testing.T) {
 		"github.com/go-sql-driver/mysql",
 		"github.com/jackc/pgx",
 	}
-	// The concrete engine's own names: the upper layer takes the port, never the
+	// The concrete engines' own names: the upper layer takes the port, never the
 	// type behind it.
-	concrete := []string{"SQLiteStore", "OpenSQLiteStore", "sqliteEngine", "sql.Open("}
+	concrete := []string{"SQLiteStore", "OpenSQLiteStore", "sqliteEngine", "PostgresStore", "OpenPostgresStore", "postgresEngine", "sql.Open("}
 
 	var engineFiles, driverImports, checked int
 	err := filepath.Walk("..", func(path string, info os.FileInfo, err error) error {
@@ -204,11 +215,11 @@ func TestOnlyTheStorageEngineMayImportADriver(t *testing.T) {
 	}
 }
 
-// importsADriver reports whether an import path is a database driver (or a
-// sqlite binding, whatever it is called).
+// importsADriver reports whether an import path is a database driver (or a driver's
+// subpackage, or a sqlite binding, whatever it is called).
 func importsADriver(path string, drivers []string) bool {
 	for _, driver := range drivers {
-		if path == driver || strings.Contains(path, "sqlite") {
+		if path == driver || strings.HasPrefix(path, driver+"/") || strings.Contains(path, "sqlite") {
 			return true
 		}
 	}
@@ -216,10 +227,15 @@ func importsADriver(path string, drivers []string) bool {
 }
 
 // isEngineFile says whether a production .go file belongs to a storage engine.
-// Engines are named <engine>_*.go, so the sqlite engine owns sqlite_*.go and is
-// the only place a driver may be imported.
+// Engines are named <engine>_*.go, so the sqlite engine owns sqlite_*.go, the postgres
+// engine owns postgres_*.go, and those are the only places a driver may be imported.
 func isEngineFile(name string) bool {
-	return strings.HasPrefix(name, "sqlite_")
+	for _, engine := range []string{"sqlite", "postgres"} {
+		if strings.HasPrefix(name, engine+"_") {
+			return true
+		}
+	}
+	return false
 }
 
 // runtime uses through a store that is not SQLite: the task, the agent, the run,
