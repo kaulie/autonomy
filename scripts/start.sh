@@ -57,7 +57,14 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4300。
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
+# LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——
+# 发版包不带 Cline 桥，所以要把 AUTONOMY_CLINE_BRIDGE_SCRIPT 指到一个装好
+# @cline/sdk 的桥脚本（发版包外的一份 checkout 即可），provider/model 不设
+# 则由 `cline auth` 保存的配置解析。改完走平台重启，再用 /health 确认。
 # AUTONOMY_LLM_BACKEND=cline
+# AUTONOMY_CLINE_PROVIDER=deepseek
+# AUTONOMY_CLINE_MODEL=deepseek-v4-pro
+# AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/autonomy/src/clinesdk/bridge/bridge.mjs
 # AUTONOMY_MAX_STEPS=4
 # cursor bridge 默认用发版包自带的（bin/cursor-sdk-bridge，本脚本自动指过去）。
 # 想换桥（或指向别处的下载产物）在这里覆盖；外部桥用
@@ -102,7 +109,7 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
-log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 库=${AUTONOMY_STORE_DSN} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

@@ -73,9 +73,18 @@ func (s *HTTPServer) ListenAndServe(addr string) error {
 	return server.ListenAndServe()
 }
 
-// healthResponse is what a liveness probe answers: this process is up and serving.
+// healthResponse is what a liveness probe answers: this process is up and serving,
+// and — because it is the one setting a caller cannot see from the outside — which
+// LLM backend it will acquire its agents on, and the model that backend defaults
+// to. Every run failing the same way is a question about this pair first: an
+// account out of quota is a backend that can be switched (AUTONOMY_LLM_BACKEND,
+// docs/llm-backend.md). llm_model is omitted when the backend resolves the model
+// itself — a Cline bridge with no AUTONOMY_CLINE_MODEL uses the one saved by
+// `cline auth`, which this process does not hold.
 type healthResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	LLMBackend string `json:"llm_backend,omitempty"`
+	LLMModel   string `json:"llm_model,omitempty"`
 }
 
 // stopTaskResponse is what a stop answers: the task, and the status it was left in.
@@ -90,15 +99,22 @@ type errResponse struct {
 }
 
 // handleHealth reports liveness — the probe the deployment platform polls for every
-// service.
+// service — and which LLM backend this runtime runs acquired agents on, so "which
+// one am I on, and did the switch take?" is answerable over HTTP instead of from
+// the process's environment.
 //
-// @Summary  健康检查
+// @Summary  健康检查（含当前 LLM 后端）
 // @Tags     system
 // @Produce  json
 // @Success  200  {object}  healthResponse
 // @Router   /health [get]
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
+	backend := defaultAgentBackend()
+	writeJSON(w, http.StatusOK, healthResponse{
+		Status:     "ok",
+		LLMBackend: string(backend),
+		LLMModel:   defaultAgentModel(backend),
+	})
 }
 
 // handleHealthAlias is the same probe under the name callers used before the

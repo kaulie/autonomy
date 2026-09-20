@@ -63,3 +63,30 @@ func (a *Agent) PromptLLMText(ctx context.Context, prompt string, mode ReasonMod
 	text, _, err := a.PromptLLMStream(ctx, prompt, mode, nil)
 	return text, err
 }
+
+// defaultAgentModel is the model a backend would run on when nothing else said
+// otherwise: the Cursor default (AUTONOMY_LLM_MODEL, else composer-2), or the
+// Cline model id. It is empty for Cline when AUTONOMY_CLINE_MODEL is unset,
+// because then the bridge resolves the model from the provider/model saved by
+// `cline auth` — a fact this process does not hold. It is what /health reports
+// next to the backend, so a caller can see what this runtime will run on without
+// reading its environment (docs/llm-backend.md).
+func defaultAgentModel(backend AgentBackend) string {
+	if backend == AgentBackendCline {
+		return resolveClineModel()
+	}
+	return defaultCursorModel()
+}
+
+// emptyModelResponseErr is what a run that produced no text at all is: a failed
+// run, whatever the provider calls it. It is the failure whose fix is not in the
+// prompt — an exhausted account, a spending limit or a model that is gone ends a
+// run exactly this way, with the provider's own words in msg and nothing else —
+// so the error says where the answer is: the backend belongs to the runtime
+// process, not to the caller or to the agent (AUTONOMY_LLM_BACKEND, GET /health,
+// docs/llm-backend.md).
+func emptyModelResponseErr(status, msg string) error {
+	return fmt.Errorf("empty model response (status=%s msg=%s) — the model answered nothing; "+
+		"if the account is out of quota or the model is gone, the LLM backend is a runtime "+
+		"setting (AUTONOMY_LLM_BACKEND, see docs/llm-backend.md)", status, msg)
+}

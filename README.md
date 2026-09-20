@@ -152,6 +152,15 @@ that owns the resident Cline session; the Go side owns process lifecycle, reques
 correlation, event fan-out and the mapping onto neutral `LLMEvent`s. Design,
 protocol and mapping: [docs/cline-reasoner.md](docs/cline-reasoner.md).
 
+The backend is the **runtime's** (`autonomyd`) setting, not the CLI's: `cmd/autonomy`
+is an HTTP client, so exporting the variable around `go run ./cmd/autonomy` changes
+nothing — that run's failure is what the runtime decided. A running runtime says
+which backend it is on: `GET /health` → `{"status":"ok","llm_backend":"cursor","llm_model":"composer-2"}`.
+How to switch it (dev and deployed, and the one boundary that matters on a deployed
+runtime — the release package does **not** ship the Cline bridge), plus how to read
+the `empty model response … You're out of usage` failure that motivates a switch:
+[docs/llm-backend.md](docs/llm-backend.md).
+
 ```bash
 ./scripts/install-cline-bridge.sh            # npm install @cline/sdk for the bridge
 export AUTONOMY_LLM_BACKEND=cline            # enough when the machine ran `cline auth`
