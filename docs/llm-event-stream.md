@@ -27,6 +27,49 @@ reason_turns (1)  ────  run header：provider/status/usage/耗时/run_id
 - `llm_events` 是 **新增** 子表，`turn_id` 指向 header，按 `seq` 排序，`payload` 保留 provider
   原始事件 JSON。
 
+## 引用关系：`llm_events` 是一张叶子表
+
+「它是独立表吗，其他表有引用吗」两个方向都答一遍，而两个方向都没有 `FOREIGN KEY`：
+
+```
+reason_turns                llm_events                 其它表
+     ▲                          │
+     └── turn_id, run_id ───────┘                     agents / tasks / llm_messages /
+         （软链，无 FK）                                 execution_* / completion_contract /
+                                                        verification / agent_messages …
+   出边：有（指向 reason_turns）   入边：没有（没有任何表指向 llm_events）
+```
+
+- **出边（它引用谁）**：`llm_events.turn_id → reason_turns.id`；`run_id` 是 header 上 `run_id` 的**冗余副本**
+  （省一次 join，`FinishReasonTurn` 在 run 结束时回填）。两条都是**软链**——schema 里没有任何
+  `FOREIGN KEY`，所以即使 `PRAGMA foreign_keys = ON` 也管不到它们：删掉 header **不会**级联删掉它的
+  `llm_events` 行，反过来也一样（见 [保留策略](#保留策略)）。
+- **入边（谁引用它）**：**没有**。整份 schema 一条 `FOREIGN KEY` 都没有，也没有哪张表带
+  `llm_events_id` / `event_id` 这样的列。唯一认识它的代码是 `ConversationStore` 端口
+  （`AppendLLMEvents` / `ListLLMEvents`）：写方只有 `LLMTrace`，读方是 store 自己的聚合兜底
+  （`FinishReasonTurn` 的再聚合、`backfillReasonTurnMessages`）。HTTP 读接口目前只读
+  `llm_messages`，本表还没有对外出口。
+- **行为上也独立**：`AUTONOMY_LLM_EVENTS=0` 时整张表可以不写，`reason_turns` 头与 `llm_messages`
+  照常（见下文开关），说明没有别的表把「这次 run 发生过什么」寄托在 `llm_events` 上。
+- **所以**：换 / 删 / 重建 `llm_events` 只影响原始事件流的回放（含 `AUTONOMY_LLM_EVENTS=0` 下
+  已存在的行为），不影响任何别的表的完整性；它自身的完整性也**没有任何人保证**——没有级联、
+  没有清理任务、`turn_id` 指向一行已不存在的 header 时也没有报错。
+
+自查任意一个库（两条都应为空）：
+
+```sql
+-- 入边：指向 llm_events 的外键
+SELECT m.name, fk."from" FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) fk
+WHERE m.type = 'table' AND fk."table" = 'llm_events';
+-- 入边：形如 llm_events_id / event_id 的列
+SELECT m.name, p.name FROM sqlite_master m JOIN pragma_table_info(m.name) p
+WHERE m.type = 'table' AND m.name <> 'llm_events'
+  AND (lower(p.name) LIKE '%llm_event%' OR lower(p.name) LIKE '%event_id%');
+```
+
+这条断言是**有测试钉住的**：`TestNoOtherTableReferencesLLMEvents`
+（`src/llm_event_stream_test.go`）——将来谁真的要加一条入边，得先把这个测试改掉。
+
 ## DDL
 
 ```sql

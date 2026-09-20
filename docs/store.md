@@ -71,6 +71,10 @@ StoreEngine（Name / DefaultDSN / Open）
 - **写者不止一个**：runtime 有多个 goroutine 在写（一轮自己的记录、inbox 消费者在跑同一条 task 的下一条消息）。
   engine 把 `_pragma=busy_timeout(10000)` 放进 DSN（对每条连接生效），让第二个写者**等锁**而不是拿到
   `SQLITE_BUSY`；`journal_mode=WAL` 让读者不被写者挡住。
+- **表之间的引用是软链**：schema 里没有一条 `FOREIGN KEY`，链接写在列名与注释里（`llm_messages.turn_id`
+  → `reason_turns.id`、`execution_step_interaction.reason_turn_id` → `reason_turns.id` …），因此没有级联。
+  其中 `llm_events` 是**叶子**：只有出边、没有入边，删/重建它只影响原始事件回放
+  （[llm-event-stream.md](llm-event-stream.md)，断言由 `TestNoOtherTableReferencesLLMEvents` 钉住）。
 
 
 ## 配置

@@ -236,6 +236,60 @@ func TestLLMEventStreamEnabledParsing(t *testing.T) {
 	}
 }
 
+// TestNoOtherTableReferencesLLMEvents answers "llm_events 是独立表吗，其他表有引用它吗"
+// as an executable claim (docs/llm-event-stream.md): the raw stream is a leaf. It
+// points outward at reason_turns (turn_id, plus the redundant run_id), and nothing
+// points back at it — no foreign key targets it anywhere in the schema, and no other
+// table carries a column shaped like a pointer to one of its rows. That is what makes
+// the table droppable on its own: replay is the only thing that depends on it.
+func TestNoOtherTableReferencesLLMEvents(t *testing.T) {
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// No foreign key into llm_events (there are none at all: links are soft ids).
+	var inboundFKs int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master m
+JOIN pragma_foreign_key_list(m.name) fk
+WHERE m.type = 'table' AND fk."table" = 'llm_events'`).Scan(&inboundFKs); err != nil {
+		t.Fatal(err)
+	}
+	if inboundFKs != 0 {
+		t.Fatalf("foreign keys into llm_events=%d, want 0: nothing references the stream", inboundFKs)
+	}
+
+	// No column outside llm_events is shaped like a link back to one of its rows.
+	rows, err := store.db.Query(`SELECT m.name || '.' || p.name FROM sqlite_master m
+JOIN pragma_table_info(m.name) p
+WHERE m.type = 'table' AND m.name <> 'llm_events'
+  AND (lower(p.name) LIKE '%llm_event%' OR lower(p.name) LIKE '%event_id%')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatal(err)
+		}
+		t.Errorf("%s looks like a reference to llm_events, want none: the stream is a leaf", column)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The one edge that does exist is written as a soft id: turn_id names the header.
+	var turnIDColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('llm_events') WHERE name = 'turn_id'`).Scan(&turnIDColumn); err != nil {
+		t.Fatal(err)
+	}
+	if turnIDColumn != 1 {
+		t.Fatalf("llm_events.turn_id columns=%d, want 1 (the soft link to reason_turns.id)", turnIDColumn)
+	}
+}
+
 func TestLLMTraceSkipsStreamWhenDisabled(t *testing.T) {
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
