@@ -9,6 +9,7 @@
 // ones, so curl says the same thing:
 //
 //	POST /api/tasks                             one instruction (what this sends)
+//	POST /api/broadcast                         one message to many agents (-broadcast)
 //	GET  /api/tasks/{id}                        its progress (-wait, -progress)
 //	GET  /api/tasks/{id}/agents/{id}/events     the conversation (-follow)
 //	POST /api/tasks/{id}/stop                   stop what the agent is on (-stop)
@@ -25,6 +26,8 @@
 //	autonomy -task task-28                                          # instruction is the row's description
 //	autonomy -task task-28 -progress                                # just look
 //	autonomy -task task-28 -stop                                    # stop what it is on
+//	autonomy -broadcast project-749a0238 -description "上线窗口挪到今晚"  # that project's agents
+//	autonomy -broadcast all -description "今天 18:00 全员停服演练"        # every project's agents
 package main
 
 import (
@@ -70,6 +73,7 @@ type options struct {
 	domain      string
 	goal        string
 	context     contextRefs
+	broadcast   string
 	wait        bool
 	follow      bool
 	timeout     time.Duration
@@ -78,6 +82,10 @@ type options struct {
 	progress    bool
 	json        bool
 }
+
+// broadcastAll is the -broadcast value that means "every project". Every other
+// value is a project id.
+const broadcastAll = "all"
 
 // contextRefs is -context key=value, repeatable. An empty value drops the key,
 // so the default ref can be taken back with -context project=.
@@ -111,7 +119,8 @@ func (r contextRefs) Set(v string) error {
 }
 
 const usageHeader = `autonomy sends one instruction to a running Autonomy runtime over HTTP (docs/http-api.md)
-and, by default, follows the run it becomes.
+and, by default, follows the run it becomes — or, with -broadcast, hands one message
+to many agents at once (one project's, or every project's).
 
 usage: autonomy [flags] [more words of the instruction]
 
@@ -152,6 +161,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.DurationVar(&o.timeout, "timeout", o.timeout, "give up waiting after this long; the run goes on")
 	fs.BoolVar(&o.stop, "stop", false, "stop the message the task's agent is on, instead of sending one")
 	fs.BoolVar(&o.progress, "progress", false, "print the task's progress and exit, instead of sending one (exit code = that status)")
+	fs.StringVar(&o.broadcast, "broadcast", "", `hand the instruction to many agents at once: "`+broadcastAll+`" (every project) or a project id (its agents). -wait / -follow / -task / -context do not apply`)
 	fs.BoolVar(&o.json, "json", false, "print the API's responses as JSON")
 	if err := fs.Parse(args); err != nil {
 		return o, err
@@ -160,9 +170,10 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		o.description = strings.TrimSpace(o.description + " " + strings.Join(words, " "))
 	}
 	o.description = strings.TrimSpace(o.description)
+	o.broadcast = strings.TrimSpace(o.broadcast)
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	if o.description == "" && !o.stop && !o.progress && !set["task"] {
+	if o.description == "" && !o.stop && !o.progress && o.broadcast == "" && !set["task"] {
 		// Nothing was asked for and no task was named: this is the demo.
 		o.description = demoInstruction
 	}
@@ -171,6 +182,17 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	}
 	if (o.stop || o.progress) && strings.TrimSpace(o.task) == "" {
 		return o, errors.New("-task is required with -stop and -progress")
+	}
+	if o.broadcast != "" {
+		if o.stop || o.progress {
+			return o, errors.New("-broadcast is its own mode: pick it or -stop / -progress")
+		}
+		if set["task"] {
+			return o, errors.New("-task names one task; a broadcast picks its targets from the scope it is given")
+		}
+		if o.description == "" {
+			return o, errors.New("-broadcast needs something to say: -description \"…\" (or words after the flags)")
+		}
 	}
 	if !o.wait {
 		// There is nothing to follow while not waiting.
@@ -209,8 +231,62 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return showProgress(ctx, c, o, stdout, stderr)
 	case o.stop:
 		return stopRun(ctx, c, o, stdout, stderr)
+	case o.broadcast != "":
+		return broadcast(ctx, c, o, stdout, stderr)
 	default:
 		return submit(ctx, c, o, stdout, stderr)
+	}
+}
+
+// broadcast is POST /api/broadcast: one message to many agents at once — the
+// agents of one project (-broadcast <project id>), or of every project
+// (-broadcast all). There is nothing to wait for here: a broadcast hands the
+// message to each target's queue and answers who took it, and each agent runs it
+// in its own time; -progress / -stop are how a task is followed up afterwards.
+//
+// The exit code is about the delivery: a target that could not be reached
+// (failed) is a non-zero exit, because the message did not get there. A skipped
+// target is not — nothing was there to tell.
+func broadcast(ctx context.Context, c *client, o options, stdout, stderr io.Writer) int {
+	req := broadcastRequest{Content: o.description}
+	if strings.EqualFold(o.broadcast, broadcastAll) {
+		req.AllProjects = true
+	} else {
+		req.ProjectID = o.broadcast
+	}
+	var resp broadcastResponse
+	if err := c.post(ctx, broadcastPath, req, &resp); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if o.json {
+		writeJSON(stdout, resp)
+	} else {
+		printBroadcast(stdout, resp)
+	}
+	if resp.Failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+// printBroadcast is a broadcast's report for a terminal: what the scope reached,
+// and one line per target.
+func printBroadcast(w io.Writer, resp broadcastResponse) {
+	scope := "every project"
+	if resp.Scope != "all" {
+		scope = "project " + resp.ProjectID
+	}
+	fmt.Fprintf(w, "broadcast to %s: %d targets, %d delivered, %d skipped, %d failed\n",
+		scope, resp.Targets, resp.Delivered, resp.Skipped, resp.Failed)
+	for _, delivery := range resp.Deliveries {
+		switch delivery.Status {
+		case "delivered":
+			fmt.Fprintf(w, "  task %s agent %d message %d queued %d\n",
+				delivery.TaskID, delivery.AgentID, delivery.MessageID, delivery.Queued)
+		default:
+			fmt.Fprintf(w, "  task %s %s: %s\n", delivery.TaskID, delivery.Status, oneLine(delivery.Reason))
+		}
 	}
 }
 

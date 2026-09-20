@@ -86,6 +86,7 @@ go test ./...
 go run ./cmd/hello
 go run ./cmd/autonomyd                    # the runtime: owns the store, the agents, the world; serves the task API
 go run ./cmd/autonomy -description "…"    # a client of it: one instruction over HTTP
+go run ./cmd/autonomy -broadcast all -description "…"   # or one message to every project's agents
 ```
 
 The API's contract is not a hand-written spec: every route is **annotated where it is handled**

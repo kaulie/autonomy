@@ -44,6 +44,39 @@ type stopResponse struct {
 	Status string `json:"status"`
 }
 
+// broadcastRequest is the body of POST /api/broadcast: what to say, and the one
+// thing that says to whom — a project id, or every project. The scope is always
+// named, because "no project" is not the same request as "every project".
+type broadcastRequest struct {
+	Content     string `json:"content"`
+	ProjectID   string `json:"project_id,omitempty"`
+	AllProjects bool   `json:"all_projects,omitempty"`
+}
+
+// broadcastResponse is what a broadcast answers: the scope it ran with, how the
+// targets came out, and one line per target.
+type broadcastResponse struct {
+	Scope      string              `json:"scope"`
+	ProjectID  string              `json:"project_id,omitempty"`
+	Targets    int                 `json:"targets"`
+	Delivered  int                 `json:"delivered"`
+	Skipped    int                 `json:"skipped"`
+	Failed     int                 `json:"failed"`
+	Deliveries []broadcastDelivery `json:"deliveries"`
+}
+
+// broadcastDelivery is one target: the task the message was addressed to, its
+// agent, and where the message went — or why it did not (status + reason).
+type broadcastDelivery struct {
+	TaskID    string `json:"task_id"`
+	AgentID   int64  `json:"agent_id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	Status    string `json:"status"`
+	MessageID int64  `json:"message_id,omitempty"`
+	Queued    int    `json:"queued,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 // taskProgress is GET /api/tasks/{id}: what the task is (goal type, the context it
 // names, the project it belongs to and that project's organization), its status,
 // and every plan it has run, each with the steps it planned and what executing
@@ -212,3 +245,6 @@ func eventsPath(taskID string, agentID, after int64) string {
 func stopPath(taskID string) string {
 	return progressPath(taskID) + "/stop"
 }
+
+// broadcastPath is POST /api/broadcast: one message to many agents at once.
+const broadcastPath = "/api/broadcast"

@@ -33,6 +33,13 @@ type TaskStore interface {
 	UpsertTask(task *Task) error
 	// GetTask reads one task row by id. A missing row returns (nil, nil).
 	GetTask(taskID string) (*Task, error)
+	// ListTasks reads every task row, oldest first. It is how a broadcast
+	// resolves its scope: a project's agents are the agents of that project's
+	// tasks, and "every project" is every task (src/broadcast.go). One task per
+	// row, with the context references it carries — the project a task names is
+	// on its own row (tasks.context_ref), so the scope is decided from what the
+	// tasks are, not from what a request happened to say.
+	ListTasks() ([]*Task, error)
 }
 
 // AgentStore is the agent rows.

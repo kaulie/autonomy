@@ -10,9 +10,12 @@
 
 | sender | 谁 | 今天从哪来 | kind |
 |---|---|---|---|
-| `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` | `instruction` |
+| `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` / `POST /api/broadcast` 的广播（一句话投给多个 agent，每个目标各收到一条） | `instruction` |
 | `agent` | 别的 agent | capability 交给 worker 的那句 prompt（`LLMSession.Prompt`），`sender_id` 记委托方 agent | `delegation` |
 | `system` | runtime 自己 | `POST /api/tasks/{id}/stop` 的停止通知（`sender_id=runtime`） | `stop` |
+
+广播不是第四种消息：它是**同一个 `user` 指令**同时说给多个 agent（见 [broadcast.md](broadcast.md)）——
+每个目标收到的就是它自己那条 task 的指令，队列里看不出任何差别。
 
 实现：`src/message.go`（模型）、`src/inbox.go`（队列与消费者）、`src/sqlite_inbox.go`（engine 侧的表与读写）。
 

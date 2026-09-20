@@ -12,6 +12,7 @@
 // Its client counterpart is cmd/autonomy:
 //
 //	go run ./cmd/autonomy -description "开放服务契约的前端入口"
+//	go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演练"
 //
 // General API Info for swaggo/swag — this comment block is the annotation entry
 // point the release step reads (`swag init -g cmd/autonomyd/main.go`, then
@@ -26,7 +27,7 @@
 //
 // @title        autonomy
 // @version      1.0.0
-// @description  自主 agent runtime 的任务 API：受理指令、查任务详情（状态 / 计划 / 所属 project 与组织）、查 agent 工作状态、轮询对话流。
+// @description  自主 agent runtime 的任务 API：受理指令、把一句话广播给一批 agent（某个 project 下的 / 所有 project 下的）、查任务详情（状态 / 计划 / 所属 project 与组织）、查 agent 工作状态、轮询对话流。
 // @BasePath     /
 // @schemes      http
 // @host         127.0.0.1:4300

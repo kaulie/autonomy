@@ -35,6 +35,7 @@ type httpsRoute struct {
 func (s *HTTPServer) routes() []httpsRoute {
 	return []httpsRoute{
 		{"POST /api/tasks", s.handleAcceptTask},
+		{"POST /api/broadcast", s.handleBroadcast},
 		{"POST /api/tasks/{taskID}/stop", s.handleStopTask},
 		{"GET /api/tasks/{taskID}", s.handleTaskProgress},
 		{"GET /api/tasks/{taskID}/agents/{agentID}", s.handleAgentStatus},
@@ -137,6 +138,33 @@ func (s *HTTPServer) handleAcceptTask(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusAccepted, resp)
+}
+
+// handleBroadcast delivers one message to many agents at once: the agents of one
+// project, or of every project. Every target gets the instruction message an
+// accept would give it (one per target's task), and the answer is one line per
+// target — delivered, or why it was not (docs/broadcast.md).
+//
+// @Summary  广播一条消息给一批 agent（某个 project 下的，或所有 project 下的）
+// @Tags     agents
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.BroadcastRequest   true  "说的话与范围（project_id 指定一个 project，或 all_projects=true 所有 project）"
+// @Success  200      {object}  autonomy.BroadcastResponse  "每个目标一条结果：delivered / skipped / failed，以及消息落在那只 agent 队列的哪里"
+// @Failure  400      {object}  errResponse                 "请求不是合法 JSON，内容为空，或没说清范围（两样都写 / 两样都没写）"
+// @Router   /api/broadcast [post]
+func (s *HTTPServer) handleBroadcast(w http.ResponseWriter, req *http.Request) {
+	var body BroadcastRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	resp, err := s.Autonomy.Broadcast(body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleStopTask stops what a task's agent is on right now: the message being

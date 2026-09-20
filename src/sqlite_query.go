@@ -20,35 +20,77 @@ func (s *SQLiteStore) GetTask(taskID string) (*Task, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("empty task id")
 	}
-	var (
-		t          Task
-		domain     string
-		goalType   string
-		contextRef string
-		createdAt  string
-		updatedAt  string
-	)
-	err := s.db.QueryRow(`
+	task, err := scanTask(s.db.QueryRow(`
 SELECT id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at
-FROM tasks WHERE id = ?`, taskID).Scan(
-		&t.ID, &t.Description, &domain, &goalType, &contextRef, &t.Status, &t.Error, &t.AgentID, &createdAt, &updatedAt,
-	)
+FROM tasks WHERE id = ?`, taskID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get task: %w", err)
 	}
+	return task, nil
+}
+
+// ListTasks reads every task row, oldest first (created_at, then id): the walk a
+// broadcast takes to resolve its scope (src/broadcast.go).
+func (s *SQLiteStore) ListTasks() ([]*Task, error) {
+	rows, err := s.db.Query(`
+SELECT id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at
+FROM tasks ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer rows.Close()
+	var tasks []*Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+// taskRow is one row of the task columns every task read selects, in that order.
+// Both readers take the same columns so a task is the same value whichever way it
+// was read (GetTask, ListTasks).
+type taskRow interface {
+	Scan(dest ...any) error
+}
+
+// scanTask reads one task row: the columns the queries above select, in order.
+// It reports sql.ErrNoRows unchanged, so a caller that asks for one task can tell
+// "no such task" from "the read failed".
+func scanTask(row taskRow) (*Task, error) {
+	var (
+		task       Task
+		domain     string
+		goalType   string
+		contextRef string
+		createdAt  string
+		updatedAt  string
+	)
+	if err := row.Scan(
+		&task.ID, &task.Description, &domain, &goalType, &contextRef, &task.Status, &task.Error,
+		&task.AgentID, &createdAt, &updatedAt,
+	); err != nil {
+		return nil, err
+	}
 	refs, err := parseTaskContextRef(contextRef)
 	if err != nil {
-		return nil, fmt.Errorf("get task %s: %w", taskID, err)
+		return nil, fmt.Errorf("task %s context_ref: %w", task.ID, err)
 	}
-	t.Domain = TaskDomain(domain)
-	t.GoalType = GoalType(goalType)
-	t.ContextRef = refs
-	t.CreatedAt = parseTime(createdAt)
-	t.UpdatedAt = parseTime(updatedAt)
-	return &t, nil
+	task.Domain = TaskDomain(domain)
+	task.GoalType = GoalType(goalType)
+	task.ContextRef = refs
+	task.CreatedAt = parseTime(createdAt)
+	task.UpdatedAt = parseTime(updatedAt)
+	return &task, nil
 }
 
 // GetAgent reads one agent by id. A missing row returns (nil, nil).
