@@ -12,6 +12,24 @@
 // Its client counterpart is cmd/autonomy:
 //
 //	go run ./cmd/autonomy -description "开放服务契约的前端入口"
+//
+// General API Info for swaggo/swag — this comment block is the annotation entry
+// point the release step reads (`swag init -g cmd/autonomyd/main.go`, then
+// scripts/register-contract.sh registers the result in the service registry). The
+// endpoints themselves are annotated next to their handlers in src/http_server.go,
+// and src/contract_test.go keeps the two in step: annotations are the contract's
+// single source of truth (docs/http-api.md).
+//
+// Nothing at runtime depends on this: the runtime imports no swaggo package. @version
+// is only a fallback for a local `swag init` — the registration step passes the
+// release's APP_VERSION, so the registry always sees the deployed hash.
+//
+// @title        autonomy
+// @version      1.0.0
+// @description  自主 agent runtime 的任务 API：受理指令、查任务详情（状态 / 计划 / 所属 project 与组织）、查 agent 工作状态、轮询对话流。
+// @BasePath     /
+// @schemes      http
+// @host         127.0.0.1:4300
 package main
 
 import (

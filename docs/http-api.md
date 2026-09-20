@@ -1,6 +1,6 @@
 # HTTP API
 
-Autonomy 对外的任务 HTTP 接口。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
+Autonomy 对外的任务 HTTP 接口。契约本身由代码里的注解生成（见文末「服务契约」）。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
 
 发版包（`build.sh`）自带两份东西，部署上直接能用：runtime 本体 `bin/autonomyd`，以及 cursor bridge `bin/cursor-sdk-bridge`（`third_party/` 是 gitignore 的下载产物，不带它的话部署上的 llm 任务会失败在 `cursor bridge ping`；`scripts/start.sh` 会把它指给 `CURSOR_SDK_BRIDGE_BIN`）。
 
@@ -133,6 +133,44 @@ go run ./cmd/autonomy -task task-28 -stop                        # POST /api/tas
   "next_poll_after_seq": 42
 }
 ```
+
+
+## 服务契约（注解自动登记）
+
+本服务的对外契约**不是手写的规范文件，而是代码里的 swag 注解**：
+
+```
+cmd/autonomyd/main.go    General API Info（@title/@version/@description/@BasePath/@host）
+src/http_server.go       每个 handler 一段（@Summary/@Tags/@Param/@Success/@Failure/@Router）
+        │
+        ├─ swag init -g cmd/autonomyd/main.go -o docs --outputTypes json → docs/swagger.json（产物，gitignore）
+        └─ scripts/register-contract.sh → 服务中心 client/ci/register-go-service.sh → PUT 契约 + 实例（幂等）
+```
+
+接口改了，注解跟着改，下一次发布契约自动刷新 —— 没人手工维护 OpenAPI。注解**运行期零依赖**：
+不 import swaggo（`json.RawMessage` 这类推断不出来的字段用 `swaggertype` 标签说明，也只是标签）。
+
+| 触发点 | 怎么做 |
+|---|---|
+| `build.sh`（发版） | 末尾自动登记，**默认尽力而为**：服务中心不可达只告警、不阻塞发版（`REGISTER_CONTRACT_STRICT=1` 改硬失败，`SKIP_REGISTER_CONTRACT=1` 跳过） |
+| 手工 / 补登记 | `bash scripts/register-contract.sh`（幂等，随时能跑） |
+| 本地看一眼注解产物 | `swag init -g cmd/autonomyd/main.go -o docs --outputTypes json` + `python3 -c 'import json;print(list(json.load(open("docs/swagger.json"))["paths"]))'` |
+| 一致性 | `go test ./src -run TestSwagAnnotationsMatchTheRoutes`：**注解与路由表必须一一对应**，少一条注解（契约漏接口）或多一条（契约撒谎）都红 |
+
+环境变量（`scripts/register-contract.sh`，都可覆盖）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SERVICE_NAME` | `autonomy` | 注册用的服务名 |
+| `DEPARTMENT_ID` | `D0005`（AI研发部） | 归属部门；服务端会拿组织接口把 ID/名称对齐 |
+| `INSTANCES` | `127.0.0.1:4300` | 实例地址，逗号分隔（端口即本服务的契约端口） |
+| `REGISTRY_URL` / `REGISTRY_NS` | `http://127.0.0.1:4240` / `default` | 服务中心（只绑本机）；写接口收紧后用 `REGISTRY_TOKEN` |
+| `VERSION` | `$APP_VERSION` 或 `git describe` | 上报版本；**契约没变时不会写库**（比对规范 sha256，避免刷 revision） |
+| `SWAG_MAIN` | `cmd/autonomyd/main.go` | swag 的入口（`cmd/autonomy` 是客户端，自动探测会选错，所以显式指定） |
+| `OWNER` / `HEALTH_PATH` / `TAGS` / `GIT_REPO` | `kaulie` / `/health` / `tasks` / 本仓库 | 契约元数据 |
+
+服务中心的客户端脚本本体在 [service-registry](https://github.com/kaulie/service-registry) 的 `client/ci/`；
+`scripts/register-contract.sh` 按「环境变量指定 → 本机检出 → 仓库内 vendored 副本 → 浅克隆兜底」找到它。
 
 ## 说明
 

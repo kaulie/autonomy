@@ -88,6 +88,12 @@ go run ./cmd/autonomyd                    # the runtime: owns the store, the age
 go run ./cmd/autonomy -description "…"    # a client of it: one instruction over HTTP
 ```
 
+The API's contract is not a hand-written spec: every route is **annotated where it is handled**
+(`cmd/autonomyd/main.go` for the General API Info, `src/http_server.go` per handler), swag turns the
+annotations into OpenAPI, and `scripts/register-contract.sh` registers it — `build.sh` does that at the
+end of every release, idempotently. `src/contract_test.go` keeps the annotations and the served routes
+one and the same. Annotations cost the runtime nothing (no swaggo import). See [docs/http-api.md](docs/http-api.md).
+
 ### Cursor SDK Bridge (LLMReasoner)
 
 Go adapter: `src/cursorsdk` (BridgeManager + Connect client + Agent/Run), generated from `proto/sdk/v1` per [Agent: start here](https://github.com/cursor/sdk-bridge#agent-start-here).
