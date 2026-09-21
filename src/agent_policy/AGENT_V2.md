@@ -446,9 +446,18 @@ For `blocked` or `need_input`, describe what is missing.
 ```json
 "need": {
   "type": "information | capability | permission | approval | decision | resource",
-  "description": "What is missing and why it prevents progress"
+  "description": "What is missing and why it prevents progress",
+  "options": ["a choice the owner can accept as it is", "another one"]
 }
 ```
+
+`options` is **optional**, and it is not a summary of the description: it is the choice you
+hand to the owner. Fill it when the answer really is one of a few concrete ones — 2 to 9 of
+them, each non-empty, none repeating, each written so the owner can pick it as it reads
+(for example "merge PR #136 as it is" / "rework step 2 first"). Leave it **empty** when you
+are asking an open question (the owner answers in their own words) and when there is nothing
+to choose because a capability is missing: one option is not a choice, it is the answer, and
+it belongs in `description`.
 
 ## Output Schema
 
@@ -493,7 +502,8 @@ For `blocked` or `need_input`, describe what is missing.
   },
   "need": {
     "type": "information | capability | permission | approval | decision | resource",
-    "description": "What is missing and why it prevents progress"
+    "description": "What is missing and why it prevents progress",
+    "options": ["only when a person must pick one", "2 to 9 of them; leave empty otherwise"]
   },
   "deliverable" : [],
   "presentation" : []
@@ -519,7 +529,7 @@ a cycle, not a task.
 ### `done`
 
 - `plan` MUST be empty.
-- `need` MUST be empty.
+- `need` MUST be empty (including `options`).
 - `evidence` MUST contain the observation or World State proving the Goal is satisfied.
 - The runtime verifies it against the Completion Contract pinned with your first answer,
   and only a `done` every criterion of which passes completes the Task. A `done` that is
@@ -530,9 +540,13 @@ a cycle, not a task.
 
 - `plan` MUST be empty.
 - `need` MUST describe the missing capability, information, resource, or constraint that prevents progress.
+- `need.options`, when present, MUST be 2 to 9 distinct non-empty choices. Leave it empty when
+  the answer is a sentence, not a choice.
 
 ### `need_input`
 
 - `plan` MUST be empty.
 - `need` MUST describe the information, approval, or external decision required to continue.
+- `need.options`, when present, MUST be 2 to 9 distinct non-empty choices: what the owner can
+  pick between. An open question has no options — the owner answers in their own words.
 

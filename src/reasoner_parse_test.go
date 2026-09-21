@@ -643,7 +643,7 @@ func TestParseDecisionRealPlannerPayload(t *testing.T) {
 	if len(decision.Evidence) != 2 || decision.Evidence[0].ID != "E1" || decision.Evidence[0].Source != "goal" {
 		t.Fatalf("evidence=%+v", decision.Evidence)
 	}
-	if decision.Need != (Need{}) {
+	if decision.Need.Type != "" || decision.Need.Description != "" || len(decision.Need.Options) != 0 {
 		t.Fatalf("need=%+v, want empty", decision.Need)
 	}
 	if len(decision.Deliverables) != 1 || decision.Deliverables[0].Type != "asset" ||

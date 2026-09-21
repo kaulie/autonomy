@@ -22,6 +22,9 @@ func TestValidateDecisionAcceptsWhatTheContractAsksFor(t *testing.T) {
 		{Type: "done", Evidence: []Evidence{{ID: "E1", Fact: "the goal is satisfied"}}},
 		{Type: "blocked", Need: Need{Type: "capability", Description: "nothing available can do this"}},
 		{Type: "need_input", Need: Need{Type: "decision", Description: "which environment?"}},
+		// Options are optional: when given they are the choice handed to the owner.
+		{Type: "blocked", Need: Need{Type: "capability", Description: "nothing available can do this", Options: []string{"merge PR #136 as it is", "rework step 2 first"}}},
+		{Type: "need_input", Need: Need{Type: "decision", Description: "which environment?", Options: []string{"staging", "production"}}},
 	}
 	for _, decision := range decisions {
 		if err := validateDecision(decision); err != nil {
@@ -83,6 +86,37 @@ func TestValidateDecisionNamesTheRuleItBreaks(t *testing.T) {
 			decision: Decision{Type: "blocked"},
 			rule:     "blocked.need_describes_what_is_missing",
 			detail:   "does not say what is missing",
+		},
+		{
+			name:     "a done that carries options",
+			decision: Decision{Type: "done", Evidence: []Evidence{{ID: "E1"}}, Need: Need{Options: []string{"a", "b"}}},
+			rule:     "done.need_empty",
+			detail:   "done carries no need",
+		},
+		{
+			name:     "a blocked whose options are one option",
+			decision: Decision{Type: "blocked", Need: Need{Description: "PR #136 must be merged", Options: []string{"merge it"}}},
+			rule:     "blocked.need_options_are_choices",
+			detail:   "one option is not a choice",
+		},
+		{
+			name:     "a blocked whose options repeat",
+			decision: Decision{Type: "blocked", Need: Need{Description: "PR #136 must be merged", Options: []string{"merge it", "merge it"}}},
+			rule:     "blocked.need_options_are_choices",
+			detail:   "repeats",
+		},
+		{
+			name:     "a need_input whose option is empty",
+			decision: Decision{Type: "need_input", Need: Need{Description: "which environment?", Options: []string{"staging", "  "}}},
+			rule:     "need_input.need_options_are_choices",
+			detail:   "is empty",
+		},
+		{
+			name: "a need_input with a menu",
+			decision: Decision{Type: "need_input", Need: Need{Description: "which environment?",
+				Options: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}}},
+			rule:   "need_input.need_options_are_choices",
+			detail: "at most 9",
 		},
 		{
 			name: "a need_input that executes",

@@ -65,7 +65,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 - 每轮：`DecideAtCycle(cycle)` → `Decision` → **dispatch** `Runtime.Execute(decision)`（独立 worker goroutine）→ 事件 `cycleDone` → `Agent.Observe(result)` → 下一轮。Planner 主循环在 dispatch 之后停在事件等待上，**不**锁在 `Execute` 里（`src/autonomy.go:dispatchExecute`；见 [runtime.md](runtime.md)、[principles.md](principles.md) §Event Driven）。同 task 仍保持 decide → execute → observe 的顺序，下一轮 Decide 必须先看到本轮 `previous_actions`。`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)（`Autonomy.MaxSteps`，默认 `1`）。
 - **决策先过闸，再执行**：`Runtime.Execute` 的第一件事是校验这份 Decision ——
-  ①**类型契约**（AGENT_V2 §Type-specific Requirements：`plan` 非空、每个 step 说清 `expected_effect`、引用的 evidence 存在；`done` 不带 plan/need 且必须带 evidence；`blocked` / `need_input` 不带 plan 且必须写清 `need.description`），
+  ①**类型契约**（AGENT_V2 §Type-specific Requirements：`plan` 非空、每个 step 说清 `expected_effect`、引用的 evidence 存在；`done` 不带 plan/need 且必须带 evidence；`blocked` / `need_input` 不带 plan 且必须写清 `need.description`；给了 `need.options` 就必须是 2–9 个互不重复、非空的选项——要么留空：开放问题由人用自己的话回答、只有一个选项那不叫选择），
   ②**计划的数据血缘**（每个入参来源可读、必填入参齐备，见 [execution-step.md](execution-step.md)）。
   任一条不成立 → 这一轮的计划**不写、不执行**，错误里带规则名与出错的那一步；循环继续，下一轮 planner 在 `previous_actions` 里看到这条原因再规划（`src/decision_rules.go` / `src/plan_lineage.go`）。
   **契约不靠 prompt 兜**：prompt 只是请求，运行时才是闸门 —— 一个"没有任何证据的 done"不能凭模型一句话就把 Task 收成完成。

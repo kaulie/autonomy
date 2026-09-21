@@ -126,9 +126,16 @@ type Evidence struct {
 }
 
 // Need says what is missing when the decision is blocked or needs input.
+//
+// Options is the choice the owner is handed, when the answer really is one of a few
+// concrete ones: each is a self-contained answer they can accept as written, and the UI
+// lists them 1..N so they can pick instead of typing. It is optional on purpose — an open
+// question ("which environment?") has no list and the owner answers in their own words,
+// and padding it with invented choices is worse than leaving it empty (AGENT_V2.md §Need).
 type Need struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Options     []string `json:"options,omitempty"`
 }
 
 // Deliverable is the concrete result a task hands over: a system-defined Asset

@@ -73,10 +73,12 @@ var decisionRules = map[string][]decisionRule{
 	decisionBlocked: {
 		{name: "blocked.plan_empty", check: noSteps},
 		{name: "blocked.need_describes_what_is_missing", check: needDescribesWhatIsMissing},
+		{name: "blocked.need_options_are_choices", check: needOptionsAreChoices},
 	},
 	decisionNeedInput: {
 		{name: "need_input.plan_empty", check: noSteps},
 		{name: "need_input.need_describes_what_is_missing", check: needDescribesWhatIsMissing},
+		{name: "need_input.need_options_are_choices", check: needOptionsAreChoices},
 	},
 }
 
@@ -151,7 +153,8 @@ func noSteps(decision Decision) string {
 
 // noNeed: a done decision is not also asking for something.
 func noNeed(decision Decision) string {
-	if strings.TrimSpace(decision.Need.Type) == "" && strings.TrimSpace(decision.Need.Description) == "" {
+	if strings.TrimSpace(decision.Need.Type) == "" && strings.TrimSpace(decision.Need.Description) == "" &&
+		len(decision.Need.Options) == 0 {
 		return ""
 	}
 	return "the answer also says something is missing (need): done carries no need"
@@ -174,6 +177,45 @@ func needDescribesWhatIsMissing(decision Decision) string {
 		return ""
 	}
 	return "the answer does not say what is missing (need.description): describing it is the whole answer here"
+}
+
+// maxNeedOptions bounds the list: the choices a person is asked to pick between are
+// readable at a glance, and the UI numbers them 1..N. A longer list is not a choice, it is
+// a menu — and a menu is what `need.description` is for.
+const maxNeedOptions = 9
+
+// needOptionsAreChoices: `need.options` is optional — an open question has no options and
+// the owner answers in their own words. When it *is* given it must be a real choice: at
+// least two, each non-empty, none repeating, and no longer than maxNeedOptions. One option
+// is not a choice: that is the answer, and it belongs in need.description.
+//
+// It exists because the alternative is guessing: the planner used to write its choices as
+// prose ("(1) Scope decision: … (2) Approval/action to land: …") and every reader — a UI, a
+// person — had to parse a paragraph to find them.
+func needOptionsAreChoices(decision Decision) string {
+	options := decision.Need.Options
+	if len(options) == 0 {
+		return ""
+	}
+	if len(options) < 2 {
+		return "need.options carries a single option: one option is not a choice — write it in need.description and leave need.options empty"
+	}
+	if len(options) > maxNeedOptions {
+		return fmt.Sprintf("need.options carries %d options: a choice is at most %d (list only what a person can pick between)",
+			len(options), maxNeedOptions)
+	}
+	seen := make(map[string]bool, len(options))
+	for i, option := range options {
+		text := strings.TrimSpace(option)
+		if text == "" {
+			return fmt.Sprintf("need.options[%d] is empty: every option must say what choosing it does", i)
+		}
+		if seen[text] {
+			return fmt.Sprintf("need.options repeats %q: two options that say the same thing are not two choices", text)
+		}
+		seen[text] = true
+	}
+	return ""
 }
 
 // evidenceIDs renders the ids a decision carries, for an error message.
