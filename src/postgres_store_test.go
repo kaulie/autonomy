@@ -259,6 +259,9 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	if err != nil || len(msgs) != 2 {
 		t.Fatalf("ListLLMMessages = %d rows, %v", len(msgs), err)
 	}
+	if msgs[0].ID < MessageIDBase {
+		t.Fatalf("first message id = %d, want at least %d (the message space starts high)", msgs[0].ID, MessageIDBase)
+	}
 	if msgs[0].Role != LLMMessageRoleUser || msgs[0].Content != "do it" || msgs[0].Seq != llmMessageSeqUser {
 		t.Fatalf("input message = %+v", msgs[0])
 	}
@@ -375,6 +378,9 @@ func TestPostgresStoreInbox(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("EnqueueMessage: %v", err)
+		}
+		if id < MessageIDBase {
+			t.Fatalf("inbox message id = %d, want at least %d (the message space starts high)", id, MessageIDBase)
 		}
 		ids = append(ids, id)
 	}

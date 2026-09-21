@@ -62,6 +62,11 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 `message_id` 是这条指令在 inbox 里的消息 id；`queued` 是这只 agent **前面**还有几条没处理完的消息（`queued` 或正在处理，
 **含正在跑的那条**）：`0` = 这条就是它正在做或马上要做的，`n` = 前面还有 n 条要先过。
 
+> **id 的区间**：`message_id`（`agent_messages.id`）与对话流的 `message_seq`（`llm_messages.id`）从
+> **1000000** 起（`MessageIDBase`），agent id 从 **10000** 起（`AgentIDBase`）。消费者（比如控制面的时间线）
+> 自己也从 1 编号时，两边的 id 放同一张表也分得清，不必自己再映射一层；这是一条**下限**，不是迁移 ——
+> 老库里已有的 id 原样保留，重开库只会把序列往上调、不会倒退（见 [store.md](store.md)）。
+
 同一个入口也有进程内的同步版本：`Autonomy.Run(AcceptTaskRequest)`（测试用它）。它走的是同一条 accept 路径（同一个 task、
 同一条指令消息、同一只 agent），区别只在于它会等这次运行结束才返回，返回这次运行的错误和同一份接受信息
 （`*AcceptTaskResponse`）。命令行客户端（`cmd/autonomy`）不链接 runtime，它是这条路线的 HTTP 版本：
@@ -160,6 +165,7 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 按 `llm_messages.id` 做跨 turn 的单调游标轮询增量对话流（thinking / tool / assistant 等）。
 
 - 请求参数 `last_synced_message_seq`：上次同步到的 `message_seq`（即 `llm_messages.id`）；首次传 `0`
+  （`0` 只是"从头拉"，不是消息 id —— 消息 id 从 `MessageIDBase` = 1000000 起）
 - 响应里每条事件的 `message_seq` 供下次轮询；`turn_seq` 是 run 内序（每次 run 从 0 起）
 - **工具调用**：一次调用是一行（`role: "tool"`），**结果在 `content`**，**调用在 `normalized_content`**
   （`{"name": …, "call_id": …, "args": {…}}`，见 [llm-message.md](llm-message.md)）；thinking 行的

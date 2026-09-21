@@ -320,9 +320,6 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_agent ON reason_turns(agent_id, cycl
 CREATE INDEX IF NOT EXISTS idx_reason_turns_task ON reason_turns(task_id, cycle);
 CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle);
 `
-	if err := s.ensureAgentsIDSequence(); err != nil {
-		return fmt.Errorf("migrate agents.id sequence: %w", err)
-	}
 	// tasks.error records why a task ended in error. Databases that predate the
 	// column (every task row until now) get it empty, which is what they know.
 	if err := s.ensureColumn("tasks", "error", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -449,6 +446,11 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 	if err := s.backfillAgentCycles(); err != nil {
 		return fmt.Errorf("backfill agent cycles: %w", err)
 	}
+	// Last, once every table exists: the id spaces a consumer sees start at their contract
+	// floor (AgentIDBase / MessageIDBase) and never below the highest id already stored.
+	if err := s.ensureIDSequences(); err != nil {
+		return fmt.Errorf("migrate id sequences: %w", err)
+	}
 	return nil
 }
 
@@ -479,24 +481,44 @@ func (s *SQLiteStore) agentsUseTextID() (bool, error) {
 	return false, rows.Err()
 }
 
-// ensureAgentsIDSequence makes agents.id start at 10000 (and never reset it
-// below the current max). It is idempotent across opens.
-func (s *SQLiteStore) ensureAgentsIDSequence() error {
+// ensureIDSequences puts every id space a consumer sees at its contract floor
+// (AgentIDBase / MessageIDBase) without ever rewinding one below the highest id already
+// stored: opening a database must not hand out an id that is in use, and an older database
+// keeps the ids its rows already have. It is idempotent across opens, and it runs after the
+// schema exists because it writes sqlite_sequence rows for those tables.
+func (s *SQLiteStore) ensureIDSequences() error {
+	for _, space := range []struct {
+		table string
+		base  int64
+	}{
+		{"agents", AgentIDBase},
+		{"agent_messages", MessageIDBase},
+		{"llm_messages", MessageIDBase},
+	} {
+		if err := s.ensureIDSequence(space.table, space.base); err != nil {
+			return fmt.Errorf("%s.id: %w", space.table, err)
+		}
+	}
+	return nil
+}
+
+// ensureIDSequence sets one AUTOINCREMENT table's next id to base (or to one past the
+// highest id it holds, when that is higher). sqlite_sequence keeps the last id handed out,
+// so the row is written as base-1.
+func (s *SQLiteStore) ensureIDSequence(table string, base int64) error {
 	var maxID int64
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM agents`).Scan(&maxID); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM ` + table).Scan(&maxID); err != nil {
 		return err
 	}
-	seq := int64(9999)
+	seq := base - 1
 	if maxID > seq {
 		seq = maxID
 	}
-	if _, err := s.db.Exec(`DELETE FROM sqlite_sequence WHERE name = 'agents'`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM sqlite_sequence WHERE name = ?`, table); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`INSERT INTO sqlite_sequence(name, seq) VALUES('agents', ?)`, seq); err != nil {
-		return err
-	}
-	return nil
+	_, err := s.db.Exec(`INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)`, table, seq)
+	return err
 }
 
 func (s *SQLiteStore) columnExists(table, column string) (bool, error) {

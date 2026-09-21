@@ -90,21 +90,36 @@ func (s *PostgresStore) migrate() error {
 			return fmt.Errorf("migrate postgres schema: %w", err)
 		}
 	}
-	if err := s.ensureAgentsIDSequence(); err != nil {
-		return fmt.Errorf("migrate postgres agents id sequence: %w", err)
+	if err := s.ensureIDSequences(); err != nil {
+		return fmt.Errorf("migrate postgres id sequences: %w", err)
 	}
 	return nil
 }
 
-// ensureAgentsIDSequence keeps agent ids in the 10000+ range the runtime assumes
-// (agent-10000 is a machine's first agent), and never rewinds the sequence below the
-// highest id already stored: reopening a database must not hand out an id that is in
-// use. It is idempotent.
-func (s *PostgresStore) ensureAgentsIDSequence() error {
-	_, err := s.db.Exec(`
-SELECT setval(pg_get_serial_sequence('agents', 'id'),
-              GREATEST(9999, COALESCE((SELECT MAX(id) FROM agents), 0)))`)
-	return err
+// ensureIDSequences puts every id space a consumer sees at its contract floor
+// (AgentIDBase / MessageIDBase) and never rewinds one below the highest id already stored:
+// reopening a database must not hand out an id that is in use. It is idempotent, and it runs
+// after the schema exists because it reads each table's sequence through
+// pg_get_serial_sequence. The table names are this file's own identifiers, never caller
+// input.
+func (s *PostgresStore) ensureIDSequences() error {
+	for _, space := range []struct {
+		table string
+		base  int64
+	}{
+		{"agents", AgentIDBase},
+		{"agent_messages", MessageIDBase},
+		{"llm_messages", MessageIDBase},
+	} {
+		query := fmt.Sprintf(`
+SELECT setval(pg_get_serial_sequence('%s', 'id'),
+              GREATEST(%d, COALESCE((SELECT MAX(id) FROM %s), 0)))`,
+			space.table, space.base-1, space.table)
+		if _, err := s.db.Exec(query); err != nil {
+			return fmt.Errorf("%s.id: %w", space.table, err)
+		}
+	}
+	return nil
 }
 
 // postgresSchema is the task/agent/conversation half of the schema: the five core
