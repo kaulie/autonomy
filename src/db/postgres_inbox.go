@@ -151,6 +151,22 @@ UPDATE agent_messages SET status = $1, started_at = NULL WHERE agent_id = $2 AND
 	return nil
 }
 
+// RequeueMessage puts one claimed message back in the queue, where it was: a run that
+// must not start yet (a graceful restart is draining, src/graceful.go) is left for the
+// consumer that starts next. Only the row that is running goes back — the id is the
+// message's place in the queue, so it is claimed again before anything behind it.
+func (s *PostgresStore) RequeueMessage(id int64) error {
+	if id == 0 {
+		return nil
+	}
+	if _, err := s.db.Exec(`
+UPDATE agent_messages SET status = $1, started_at = NULL WHERE id = $2 AND status = $3
+`, string(MessageStatusQueued), id, string(MessageStatusRunning)); err != nil {
+		return fmt.Errorf("requeue message %d: %w", id, err)
+	}
+	return nil
+}
+
 // CountQueuedMessages counts the messages waiting for one agent — what the drain asks
 // to know whether the message it just finished was the last one.
 //

@@ -1,14 +1,23 @@
 package autonomy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// httpShutdownGrace is how long a graceful HTTP stop waits for the requests in flight
+// to answer (Serve's own shutdown, cmd/autonomyd's SIGTERM path). Every route is a
+// short read or a queue write — the runs happen off the request goroutine — so this is
+// a backstop for a caller that stalled, not a budget anybody waits out.
+const httpShutdownGrace = 5 * time.Second
 
 // HTTPServer serves Autonomy's external task API.
 //
@@ -20,6 +29,10 @@ import (
 type HTTPServer struct {
 	Autonomy *Autonomy
 	Mux      *http.ServeMux
+	// mu guards server, which Serve installs and Shutdown takes away: the running
+	// http.Server, so a stop (a restart, a SIGTERM) can be graceful.
+	mu     sync.Mutex
+	server *http.Server
 }
 
 // httpsRoute is one route this server serves: the pattern the mux is given, and the
@@ -49,6 +62,13 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /api/reason-turns/facets", s.handleReasonTurnFacets},
 		{"GET /api/reason-turns/{turnID}", s.handleReasonTurn},
 		{"GET /api/meta", s.handleMeta},
+		// The graceful restart the deployment platform performs on this service: one
+		// notice before it stops us, then a poll while it waits for the runs in flight
+		// to come back (src/graceful.go). A service that answers both is deployed
+		// without cutting a run in half; a service that answers neither is stopped and
+		// started the hard way, mid-cycle.
+		{"POST /api/ops/restart-notify", s.handleRestartNotify},
+		{"GET /api/ops/restart-status", s.handleRestartStatus},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -73,13 +93,51 @@ func (s *HTTPServer) Handler() http.Handler {
 // ListenAndServe starts the HTTP API on addr (e.g. ":4300", this service's port
 // in the deployment contract; scripts/start.sh passes it in AUTONOMY_HTTP_ADDR).
 func (s *HTTPServer) ListenAndServe(addr string) error {
+	return s.Serve(context.Background(), addr)
+}
+
+// Serve is ListenAndServe with an end: it serves until ctx is done, then stops the way
+// a restart needs it to — no new connection is accepted, and the requests in flight
+// are given a moment to answer instead of being cut (cmd/autonomyd calls this with a
+// context cancelled by SIGTERM; the runs themselves are the runtime's own drain,
+// Autonomy.Shutdown).
+func (s *HTTPServer) Serve(ctx context.Context, addr string) error {
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	s.mu.Lock()
+	s.server = server
+	s.mu.Unlock()
+	if ctx != nil {
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownGrace)
+			defer cancel()
+			_ = s.Shutdown(shutdownCtx)
+		}()
+	}
 	fmt.Printf("[autonomy] http listening on %s\n", addr)
-	return server.ListenAndServe()
+	err := server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+// Shutdown stops the server gracefully: no new connection, the requests in flight
+// finish (or ctx ends). After it, the server holds nothing — a caller that wants to
+// serve again calls Serve / ListenAndServe.
+func (s *HTTPServer) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	server := s.server
+	s.server = nil
+	s.mu.Unlock()
+	if server == nil {
+		return nil
+	}
+	return server.Shutdown(ctx)
 }
 
 // healthResponse is what a liveness probe answers: this process is up and serving,
@@ -111,6 +169,62 @@ type stopTaskResponse struct {
 // errResponse is the shape of every refusal: the runtime's own words (writeErr).
 type errResponse struct {
 	Error string `json:"error"`
+}
+
+// handleRestartNotify takes the notice the deployment platform sends before it
+// restarts this service (src/graceful.go): the runtime stops starting new runs — an
+// instruction that arrives now is accepted and left in its agent's queue, not started —
+// and the answer reports what a restart would still cut. The platform polls
+// /api/ops/restart-status from here until the answer says it may.
+//
+// @Summary  优雅重启：部署平台通知即将重启（进入 drain，不再启动新 run）
+// @Tags     system
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.RestartNotice  true  "重启通知（requestId 必填；serviceId / deployment / version / message 是平台自述）"
+// @Success  202      {object}  autonomy.RestartStatus   "已进入 drain：running 是在途 run，canRestart 说现在能不能重启"
+// @Failure  400      {object}  errResponse              "请求不是合法 JSON，或缺少 requestId"
+// @Failure  500      {object}  errResponse              "runtime 没初始化"
+// @Router   /api/ops/restart-notify [post]
+func (s *HTTPServer) handleRestartNotify(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	var body RestartNotice
+	switch err := json.NewDecoder(req.Body).Decode(&body); {
+	case err == nil, errors.Is(err, io.EOF):
+		// An empty body is a notice that says nothing: requestId is still required,
+		// and the check below is what says so.
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	body.RequestID = strings.TrimSpace(body.RequestID)
+	if body.RequestID == "" {
+		writeErr(w, http.StatusBadRequest, "requestId is required")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.Autonomy.RestartNotify(body))
+}
+
+// handleRestartStatus answers the poll that follows a notice: is a restart safe now?
+// canRestart is the field the deployment platform reads (canDeploy and ready are its
+// other convention's names for the same answer); running says what a restart would cut
+// right now, and reason says it in words.
+//
+// @Summary  优雅重启：轮询现在能不能重启（无在途 run）
+// @Tags     system
+// @Produce  json
+// @Success  200  {object}  autonomy.RestartStatus  "canRestart / canDeploy / ready（同义）+ draining + running + held + reason"
+// @Failure  500  {object}  errResponse             "runtime 没初始化"
+// @Router   /api/ops/restart-status [get]
+func (s *HTTPServer) handleRestartStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Autonomy.RestartStatus())
 }
 
 // handleHealth reports liveness — the probe the deployment platform polls for every

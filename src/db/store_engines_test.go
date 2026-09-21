@@ -307,6 +307,14 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	must("RequeueRunningMessages", store.RequeueRunningMessages(planner.ID))
 	again, found, err := store.ClaimNextMessage(planner.ID)
 	must("ClaimNextMessage (second)", err)
+	// One claimed message can be put back where it was (RequeueMessage): that is how a
+	// restart's drain leaves a run for the consumer that starts next — claimed again,
+	// in the same place in the queue.
+	must("RequeueMessage", store.RequeueMessage(again.ID))
+	back, refound, err := store.ClaimNextMessage(planner.ID)
+	must("ClaimNextMessage (requeued)", err)
+	add("requeued %t|%t", refound, back.ID == queued[1])
+	again = back
 	must("FinishAgentMessage (failed)", store.FinishAgentMessage(again.ID, MessageStatusFailed, "boom"))
 	add("second claim %t|%s|%t", found, again.Content, again.ID == queued[1])
 	inbox, err := store.ListAgentMessages(planner.ID, 0)

@@ -192,6 +192,34 @@ adds its own milestone lines and `=1` the full per-event firehose for debugging.
 
 Bridge unit tests (trace policy, config resolution): `cd src/clinesdk/bridge && npm test`.
 
+### Graceful restart
+
+The deployment platform restarts a service with `stop` + `start`. A service that has
+registered **two endpoints** in its deployment config is restarted gracefully instead:
+the platform announces the restart, then polls until the service says a restart is safe.
+
+Autonomy serves both (`src/graceful.go`):
+
+```bash
+curl -sS -X POST http://127.0.0.1:4300/api/ops/restart-notify \
+  -H 'content-type: application/json' \
+  -d '{"serviceId":"autonomy","requestId":"deploy-1","deployment":"deployment-abc12345","message":"restarting"}'
+curl -sS http://127.0.0.1:4300/api/ops/restart-status   # {"canRestart":…,"running":…,"held":…,"reason":"…"}
+```
+
+Register exactly those two URLs (notify + status) as autonomy's graceful endpoints in the
+deployment panel: `http://127.0.0.1:4300/api/ops/restart-notify` and
+`http://127.0.0.1:4300/api/ops/restart-status` — with both configured, a deploy waits for
+the runs in flight instead of cutting them; with neither, it restarts the hard way.
+
+What "safe" means: no run is in flight. While draining, an instruction is still **accepted**
+(it is a row in its agent's inbox) but not **started** — the process that comes up after the
+restart starts it, so nothing a caller handed over is lost. A drain that never gets its
+restart ends by itself after `AUTONOMY_DRAIN_TIMEOUT` (10 minutes, `0` = never) so a failed
+deploy cannot wedge the service. `SIGTERM` (what `scripts/stop.sh` sends) is handled the same
+way: no new run, the runs in flight get `AUTONOMY_SHUTDOWN_GRACE` (10s) to come back, then
+they are stopped and the store and provider sessions are closed properly. See
+[docs/graceful-restart.md](docs/graceful-restart.md).
 
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
