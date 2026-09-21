@@ -131,7 +131,7 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 |------|------|
 | `goal_type` | 受理时的目标类型（`tasks.goal_type`） |
 | `context_ref` | 它引用的世界，如 `{"project": "project-749a0238"}`，或 `{"task": "task-2ecd5e15ae3047f0"}`（跟着那条 task 的世界） |
-| `project` | **所属 project**：`{"id", "name", "description", "domain", "git_repo_url", "organization"}` |
+| `project` | **所属 project**：`{"id", "name", "description", "domain", "git_repo_url", "organization"}`。`git_repo_url` 这个键**始终在**（知道就是仓库地址，不知道就是空串）：平台的 project 注册表已不再提供仓库，autonomy 在这条路上**不推导**它 —— 一条 task 的仓库属于它的**世界**（组织 → 服务中心的服务清单，每个服务带自己的 repo），不属于 project 行。 |
 | `project.organization` | **project 所属的组织（部门）**：`{"id": "D0005", "name": "AI研发部"}` |
 
 `project` 由两处合成，都不强求：runtime 自己注册过的 context container 提供它知道的（`name` / `description` / `domain`），
@@ -161,6 +161,20 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 
 - 请求参数 `last_synced_message_seq`：上次同步到的 `message_seq`（即 `llm_messages.id`）；首次传 `0`
 - 响应里每条事件的 `message_seq` 供下次轮询；`turn_seq` 是 run 内序（每次 run 从 0 起）
+- **工具调用**：一次调用是一行（`role: "tool"`），**结果在 `content`**，**调用在 `normalized_content`**
+  （`{"name": …, "call_id": …, "args": {…}}`，见 [llm-message.md](llm-message.md)）；thinking 行的
+  `normalized_content` 是 `{"duration_ms": …}`。想渲染「tool(名, 入参) → 结果」两个字段都要读。
+  注意 tool 行是**调用 + 结果合并后**写的（结果到了这行才算完整），所以没有单独的 "tool_call_started" 事件。
+- **每一轮 run 的头跟着这一页走**：`turns[]` 是这一页事件涉及到的那些 turn 的 header
+  （去重、按 turn 序），一行一个 run —— `cycle` / `mode`（plan / agent）/ `model` / `provider` / `run_id` /
+  `status`（`running` / `finished` / `error`）/ `duration_ms` / `error_code` / `error_message` /
+  `started_at` / `ended_at`。**run 的收尾读这里**，不要从"最后一条消息"猜：一条 run 的终态是它自己的
+  header（`reason_turns`）。run 的头读不到时这一行只是缺席，不影响这一页事件。
+- `role` 的取值：`user`（用户/运行时投递的输入）、`agent`（另一个 agent 委派来的输入）、
+  `thinking`、`tool`、`assistant`（这一轮的返回）。**没有** `status` / `plan` / `decision` 行：
+  决策与计划是 `execution_plan` + `reason_turns.raw_output`（`agent` 轮的返回文本就是那份决策 JSON），
+  要显示 `decision.type` / `reason` 请读任务详情（`plans[]`）。
+- `404`：没有这条 task，或没有这只 agent；`agent` 存在但它属于别的 task → `400`（与上一条同义）。
 
 ```json
 {
@@ -172,11 +186,21 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
       "turn_id": 7,
       "turn_seq": 1,
       "cycle": 1,
-      "role": "thinking",
-      "content": "…",
+      "role": "tool",
+      "content": "[{\"exit\":0}]",
+      "normalized_content": "{\"name\":\"shell\",\"call_id\":\"call-1\",\"args\":{\"cmd\":\"ls\"}}",
+      "model": "composer-2",
+      "provider": "cursor",
       "run_id": "…",
       "status": "running",
       "created_at": "…"
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 7, "cycle": 1, "mode": "plan", "model": "composer-2", "provider": "cursor",
+      "run_id": "…", "status": "finished", "duration_ms": 1234,
+      "started_at": "…", "ended_at": "…", "created_at": "…"
     }
   ],
   "last_message_seq": 42,
@@ -251,20 +275,33 @@ agent 名字怎么 join 由 autonomy 负责**，评测侧只认服务地址（`A
 `agents` 是**名字**（`LEFT JOIN agents`）；join 不上的 turn 不计入（旧库里 `agent_id` 是 TEXT 的那种行
 也照常读，只是名字为空、不进 facets）。
 
-### `GET /api/tasks` — 对比页的 task 选择器
+### `GET /api/tasks` — 对比页的 task 选择器（也是控制面「Autonomy 任务」页）
 
 与 `POST /api/tasks` **同路径不同方法**：读的是候选与它们的运行量。
 
 ```json
 { "tasks": [ { "id": "task-29", "description": "…", "status": "blocked", "turns": 12,
-               "last_at": "2026-09-20T07:49:46.033072Z" },
-             { "id": "task-28", "description": "…", "status": "error", "turns": 0, "last_at": "" } ] }
+               "last_at": "2026-09-20T07:49:46.033072Z",
+               "project_id": "project-749a0238", "agent_id": 10001,
+               "updated_at": "2026-09-20T07:49:46.033072Z" },
+             { "id": "task-28", "description": "…", "status": "error", "turns": 0, "last_at": "",
+               "project_id": "", "agent_id": 10000, "updated_at": "2026-09-20T07:00:00.1Z" } ] }
 ```
 
 - 候选 = `tasks` 表的行 ∪ **只出现在日志里的 task_id**（行被删了、或没落库的历史数据也要能对比）；
   `description` / `status` 取自 `tasks` 表，没有就是 `""`。
 - `last_at` 是该 task 最近一条 turn 的 `created_at`，没有 turn 就是 `""`。
+- `project_id` 是这条 task **行里自己写下的** project（`tasks.context_ref` 的 `project` 键），`agent_id` 是它的
+  owner agent，`updated_at` 是行自己的时间（每次运行推进，所以「多久没动」读它）。**只出现在日志里的 task
+  没有行**：三者分别是 `""` / `0` / `""`。
+  注意这是**字面**读法，不解析引用链：世界写成 `{"task": "<平台 task id>"}`（跟着那条 task 的世界）时这里就是
+  `""` —— 列表是本地一次查询，**不为了一个 project 去问平台注册表**（那会让列表页依赖控制面在不在）。这类 task
+  的 `context_ref` 与它真正解析出的 project，读详情（`GET /api/tasks/{taskID}`）看。
+- `?project_id=<id>` **只返回这个 project 的 task**（按上面的 `project_id` 过滤）；省略 = 全部；
+  **未知 id → `200` + 空数组**（"这个 project 没有 task"是过滤的事实，不是请求的错）。
 - 排序：`last_at` 降序（最近在前），同则 `id` 升序。不分页（task 数量级不大，一次渲染下拉）。
+- `updated_at` 是 RFC3339 UTC 文本；精度的最后几位取决于 engine 的时间列（sqlite 纳秒、postgres 微秒），
+  同一个时刻在两边是同一个时刻、不是同一个字符串。
 
 ### `GET /api/tasks/{taskID}/turns` — 一个 task 的执行序列
 

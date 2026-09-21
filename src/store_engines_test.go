@@ -174,7 +174,11 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	options, err := store.ListTaskOptions()
 	must("ListTaskOptions", err)
 	for _, option := range options {
-		add("option %s|%d|%s|%s", option.ID, option.Turns, option.Description, option.Status)
+		// updated_at is compared by presence, not by value: the two engines keep the same
+		// instant in their own column type, and a nanosecond and a microsecond rendering
+		// of one clock are not the same string (src/store.md, "两个引擎，两份数据").
+		add("option %s|%d|%s|%s|%s|agent=%d|updated=%t", option.ID, option.Turns, option.Description,
+			option.Status, option.ProjectID, option.AgentID, option.UpdatedAt != "")
 	}
 	series, seriesTotal, err := store.ListTurnsByTask(taskID, 0)
 	must("ListTurnsByTask", err)

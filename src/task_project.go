@@ -21,9 +21,15 @@ type TaskProject struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Domain      string `json:"domain,omitempty"`
-	// GitRepoURL is the project's repository, as the registry has it: the code the
-	// work is about.
-	GitRepoURL string `json:"git_repo_url,omitempty"`
+	// GitRepoURL is the project's repository *when the registry hands one over*
+	// (`gitRepoUrl` on the project registry's row). It is a stable key, deliberately
+	// always present, and empty when nobody says: the platform's project registry no
+	// longer carries a repository, and autonomy does not go looking for one on this
+	// path — a task's repository, when there is one, is part of its *world* (the
+	// organization's services each name their repo, src/context_builder), not of the
+	// project row. A consumer that renders "这条任务的世界" therefore shows what it
+	// has and does not wait for this field.
+	GitRepoURL string `json:"git_repo_url"`
 	// Organization is the 部门 the project belongs to. Absent when the registry does
 	// not know this project (or nobody configured one).
 	Organization *TaskOrganization `json:"organization,omitempty"`

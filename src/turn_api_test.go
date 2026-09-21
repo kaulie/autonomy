@@ -36,6 +36,7 @@ func seedTurnLog(t *testing.T) (*SQLiteStore, map[string]int64) {
 	if err := store.UpsertTask(&Task{
 		ID: "task-29", Description: "主界面增加显示当前agent已经执行的轮次", Domain: TaskDomainSoftwareDevelopment,
 		Status: TaskStatusBlocked, AgentID: 10001,
+		ContextRef: map[ContextContainerType]string{ContextContainerTypeProject: "project-749a0238"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +487,8 @@ func TestDataAPIReasonTurnDetail(t *testing.T) {
 }
 
 // TestTurnQueryStoreTaskOptions is the selector's data: the tasks that have a row
-// unioned with the ones that only appear in the log, most recently active first.
+// unioned with the ones that only appear in the log, most recently active first — and,
+// with them, the project and agent a list page groups and links by.
 func TestTurnQueryStoreTaskOptions(t *testing.T) {
 	store, _ := seedTurnLog(t)
 
@@ -494,17 +496,33 @@ func TestTurnQueryStoreTaskOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// updated_at is the clock the write stamped (UpsertTask sets it to now), so the rows
+	// with a definition are compared without it and it is checked by presence below.
 	want := []TaskOption{
 		{ID: "task-28", Description: "开放服务契约的前端入口", Status: TaskStatusError, Turns: 2, LastAt: "2026-09-20T07:05:00Z"},
 		{ID: "task-27", Turns: 1, LastAt: "2026-09-20T07:04:00Z"},
-		{ID: "task-29", Description: "主界面增加显示当前agent已经执行的轮次", Status: TaskStatusBlocked, Turns: 3, LastAt: "2026-09-20T07:03:00Z"},
+		{ID: "task-29", Description: "主界面增加显示当前agent已经执行的轮次", Status: TaskStatusBlocked, Turns: 3, LastAt: "2026-09-20T07:03:00Z",
+			ProjectID: "project-749a0238", AgentID: 10001},
 	}
 	if len(options) != len(want) {
 		t.Fatalf("options=%+v, want %d", options, len(want))
 	}
 	for i := range want {
-		if options[i] != want[i] {
-			t.Errorf("options[%d]=%+v, want %+v", i, options[i], want[i])
+		got, expected := options[i], want[i]
+		got.UpdatedAt, expected.UpdatedAt = "", ""
+		if got != expected {
+			t.Errorf("options[%d]=%+v, want %+v", i, got, expected)
+		}
+	}
+	// The row's own updated_at travels with the definition; a task that only appears in
+	// the log has no row, so it has none (nor a project, nor an agent).
+	for _, option := range options {
+		hasRow := option.ID != "task-27"
+		if hasRow != (option.UpdatedAt != "") {
+			t.Errorf("option %s: updated_at=%q, want a row's time exactly when it has a row", option.ID, option.UpdatedAt)
+		}
+		if option.ID == "task-27" && (option.ProjectID != "" || option.AgentID != 0 || option.Turns != 1) {
+			t.Errorf("log-only option = %+v, want no project and no agent", option)
 		}
 	}
 }
@@ -534,6 +552,26 @@ func TestDataAPIFacetsTasksAndSeries(t *testing.T) {
 	}
 	if tasks.Tasks[1].ID != "task-27" || tasks.Tasks[1].Description != "" || tasks.Tasks[1].Turns != 1 {
 		t.Fatalf("log-only task = %+v, want task-27 with no row and one turn", tasks.Tasks[1])
+	}
+
+	// The same list, filtered by project: only the task whose own world names it, and an
+	// id nobody accepted under is an empty list rather than a 404.
+	var byProject TaskOptionListResponse
+	if rec := getJSON(t, handler, "/api/tasks?project_id=project-749a0238", &byProject); rec.Code != http.StatusOK {
+		t.Fatalf("tasks?project_id = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(byProject.Tasks) != 1 || byProject.Tasks[0].ID != "task-29" {
+		t.Fatalf("tasks?project_id=project-749a0238 = %+v, want task-29 alone", byProject.Tasks)
+	}
+	if byProject.Tasks[0].ProjectID != "project-749a0238" || byProject.Tasks[0].AgentID != 10001 || byProject.Tasks[0].UpdatedAt == "" {
+		t.Fatalf("filtered task = %+v, want its project, its agent and its updated_at", byProject.Tasks[0])
+	}
+	var unknownProject TaskOptionListResponse
+	if rec := getJSON(t, handler, "/api/tasks?project_id=project-nope", &unknownProject); rec.Code != http.StatusOK {
+		t.Fatalf("tasks?project_id=project-nope = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	if len(unknownProject.Tasks) != 0 {
+		t.Fatalf("tasks?project_id=project-nope = %+v, want an empty list", unknownProject.Tasks)
 	}
 
 	var series TaskTurnListResponse

@@ -260,19 +260,25 @@ func (s *SQLiteStore) turnFacet(column string) ([]TurnFacetValue, error) {
 func (s *SQLiteStore) ListTaskOptions() ([]TaskOption, error) {
 	options := map[string]*TaskOption{}
 	// MAX(created_at) is the newest turn's time because every timestamp this engine
-	// writes is UTC RFC3339 (formatTime): later in time is later in text.
+	// writes is UTC RFC3339 (formatTime): later in time is later in text. The task's own
+	// columns (its context references, its agent, its updated_at) come along so the list
+	// answers which project a task belongs to without a second read per row.
 	known, err := s.db.Query(`
-SELECT t.id, t.description, t.status, COUNT(r.id), COALESCE(MAX(r.created_at), '')
+SELECT t.id, t.description, t.status, COUNT(r.id), COALESCE(MAX(r.created_at), ''),
+       t.context_ref, t.agent_id, t.updated_at
 FROM tasks t LEFT JOIN reason_turns r ON r.task_id = t.id
-GROUP BY t.id, t.description, t.status`)
+GROUP BY t.id, t.description, t.status, t.context_ref, t.agent_id, t.updated_at`)
 	if err != nil {
 		return nil, fmt.Errorf("list task options: %w", err)
 	}
 	if err := scanTaskOptions(known, options); err != nil {
 		return nil, err
 	}
+	// A task that only ever appears in the log has no row, so it has no world, no agent
+	// and no update time: its project is "" and it is not one of any project's tasks.
 	orphans, err := s.db.Query(`
-SELECT r.task_id, '' AS description, '' AS status, COUNT(*), COALESCE(MAX(r.created_at), '')
+SELECT r.task_id, '' AS description, '' AS status, COUNT(*), COALESCE(MAX(r.created_at), ''),
+       '' AS context_ref, 0 AS agent_id, '' AS updated_at
 FROM reason_turns r
 WHERE r.task_id <> '' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = r.task_id)
 GROUP BY r.task_id`)
@@ -290,12 +296,22 @@ GROUP BY r.task_id`)
 func scanTaskOptions(rows *sql.Rows, options map[string]*TaskOption) error {
 	defer rows.Close()
 	for rows.Next() {
-		var option TaskOption
-		if err := rows.Scan(&option.ID, &option.Description, &option.Status, &option.Turns, &option.LastAt); err != nil {
+		var (
+			option     TaskOption
+			contextRef string
+		)
+		if err := rows.Scan(&option.ID, &option.Description, &option.Status, &option.Turns, &option.LastAt,
+			&contextRef, &option.AgentID, &option.UpdatedAt); err != nil {
 			return fmt.Errorf("scan task option: %w", err)
 		}
 		if option.ID == "" {
 			continue
+		}
+		// The project is read out of the task's own world (tasks.context_ref): the
+		// column is JSON, and which key names the project is the contract's business
+		// (src/store_row_text.go), not this query's.
+		if refs, err := parseTaskContextRef(contextRef); err == nil {
+			option.ProjectID = refs[ContextContainerTypeProject]
 		}
 		options[option.ID] = &option
 	}

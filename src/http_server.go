@@ -293,14 +293,21 @@ func (s *HTTPServer) handleAgentStatus(w http.ResponseWriter, req *http.Request)
 // handleAgentStream is the conversation's incremental poll: the messages written
 // after a cursor (llm_messages.id), thinking / tool / assistant (docs/llm-message.md).
 //
+// A tool message's call (name / args / call_id) travels in normalized_content, and the
+// runs this page touches travel with it as turns[] — a run's terminus is its own header
+// (duration, status, error), so a timeline does not have to infer it from the last
+// message it happens to see. An unknown task or agent is a 404 (there is no such
+// conversation to poll); an agent bound to another task is a 400, as in /agents/{id}.
+//
 // @Summary  轮询对话流（增量）
 // @Tags     agents
 // @Produce  json
 // @Param    taskID                  path      string  true  "task id"
 // @Param    agentID                 path      integer true  "agent id（tasks.agent_id）"
 // @Param    last_synced_message_seq  query     integer false "上次同步到的 message_seq（llm_messages.id）；首次传 0"
-// @Success  200                     {object}  autonomy.AgentStreamResponse  "events（带 message_seq）与 next_poll_after_seq"
-// @Failure  400                     {object}  errResponse                    "agent_id 或 last_synced_message_seq 不合法"
+// @Success  200                     {object}  autonomy.AgentStreamResponse  "events（带 message_seq 与 normalized_content）+ turns（本页涉及的 run 头）+ next_poll_after_seq"
+// @Failure  400                     {object}  errResponse                    "agent_id / last_synced_message_seq 不合法，或该 agent 属于别的 task"
+// @Failure  404                     {object}  errResponse                    "没有这条 task，或这只 agent"
 // @Router   /api/tasks/{taskID}/agents/{agentID}/events [get]
 func (s *HTTPServer) handleAgentStream(w http.ResponseWriter, req *http.Request) {
 	taskID := req.PathValue("taskID")
@@ -318,7 +325,14 @@ func (s *HTTPServer) handleAgentStream(w http.ResponseWriter, req *http.Request)
 		}
 	}
 	stream, err := s.Autonomy.AgentStream(taskID, agentID, after)
-	if err != nil {
+	switch {
+	case errors.Is(err, errTaskNotFound), errors.Is(err, errAgentNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, errAgentOffTask):
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	case err != nil:
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -442,14 +456,35 @@ func (s *HTTPServer) handleReasonTurnFacets(w http.ResponseWriter, _ *http.Reque
 // @Summary  任务列表（对比页的选择器）
 // @Tags     data
 // @Produce  json
-// @Success  200  {object}  autonomy.TaskOptionListResponse  "每个 task 一行：id / description / status / turns / last_at"
-// @Failure  500  {object}  errResponse                      "store 读不了任务与日志"
+// It is also what the control plane's "Autonomy tasks" page reads, so `?project_id=`
+// keeps the rows whose task definition names that project (`tasks.context_ref`): an id
+// nobody ever accepted under is a `200` with an empty array, not a 404, because "that
+// project has no tasks" is a fact about the filter, not about the request. With the
+// parameter omitted the list is everything. The filter is applied here rather than in
+// SQL so both engines answer it identically — a task that only ever appears in the log
+// has no definition, so no project, so it is not one of that project's tasks.
+//
+// @Summary  任务列表（对比页的选择器 / 控制面 Autonomy 任务页；可按 project 过滤）
+// @Tags     data
+// @Produce  json
+// @Param    project_id  query     string  false  "只返回这个 project 的 task（省略 = 全部；未知 id = 空数组）"
+// @Success  200         {object}  autonomy.TaskOptionListResponse  "每个 task 一行：id / description / status / turns / last_at + project_id / agent_id / updated_at"
+// @Failure  500         {object}  errResponse                      "store 读不了任务与日志"
 // @Router   /api/tasks [get]
-func (s *HTTPServer) handleTaskList(w http.ResponseWriter, _ *http.Request) {
+func (s *HTTPServer) handleTaskList(w http.ResponseWriter, req *http.Request) {
 	tasks, err := s.Autonomy.TaskOptions()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if projectID := strings.TrimSpace(req.URL.Query().Get("project_id")); projectID != "" {
+		filtered := make([]TaskOption, 0, len(tasks))
+		for _, task := range tasks {
+			if task.ProjectID == projectID {
+				filtered = append(filtered, task)
+			}
+		}
+		tasks = filtered
 	}
 	if tasks == nil {
 		tasks = []TaskOption{}

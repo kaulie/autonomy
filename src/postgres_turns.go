@@ -252,17 +252,21 @@ type pgTaskOptionRow struct {
 func (s *PostgresStore) ListTaskOptions() ([]TaskOption, error) {
 	options := map[string]*pgTaskOptionRow{}
 	known, err := s.db.Query(`
-SELECT t.id, t.description, t.status, COUNT(r.id), MAX(r.created_at)
+SELECT t.id, t.description, t.status, COUNT(r.id), MAX(r.created_at),
+       t.context_ref, t.agent_id, t.updated_at
 FROM tasks t LEFT JOIN reason_turns r ON r.task_id = t.id
-GROUP BY t.id, t.description, t.status`)
+GROUP BY t.id, t.description, t.status, t.context_ref, t.agent_id, t.updated_at`)
 	if err != nil {
 		return nil, fmt.Errorf("list task options: %w", err)
 	}
 	if err := pgScanTaskOptions(known, options); err != nil {
 		return nil, err
 	}
+	// A task that only ever appears in the log has no row, so it has no world, no agent
+	// and no update time: its project is "" and it is not one of any project's tasks.
 	orphans, err := s.db.Query(`
-SELECT r.task_id, ''::text AS description, ''::text AS status, COUNT(*), MAX(r.created_at)
+SELECT r.task_id, ''::text AS description, ''::text AS status, COUNT(*), MAX(r.created_at),
+       ''::text AS context_ref, 0::bigint AS agent_id, NULL::timestamptz AS updated_at
 FROM reason_turns r
 WHERE r.task_id <> '' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = r.task_id)
 GROUP BY r.task_id`)
@@ -281,11 +285,13 @@ func pgScanTaskOptions(rows *sql.Rows, options map[string]*pgTaskOptionRow) erro
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			row    pgTaskOptionRow
-			lastAt sql.NullTime
+			row        pgTaskOptionRow
+			lastAt     sql.NullTime
+			updatedAt  sql.NullTime
+			contextRef string
 		)
 		if err := rows.Scan(&row.option.ID, &row.option.Description, &row.option.Status,
-			&row.option.Turns, &lastAt); err != nil {
+			&row.option.Turns, &lastAt, &contextRef, &row.option.AgentID, &updatedAt); err != nil {
 			return fmt.Errorf("scan task option: %w", err)
 		}
 		if row.option.ID == "" {
@@ -293,6 +299,13 @@ func pgScanTaskOptions(rows *sql.Rows, options map[string]*pgTaskOptionRow) erro
 		}
 		row.lastAt = pgScanTime(lastAt)
 		row.option.LastAt = pgTimeText(row.lastAt)
+		row.option.UpdatedAt = pgTimeText(pgScanTime(updatedAt))
+		// The project is read out of the task's own world (tasks.context_ref): the column
+		// is JSON text, and which key names the project is the contract's business
+		// (src/store_row_text.go), not this query's.
+		if refs, err := parseTaskContextRef(contextRef); err == nil {
+			row.option.ProjectID = refs[ContextContainerTypeProject]
+		}
 		options[row.option.ID] = &row
 	}
 	if err := rows.Err(); err != nil {

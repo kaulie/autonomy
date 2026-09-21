@@ -106,6 +106,12 @@ type AgentWorkStatus struct {
 // StreamEvent is one incremental conversation item for poll clients.
 // MessageSeq is llm_messages.id — the monotonic cursor across turns (per-turn
 // seq resets every run and is exposed separately as TurnSeq).
+//
+// Content is the message's text: an input prompt, a thinking block, an assistant
+// return, or — for a tool message — the tool's *result*. A tool message's call is in
+// NormalizedContent, which is where the name, the arguments and the call id live
+// (src/llm_message.go): one row carries both halves of one call, and a consumer that
+// wants to render "tool(name, args) → result" needs both fields.
 type StreamEvent struct {
 	MessageSeq int64          `json:"message_seq"`
 	TurnID     int64          `json:"turn_id"`
@@ -113,23 +119,64 @@ type StreamEvent struct {
 	Cycle      int            `json:"cycle"`
 	Role       LLMMessageRole `json:"role"`
 	Content    string         `json:"content"`
-	RunID      string         `json:"run_id,omitempty"`
-	Status     string         `json:"status,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
+	// NormalizedContent is the message's structured side: for a tool message the
+	// call — `{"name": …, "call_id": …, "args": {…}}` — and for a thinking block how
+	// long the model thought (`{"duration_ms": …}`), both as the JSON text the runtime
+	// derived (src/llm_message.go). Empty when the message has no structured side.
+	NormalizedContent string `json:"normalized_content,omitempty"`
+	// Model / Provider are the run's own backend, repeated on each of its messages so
+	// a timeline can label a run without a second read.
+	Model     string    `json:"model,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	RunID     string    `json:"run_id,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AgentRunSummary is one run of the stream, as its header has it: which turn it is,
+// which model answered, how long it took and how it ended. A timeline groups the events
+// below by TurnID and closes each group with this — the run's terminus is the run's own
+// result (reason_turns.status / duration_ms / error_message), not something a reader has
+// to infer from the last message it happens to see.
+type AgentRunSummary struct {
+	TurnID       int64  `json:"turn_id"`
+	Cycle        int    `json:"cycle"`
+	Mode         string `json:"mode,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Status       string `json:"status,omitempty"`
+	DurationMS   int64  `json:"duration_ms,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+	EndedAt      string `json:"ended_at,omitempty"`
+	CreatedAt    string `json:"created_at,omitempty"`
 }
 
 // AgentStreamResponse is an incremental poll of an agent's conversation stream.
 type AgentStreamResponse struct {
-	TaskID           string        `json:"task_id"`
-	AgentID          int64         `json:"agent_id"`
-	Events           []StreamEvent `json:"events"`
-	LastMessageSeq   int64         `json:"last_message_seq"`
-	NextPollAfterSeq int64         `json:"next_poll_after_seq"`
+	TaskID  string        `json:"task_id"`
+	AgentID int64         `json:"agent_id"`
+	Events  []StreamEvent `json:"events"`
+	// Turns is the header of every run this page touches, deduplicated, in turn order:
+	// a poll that brings a run's last message also brings the run's result, so the
+	// consumer can close the group it just rendered. A turn whose header cannot be read
+	// is left out — the conversation is what was asked for.
+	Turns            []AgentRunSummary `json:"turns"`
+	LastMessageSeq   int64             `json:"last_message_seq"`
+	NextPollAfterSeq int64             `json:"next_poll_after_seq"`
 }
 
 var (
 	errTaskNotFound   = errors.New("task not found")
 	errTaskNotRunning = errors.New("task is not running")
+	// errAgentNotFound / errAgentOffTask are the two reasons an agent does not answer
+	// for a task: no such row, or a row that belongs to another task. The handlers read
+	// them apart — "no such agent" is a 404, "wrong task" is a 400 — because they are
+	// different mistakes.
+	errAgentNotFound = errors.New("agent not found")
+	errAgentOffTask  = errors.New("agent is bound to another task")
 )
 
 // inFlightTasks maps a task that is being processed right now to the cancel func of
@@ -511,9 +558,32 @@ func (r *Autonomy) AgentStatus(taskID string, agentID int64) (*AgentWorkStatus, 
 }
 
 // AgentStream returns conversation rows with id > lastSyncedMessageSeq.
+//
+// The stream is one task's *one agent's* conversation, so the ids have to be real:
+// a task nobody knows, or an agent that is not that task's, has no conversation to
+// poll. Answering with an empty list instead would dress a mistyped id up as "nothing
+// has happened yet" — the very thing /agents/{agentID} answers with a 404.
 func (r *Autonomy) AgentStream(taskID string, agentID, lastSyncedMessageSeq int64) (*AgentStreamResponse, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
+	}
+	task, err := r.taskStore().GetTask(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, errTaskNotFound
+	}
+	agent, err := r.agentStore().GetAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		return nil, errAgentNotFound
+	}
+	if agent.CurrentTask != nil && agent.CurrentTask.ID != "" && agent.CurrentTask.ID != taskID {
+		return nil, fmt.Errorf("%w: agent %d is bound to task %s, not %s",
+			errAgentOffTask, agentID, agent.CurrentTask.ID, taskID)
 	}
 	messages, err := r.conversationStore().ListLLMMessagesAfter(taskID, agentID, lastSyncedMessageSeq, 200)
 	if err != nil {
@@ -523,22 +593,68 @@ func (r *Autonomy) AgentStream(taskID string, agentID, lastSyncedMessageSeq int6
 		TaskID:           taskID,
 		AgentID:          agentID,
 		Events:           make([]StreamEvent, 0, len(messages)),
+		Turns:            r.streamTurns(taskID, agentID, messages),
 		NextPollAfterSeq: lastSyncedMessageSeq,
 	}
 	for _, m := range messages {
 		resp.Events = append(resp.Events, StreamEvent{
-			MessageSeq: m.ID,
-			TurnID:     m.TurnID,
-			TurnSeq:    m.Seq,
-			Cycle:      m.Cycle,
-			Role:       m.Role,
-			Content:    m.Content,
-			RunID:      m.RunID,
-			Status:     m.Status,
-			CreatedAt:  m.CreatedAt,
+			MessageSeq:        m.ID,
+			TurnID:            m.TurnID,
+			TurnSeq:           m.Seq,
+			Cycle:             m.Cycle,
+			Role:              m.Role,
+			Content:           m.Content,
+			NormalizedContent: m.NormalizedContent,
+			Model:             m.Model,
+			Provider:          string(m.LLMProvider),
+			RunID:             m.RunID,
+			Status:            m.Status,
+			CreatedAt:         m.CreatedAt,
 		})
 		resp.LastMessageSeq = m.ID
 		resp.NextPollAfterSeq = m.ID
 	}
 	return resp, nil
+}
+
+// streamTurns is the run header of every turn this page of the stream touches, one row
+// per run and in turn order. A run whose header cannot be read (or that turns out to
+// belong to somebody else) is left out rather than failing the poll: the conversation is
+// what the caller asked for, and a missing summary costs it a closing line, not a page.
+func (r *Autonomy) streamTurns(taskID string, agentID int64, messages []LLMMessage) []AgentRunSummary {
+	summaries := []AgentRunSummary{}
+	if len(messages) == 0 {
+		return summaries
+	}
+	store, err := r.turnQueryStore()
+	if err != nil {
+		return summaries
+	}
+	seen := map[int64]bool{}
+	for _, m := range messages {
+		if m.TurnID == 0 || seen[m.TurnID] {
+			continue
+		}
+		seen[m.TurnID] = true
+		turn, err := store.GetTurn(m.TurnID)
+		if err != nil || turn == nil || turn.TaskID != taskID || turn.AgentID != agentID {
+			continue
+		}
+		summaries = append(summaries, AgentRunSummary{
+			TurnID:       turn.ID,
+			Cycle:        turn.Cycle,
+			Mode:         string(turn.Mode),
+			Model:        turn.Model,
+			Provider:     string(turn.Provider),
+			RunID:        turn.RunID,
+			Status:       turn.Status,
+			DurationMS:   turn.DurationMS,
+			ErrorCode:    turn.ErrorCode,
+			ErrorMessage: turn.ErrorMessage,
+			StartedAt:    turn.StartedAt,
+			EndedAt:      turn.EndedAt,
+			CreatedAt:    turn.CreatedAt,
+		})
+	}
+	return summaries
 }
