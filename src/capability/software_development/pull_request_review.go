@@ -1,7 +1,6 @@
 package software_development
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +15,8 @@ import (
 )
 
 const (
-	// ReviewName is the capability's stable semantic name: land a pull request.
+	// ReviewName is the capability's stable semantic name: read a pull request's
+	// review opinions (it does not merge).
 	ReviewName = "pull_request.review"
 	// ReviewDomain is the semantic domain it belongs to — landing code is part
 	// of software development, the domain code_edit and service.deploy live in.
@@ -31,7 +31,7 @@ const (
 	// capability somewhere else needs no code change.
 	DefaultGitHubAPIURL = "https://api.github.com"
 
-	// EnvGitHubToken / EnvGitHubTokenAlt carry the credential the merge is made
+	// EnvGitHubToken / EnvGitHubTokenAlt carry the credential the reads are made
 	// with. GH_TOKEN is the gh CLI's own variable, accepted so a host that
 	// already exports it needs no extra setting.
 	EnvGitHubToken    = "GITHUB_TOKEN"
@@ -372,27 +372,23 @@ func (c PullRequestReview) listReviews(client *http.Client, apiURL, repo, token 
 }
 
 func (c PullRequestReview) get(client *http.Client, endpoint, token string) (int, []byte, error) {
-	return c.request(client, http.MethodGet, endpoint, token, nil)
+	return c.request(client, endpoint, token)
 }
 
-// request is the one place a GitHub call happens: the version-pinned headers
-// (including the credential) are set here and the body is read bounded, so no
-// caller can pull an unbounded response into memory.
-func (c PullRequestReview) request(client *http.Client, method, endpoint, token string, body []byte) (int, []byte, error) {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequest(method, endpoint, reader)
+// request is the one place a GitHub call happens, and it is deliberately
+// read-only: it always issues a GET, so the capability cannot approve or merge a
+// pull request even by accident — there is no method and no request body that
+// could turn this into a write. The version-pinned headers (including the
+// credential) are set here and the response body is read bounded, so no caller
+// can pull an unbounded response into memory.
+func (c PullRequestReview) request(client *http.Client, endpoint, token string) (int, []byte, error) {
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return 0, nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-GitHub-Api-Version", reviewAPIVersion)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err

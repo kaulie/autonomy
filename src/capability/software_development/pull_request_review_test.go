@@ -266,6 +266,44 @@ func TestPullRequestReviewHasNoMergePath(t *testing.T) {
 	}
 }
 
+// TestPullRequestReviewRecordsApprovalWithoutActingOnIt: a pull request that
+// reviewers have approved comes back with the approval among its reviews, but the
+// capability still does not merge it — an approval is an opinion it reports, never
+// a decision it takes. Landing stays a human's call, so even a fully-approved
+// pull request is reported with merged:"false" and requires_human_approval:"true".
+func TestPullRequestReviewRecordsApprovalWithoutActingOnIt(t *testing.T) {
+	stub := newGitHubStub()
+	stub.reviewsBody = `[{"id":1,"user":{"login":"alice"},"state":"APPROVED","body":"ship it"}]`
+	out, err := review(t, stub, map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/70"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The approval is reported back as an opinion...
+	opinions := reviewsOf(t, out)
+	if len(opinions) != 1 || opinions[0].Author != "alice" || opinions[0].State != "approved" || opinions[0].Body != "ship it" {
+		t.Fatalf("opinions=%+v want alice/approved/ship it", opinions)
+	}
+	if got := out["review_summary"]; got != "1 approved" {
+		t.Errorf("review_summary=%q want %q", got, "1 approved")
+	}
+
+	// ...but it is not acted on: the capability never merges.
+	if out["merged"] != "false" || out["requires_human_approval"] != "true" {
+		t.Fatalf("out=%v want merged=false and requires_human_approval=true", out)
+	}
+
+	// Nor does it ask GitHub to act: an approval must not trigger any write.
+	for _, req := range stub.requests {
+		if req.method != http.MethodGet {
+			t.Fatalf("the capability made a %s call (%s); approval must not trigger a write", req.method, req.path)
+		}
+		if strings.HasSuffix(req.path, "/merge") {
+			t.Fatalf("the capability called the merge endpoint on an approved pull request: %s %s", req.method, req.path)
+		}
+	}
+}
+
 // TestPullRequestReviewReadsThePullRequestTheURLNames: a reference the caller
 // named outright is read by number — no branch-pair lookup — and its reviews come
 // back under the number it named.
