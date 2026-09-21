@@ -185,8 +185,12 @@ type broadcastTarget struct {
 // every project), each with the agent it is paired with. It is the store that is
 // asked what exists — the project a task names is read off the task's own row, so
 // a task is in a project because it says so, not because a request says so.
+//
+// The walk is taken from the writer: a broadcast is a write (one message per target),
+// and a task accepted a moment ago is one this runtime must not miss just because a
+// local follower has not caught up (docs/store.md「读写分离」).
 func (r *Autonomy) broadcastTargets(projectID string) ([]broadcastTarget, error) {
-	tasks, err := r.taskStore().ListTasks()
+	tasks, err := writerReads(r.taskStore()).ListTasks()
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +214,7 @@ func (r *Autonomy) broadcastTarget(task *Task, projectID string) broadcastTarget
 		target.Skip = "the task has no agent"
 		return target
 	}
-	agent, err := r.agentStore().GetAgent(task.AgentID)
+	agent, err := writerReads(r.agentStore()).GetAgent(task.AgentID)
 	switch {
 	case err != nil:
 		target.Skip = fmt.Sprintf("read agent %d: %v", task.AgentID, err)

@@ -153,6 +153,11 @@ UPDATE agent_messages SET status = $1, started_at = NULL WHERE agent_id = $2 AND
 
 // CountQueuedMessages counts the messages waiting for one agent — what the drain asks
 // to know whether the message it just finished was the last one.
+//
+// It is a read, but never a follower read: the drain decides whether to keep the
+// consumer alive on this answer, and a follower still catching up would answer "dry"
+// for a message this process has already queued. The inbox is control data, so it
+// reads through the writer (docs/store.md「读写分离」).
 func (s *PostgresStore) CountQueuedMessages(agentID int64) (int, error) {
 	if agentID == 0 {
 		return 0, nil
@@ -169,6 +174,10 @@ SELECT count(*) FROM agent_messages WHERE agent_id = $1 AND status = $2
 // CountMessagesAhead counts the messages an agent still has in front of one message:
 // the ones that arrived before it and have not finished (queued, or being processed
 // right now). The queue's order is the row id, so "before it" is `id <`.
+//
+// Like CountQueuedMessages it reads through the writer: the message it counts from is
+// one this process has just enqueued, so an answer from a follower could report a
+// queue that is shorter than the one the caller can already see.
 func (s *PostgresStore) CountMessagesAhead(agentID, messageID int64) (int, error) {
 	if agentID == 0 || messageID == 0 {
 		return 0, nil
@@ -194,7 +203,7 @@ func (s *PostgresStore) ListAgentMessages(agentID int64, limit int) ([]AgentMess
 		query += ` LIMIT $2`
 		args = append(args, limit)
 	}
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.readPool().Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list messages of agent %d: %w", agentID, err)
 	}

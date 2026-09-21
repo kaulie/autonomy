@@ -90,6 +90,10 @@ func storedAgentForTask(store Store, task *Task) (*Agent, error) {
 	if store == nil || task == nil || strings.TrimSpace(task.ID) == "" {
 		return nil, nil
 	}
+	// Resuming reads a row this runtime writes to: the agent a task is paired with is
+	// decided from what is here and written back (persistAgent / persistTask), so
+	// these two reads are taken from the writer (docs/store.md「读写分离」).
+	store = writerReads(store)
 	agentID := task.AgentID
 	if agentID == 0 {
 		storedTask, err := store.GetTask(task.ID)

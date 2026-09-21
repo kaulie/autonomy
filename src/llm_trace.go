@@ -187,7 +187,9 @@ func (t *LLMTrace) Finish(res LLMRunResult) {
 	if err := t.store.FinishReasonTurn(t.handle, res); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] finish llm trace: %v\n", err)
 	}
-	if id, found, err := t.store.AssistantMessageID(t.handle.TurnID); err != nil {
+	// The reply is the row this process has just written (FinishReasonTurn above), so
+	// it is read back from the writer (docs/store.md「读写分离」).
+	if id, found, err := writerReads(t.store).AssistantMessageID(t.handle.TurnID); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] read assistant message: %v\n", err)
 	} else if found {
 		t.replyMessageID = id

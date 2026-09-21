@@ -97,6 +97,8 @@ StoreEngine（Name / DefaultDSN / Open）
 | `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()` |
 | `AUTONOMY_DATA_DIR` | sqlite 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
 | `AUTONOMY_POSTGRES_DSN` | postgres 的默认 DSN（`DATABASE_URL` 亦可） | 两个都空且 `AUTONOMY_STORE_DSN` 也空 → 报错 |
+| `AUTONOMY_STORE_READ_DSN` | **读侧**（本地副本）连接串，见下文「读写分离」 | 未设置 → 不分离，读都在写侧 |
+| `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（上一个优先） | 未设置 → 不分离 |
 
 `OpenDefaultStore()` 读取以上变量并分发到对应 engine：
 
@@ -147,6 +149,62 @@ RFC3339 UTC 文本，`cost_cents` 是 NULL 还是 0 仍然区分，`llm_messages
 测试（`src/postgres_store_test.go`）跑在**真的 PostgreSQL** 上：每个用例自己建一个库、跑完删掉，
 `AUTONOMY_POSTGRES_TEST_DSN` 指定服务器（默认 `postgres://localhost:5432/postgres?sslmode=disable`），
 连不上就 skip。SQL 是这里要测的东西，所以不拿 mock 测。
+
+## 读写分离
+
+一个 store 可以由**两台服务器**承担：写（以及「读完就写」的读）走远端主库，只观察的读走
+本机那份 streaming replica。这不是第二种 engine，而是同一个 engine 的第二种**连接**：
+契约（七个端口）、SQL、schema 都不变，变的只是某一次读去哪台服务器取数。怎么立这份本地副本、
+怎么验证、坏了怎么办在 [local-replica.md](local-replica.md)；这里讲规则。
+
+### 规则
+
+| 读 | 去哪 | 为什么 |
+|----|------|--------|
+| HTTP 读接口（进度 / agent 状态 / 对话流）、数据 API（`TurnQueryStore` 的遍历、facets、task 候选、计数）、contract 与 verdict 的展示 | **本地副本**（默认） | 只观察：晚一点看到没关系，省掉一次跨网 |
+| 受理一条指令时读回任务行、停止任务、广播解析目标、resume 读 task/agent、judge 读 plan/step、contract 钉住与读回、收件箱计数（`CountQueuedMessages` / `CountMessagesAhead`）、写完就回读（`AssistantMessageID` / `ListExecutionStepPlan` / `TaskInputMessageID`）、LLM run 的消息 seq | **主库** | 这次读要**照着写**，或者必须看见本进程刚写下的那一版（read-your-writes） |
+
+写永远只有一处：`db`（主库）。副本是只读事务，写过去会直接被数据库拒绝 —— 这正是边界。
+
+落点是**调用点**说的，因为只有调用者知道答案会不会被拿去写：engine 只提供「把同一个 store
+换成写侧」这一个动作（`StoreReadSplit.Reading(ReadWriter)`），上层的写法是一行
+`writerReads(port)`（`src/store_read_split.go`）：
+
+```go
+// 读一眼就要照着写：这次读必须是「自己刚写下的那一版」
+if stored, err := writerReads(r.taskStore()).GetTask(taskID); err == nil && stored != nil { … }
+
+// 只观察的读：不写任何东西，默认就是本地副本
+task, err := r.taskStore().GetTask(taskID)
+```
+
+`writerReads` 对**没有读侧**的 store（没配 follower 的 postgres、以及 sqlite）原样返回，
+所以同一行代码在两种部署里都对，上层不需要知道今天有没有副本。
+
+### 打开读侧时检查什么
+
+`OpenPostgresStoreWithFollower` 在打开时验证那个读侧**确实是一份副本**：`pg_is_in_recovery()`
+为真，且 `system_identifier` 与写侧一致（同一个集群）。两个检查都是为了拦住**安静**的错误 ——
+指到别的可写库上照样连得上、照样有 `tasks` 表，只是里面的世界不是这一个；而「行还没复制过来」
+和「行根本不存在」在返回值上完全一样。
+
+检查不过**不失败**：打一条 warning，读退回主库（`[postgres] read follower disabled, reads stay
+on the writer: …`）。副本是优化，数据库才是本体 —— 服务必须能起来读它自己写的那份库。
+schema 只有写侧建（`migrate`），副本是 `pg_basebackup` 来的，engine 不会、也不能往上迁移。
+
+### 配置
+
+| 环境变量 | 含义 | 默认 |
+|----------|------|------|
+| `AUTONOMY_STORE_READ_DSN` | **读侧**连接串：本机那份副本（engine 中立的写法） | 未设置 → 不分离，读都在写侧 |
+| `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（`AUTONOMY_STORE_READ_DSN` 优先） | 未设置 → 不分离 |
+
+```bash
+# 写远端、读本地（DSN 用 scripts/local-replica.sh env 生成）
+export AUTONOMY_STORE_ENGINE=postgres
+export AUTONOMY_STORE_DSN="postgres://autonomy:…@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=…"
+export AUTONOMY_STORE_READ_DSN="postgres://autonomy:…@127.0.0.1:5433/autonomy?sslmode=disable"
+```
 
 ## 扩展：接入一种新数据库
 
@@ -230,20 +288,24 @@ RFC3339 UTC 文本，`cost_cents` 是 NULL 还是 0 仍然区分，`llm_messages
 | 关注点 | 文件 |
 |--------|------|
 | `Store` 与七个端口（契约） | `src/store.go` |
-| engine SPI + 注册表 + 选择 | `src/store_engine.go` |
-| sqlite engine（默认 DSN / 注册） | `src/sqlite_engine.go` |
-| sqlite 实现（DDL / 迁移 / 读写） | `src/sqlite_store.go`、`src/sqlite_query.go`、`src/sqlite_execution.go`、`src/sqlite_verification.go`、`src/sqlite_inbox.go` |
-| sqlite 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/sqlite_turns.go` |
+| engine SPI + 注册表 + 选择 | `src/db/store_engine.go` |
+| sqlite engine（默认 DSN / 注册） | `src/db/sqlite_engine.go` |
+| sqlite 实现（DDL / 迁移 / 读写） | `src/db/sqlite_store.go`、`src/db/sqlite_query.go`、`src/db/sqlite_execution.go`、`src/db/sqlite_verification.go`、`src/db/sqlite_inbox.go` |
+| sqlite 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/db/sqlite_turns.go` |
 | 数据 API 的读取与响应（`TurnQueryStore` 的使用方） | `src/turn_api.go`、`src/http_server.go` |
-| sqlite 列值编码（时间 / NULL / JSON） | `src/sqlite_encoding.go` |
-| postgres engine（默认 DSN / 注册） | `src/postgres_engine.go` |
-| postgres 实现（schema / 读写） | `src/postgres_store.go`、`src/postgres_query.go`、`src/postgres_execution.go`、`src/postgres_verification.go`、`src/postgres_inbox.go` |
-| postgres 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/postgres_turns.go` |
-| postgres 列值编码（时间 / NULL / 参数占位） | `src/postgres_encoding.go` |
-| 两个 engine 共用的行文本写法（JSON 保持有效、0 号外键 → NULL、`context_ref`） | `src/store_row_text.go` |
-| 两个 engine 共用的 TurnQuery 分页 / 排序 / 搜索规则 | `src/turn_query_page.go` |
-| 两个 engine 共用的「一条 run 的输入消息长什么样」 | `src/conversation_records.go` |
-| postgres engine 的测试（真库、每例一库） | `src/postgres_store_test.go` |
-| 两个 engine 答案一致的测试（同一串写入逐行比对） | `src/store_engines_test.go` |
-| 端口边界与上层可插拔性的测试 | `src/store_ports_test.go` |
+| sqlite 列值编码（时间 / NULL / JSON） | `src/db/sqlite_encoding.go` |
+| postgres engine（默认 DSN / 注册） | `src/db/postgres_engine.go` |
+| postgres 实现（schema / 读写） | `src/db/postgres_store.go`、`src/db/postgres_query.go`、`src/db/postgres_execution.go`、`src/db/postgres_verification.go`、`src/db/postgres_inbox.go` |
+| postgres 的数据 API 只读实现（过滤 / 排序 / 分页 / facets / task 候选） | `src/db/postgres_turns.go` |
+| postgres 列值编码（时间 / NULL / 参数占位） | `src/db/postgres_encoding.go` |
+| 两个 engine 共用的行文本写法（JSON 保持有效、0 号外键 → NULL、`context_ref`） | `src/db/store_row_text.go` |
+| 两个 engine 共用的 TurnQuery 分页 / 排序 / 搜索规则 | `src/db/turn_query_page.go` |
+| 两个 engine 共用的「一条 run 的输入消息长什么样」 | `src/db/conversation_records.go` |
+| postgres engine 的测试（真库、每例一库） | `src/db/postgres_store_test.go` |
+| 两个 engine 答案一致的测试（同一串写入逐行比对） | `src/db/store_engines_test.go` |
+| 端口边界与上层可插拔性的测试 | `src/db/store_ports_test.go` |
+| 读写分离：上层「这次读要主库」的写法（`ReadSource` / `StoreReadSplit` / `writerReads`） | `src/store_read_split.go` |
+| 读写分离：engine 的读侧（`readPool` / `Reading` / 打开时的副本检查）与配置 | `src/db/postgres_store.go`、`src/db/postgres_engine.go` |
+| 读写分离的测试（路由、拒收非副本、真实主副链路） | `src/db/postgres_read_split_test.go` |
+| 立一份本地副本（基础备份 / 起停 / 状态 / launchd 代理） | `scripts/local-replica.sh`，见 [local-replica.md](local-replica.md) |
 | 进程内单例与 bootstrap | `src/autonomy.go`（`activeStore()`，`BootstrapAutonomy`） |

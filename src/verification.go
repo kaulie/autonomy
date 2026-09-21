@@ -342,7 +342,11 @@ func (r *Runtime) askAuthority(ctx DecisionContext, ask verificationAsk, prior [
 // against the task's own step history — a slot naming a step this plan does not have is
 // a step an earlier cycle ran.
 func taskStepOutputs(taskID string) []ActionResult {
-	s := activeExecutionStore()
+	// The steps a criterion is judged by are the steps this run wrote, seconds ago:
+	// they are read from the writer, not from a local follower that may not have
+	// replayed them yet — a verdict on a step that "never ran" is exactly the silent
+	// failure the writer read avoids (docs/store.md「读写分离」).
+	s := writerReads(activeExecutionStore())
 	if s == nil || strings.TrimSpace(taskID) == "" {
 		return nil
 	}

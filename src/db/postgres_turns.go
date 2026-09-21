@@ -41,7 +41,7 @@ const pgTurnFrom = `FROM reason_turns t LEFT JOIN agents a ON a.id = t.agent_id`
 func (s *PostgresStore) QueryTurns(q TurnQuery) ([]TurnRecord, int, error) {
 	where, args := pgTurnWhere(q)
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) `+pgTurnFrom+where, args...).Scan(&total); err != nil {
+	if err := s.readPool().QueryRow(`SELECT COUNT(*) `+pgTurnFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count reason turns: %w", err)
 	}
 	// ORDER BY <order> <dir>, id DESC: equal sort keys keep a stable order, so a page
@@ -50,7 +50,7 @@ func (s *PostgresStore) QueryTurns(q TurnQuery) ([]TurnRecord, int, error) {
 	query := `SELECT ` + pgTurnColumns + ` ` + pgTurnFrom + where +
 		` ORDER BY ` + turnOrderColumn(q.Order) + ` ` + turnSortDirection(q.Dir) +
 		`, t.id DESC LIMIT ` + pgParam(len(page)-1) + ` OFFSET ` + pgParam(len(page))
-	rows, err := s.db.Query(query, page...)
+	rows, err := s.readPool().Query(query, page...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query reason turns: %w", err)
 	}
@@ -71,7 +71,7 @@ func (s *PostgresStore) GetTurn(id int64) (*TurnRecord, error) {
 	if id <= 0 {
 		return nil, nil
 	}
-	rec, err := pgScanTurnRecord(s.db.QueryRow(`SELECT `+pgTurnColumns+` `+pgTurnFrom+` WHERE t.id = $1`, id))
+	rec, err := pgScanTurnRecord(s.readPool().QueryRow(`SELECT `+pgTurnColumns+` `+pgTurnFrom+` WHERE t.id = $1`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -219,7 +219,7 @@ func (s *PostgresStore) pgTurnFacet(column string) ([]TurnFacetValue, error) {
 	query := `SELECT ` + column + ` AS value, COUNT(*) AS n ` + pgTurnFrom +
 		` WHERE ` + column + ` IS NOT NULL AND ` + column + ` <> ''` +
 		` GROUP BY ` + column + ` ORDER BY n DESC, value ASC`
-	rows, err := s.db.Query(query)
+	rows, err := s.readPool().Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("facet %s: %w", column, err)
 	}
@@ -253,7 +253,7 @@ type pgTaskOptionRow struct {
 // still has turns to compare.
 func (s *PostgresStore) ListTaskOptions() ([]TaskOption, error) {
 	options := map[string]*pgTaskOptionRow{}
-	known, err := s.db.Query(`
+	known, err := s.readPool().Query(`
 SELECT t.id, t.description, t.status, COUNT(r.id), MAX(r.created_at),
        t.context_ref, t.agent_id, t.updated_at
 FROM tasks t LEFT JOIN reason_turns r ON r.task_id = t.id
@@ -266,7 +266,7 @@ GROUP BY t.id, t.description, t.status, t.context_ref, t.agent_id, t.updated_at`
 	}
 	// A task that only ever appears in the log has no row, so it has no world, no agent
 	// and no update time: its project is "" and it is not one of any project's tasks.
-	orphans, err := s.db.Query(`
+	orphans, err := s.readPool().Query(`
 SELECT r.task_id, ''::text AS description, ''::text AS status, COUNT(*), MAX(r.created_at),
        ''::text AS context_ref, 0::bigint AS agent_id, NULL::timestamptz AS updated_at
 FROM reason_turns r
@@ -346,10 +346,10 @@ func (s *PostgresStore) ListTurnsByTask(taskID string, limit int) ([]TurnRecord,
 		return []TurnRecord{}, 0, nil
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) `+pgTurnFrom+` WHERE t.task_id = $1`, taskID).Scan(&total); err != nil {
+	if err := s.readPool().QueryRow(`SELECT COUNT(*) `+pgTurnFrom+` WHERE t.task_id = $1`, taskID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count task turns: %w", err)
 	}
-	rows, err := s.db.Query(`SELECT `+pgTurnColumns+` `+pgTurnFrom+
+	rows, err := s.readPool().Query(`SELECT `+pgTurnColumns+` `+pgTurnFrom+
 		` WHERE t.task_id = $1 ORDER BY t.created_at ASC, t.id ASC LIMIT $2`, taskID, taskTurnLimit(limit))
 	if err != nil {
 		return nil, 0, fmt.Errorf("list task turns: %w", err)
@@ -365,7 +365,7 @@ func (s *PostgresStore) ListTurnsByTask(taskID string, limit int) ([]TurnRecord,
 // CountTurns is how many reason turns the log holds.
 func (s *PostgresStore) CountTurns() (int, error) {
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM reason_turns`).Scan(&total); err != nil {
+	if err := s.readPool().QueryRow(`SELECT COUNT(*) FROM reason_turns`).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count reason turns: %w", err)
 	}
 	return total, nil

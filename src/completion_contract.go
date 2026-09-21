@@ -300,7 +300,10 @@ func pinCompletionContract(decision Decision, planID int64) {
 // error: it is a task whose `done` has nothing to be verified against, which is what
 // verification reports.
 func pinnedCompletionContract(taskID string) []Criterion {
-	s := activeVerificationStore()
+	// A task pins its contract at its first cycle and is judged against it later, so
+	// this read has to see what this runtime pinned — the writer, not a follower
+	// (docs/store.md「读写分离」).
+	s := writerReads(activeVerificationStore())
 	if s == nil || strings.TrimSpace(taskID) == "" {
 		return nil
 	}

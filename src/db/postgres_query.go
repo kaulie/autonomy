@@ -23,7 +23,7 @@ func (s *PostgresStore) GetTask(taskID string) (*Task, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("empty task id")
 	}
-	task, err := pgScanTask(s.db.QueryRow(`
+	task, err := pgScanTask(s.readPool().QueryRow(`
 SELECT id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at
 FROM tasks WHERE id = $1`, taskID))
 	if err == sql.ErrNoRows {
@@ -38,7 +38,7 @@ FROM tasks WHERE id = $1`, taskID))
 // ListTasks reads every task row, oldest first (created_at, then id): the walk a
 // broadcast takes to resolve its scope (src/broadcast.go).
 func (s *PostgresStore) ListTasks() ([]*Task, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, description, domain, goal_type, context_ref, status, error, agent_id, created_at, updated_at
 FROM tasks ORDER BY created_at, id`)
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *PostgresStore) GetAgent(agentID int64) (*Agent, error) {
 		createdAt, updatedAt time.Time
 		deletedAt            sql.NullTime
 	)
-	err := s.db.QueryRow(`
+	err := s.readPool().QueryRow(`
 SELECT id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
        created_at, updated_at, deleted_at
 FROM agents WHERE id = $1`, agentID).Scan(
@@ -145,7 +145,7 @@ func (s *PostgresStore) ActiveReasonTurn(taskID string, agentID int64) (*ReasonT
 		createdAt          time.Time
 		costCents          sql.NullFloat64
 	)
-	err := s.db.QueryRow(`
+	err := s.readPool().QueryRow(`
 SELECT id, task_id, agent_id, cycle, mode, llm_provider, model, llm_agent_id,
        input, raw_output, normalized_output, run_id, status, error_code, error_message,
        duration_ms, event_count, input_tokens, output_tokens, cache_read_tokens,
@@ -187,7 +187,7 @@ func (s *PostgresStore) ListLLMMessagesAfter(taskID string, agentID, afterID int
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, turn_id, task_id, agent_id, cycle, seq, role, parent_id,
 content, normalized_content, llm_provider, model, run_id, status, created_at
 FROM llm_messages

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -33,13 +34,51 @@ import (
 //     LastInsertId.
 //   - Where sqlite says INSERT OR IGNORE, PostgreSQL says ON CONFLICT DO NOTHING
 //     against the same unique key, so a replayed write stays a no-op.
+//
+// The store holds up to two connections: db, the writing server, and reader, a
+// streaming replica of it when one is configured (AUTONOMY_STORE_READ_DSN /
+// AUTONOMY_POSTGRES_READ_DSN). Writes — and the reads inside a write, like every
+// RETURNING and every read-then-write statement — go to db; a read that can wait
+// for replication goes to reader (readPool). The two are the same database, so the
+// schema is the writer's: a replica is made by pg_basebackup, not by this engine
+// (scripts/local-replica.sh), and nothing here ever migrates the reader
+// (docs/store.md「读写分离」).
 type PostgresStore struct {
-	db *sql.DB
+	db     *sql.DB
+	reader *sql.DB
 }
 
-// RawDB exposes the engine's underlying connection. See SQLiteStore.RawDB: it is
-// the seam tests use, not something the runtime calls.
+// RawDB exposes the engine's underlying connection (the writer). See
+// SQLiteStore.RawDB: it is the seam tests use, not something the runtime calls.
 func (s *PostgresStore) RawDB() *sql.DB { return s.db }
+
+// readPool is where a read that only observes gets its rows: the follower when one
+// is configured, and the writer otherwise (also when Reading(ReadWriter) handed out
+// a writer-only copy). Every read method reads through here, never through db
+// directly — that one line is the split.
+func (s *PostgresStore) readPool() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	if s.reader != nil {
+		return s.reader
+	}
+	return s.db
+}
+
+// Reading answers with the same store, routed as asked: ReadWriter gives a copy that
+// reads from the writing server only (read-your-writes), ReadFollower the store as
+// it is. A store with no follower configured is returned unchanged either way, so
+// the upper layer can ask on any deployment (docs/store.md「读写分离」).
+//
+// The copy shares both pools with the original: it is a routing decision, not a
+// second store, so the caller that owns the store is still the one that closes it.
+func (s *PostgresStore) Reading(source ReadSource) Store {
+	if s == nil || s.reader == nil || source == ReadFollower {
+		return s
+	}
+	return &PostgresStore{db: s.db}
+}
 
 // OpenPostgresStore connects to the database at dsn, checks the connection, and
 // makes the schema it needs.
@@ -49,38 +88,123 @@ func (s *PostgresStore) RawDB() *sql.DB { return s.db }
 // is created idempotently on every open, so an existing postgres database is left as
 // it is.
 func OpenPostgresStore(dsn string) (*PostgresStore, error) {
+	return OpenPostgresStoreWithFollower(dsn, "")
+}
+
+// OpenPostgresStoreWithFollower is OpenPostgresStore with a follower whose rows
+// serve readPool: a replica of the same database (pg_is_in_recovery() is true on it
+// and it carries the writer's system identifier). An empty followerDsn is a store
+// with one side, exactly like OpenPostgresStore.
+//
+// A follower that cannot be used — unreachable, writable, or another cluster — does
+// not fail the open: it is reported on stderr and the store reads from the writer,
+// because a read replica is an optimization and the runtime must still come up
+// reading the database it writes to (docs/store.md「读写分离」).
+func OpenPostgresStoreWithFollower(dsn, followerDsn string) (*PostgresStore, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, fmt.Errorf("open postgres: empty dsn")
 	}
-	db, err := sql.Open("pgx", dsn)
+	db, err := openPostgresPool(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
-	}
-	// Several goroutines of one runtime write here (a run's own records, and the inbox
-	// consumer running the same agent's next message), so the pool is a pool, and a
-	// connection is recycled rather than held for the life of the process.
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Hour)
-	// Ping with a deadline: an unreachable server must fail the open in seconds, not
-	// hang a restart until the socket gives up on its own.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open postgres: %w", err)
+		return nil, err
 	}
 	s := &PostgresStore{db: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+	if followerDsn = strings.TrimSpace(followerDsn); followerDsn != "" {
+		reader, err := openPostgresFollower(db, followerDsn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[postgres] read follower disabled, reads stay on the writer: %v\n", err)
+		} else {
+			s.reader = reader
+		}
+	}
 	return s, nil
 }
 
-// Close releases the engine's connection pool.
+// openPostgresPool connects one pool and checks it answers. Several goroutines of one
+// runtime use a pool (a run's own records, and the inbox consumer running the same
+// agent's next message), so a connection is recycled rather than held for the life of
+// the process; and the ping has a deadline, because an unreachable server must fail
+// the open in seconds rather than hang a restart until the socket gives up on its own.
+func openPostgresPool(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open postgres: %w", err)
+	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open postgres: %w", err)
+	}
+	return db, nil
+}
+
+// openPostgresFollower connects the read replica and checks that it is one: it must be
+// in recovery, and it must belong to the same cluster as the writer (the same system
+// identifier). Both checks exist because the failure they catch is silent — a DSN
+// pointing at some other writable database would serve another world's rows and look
+// perfectly healthy, and a row that has not replicated yet is indistinguishable from
+// one that never existed.
+func openPostgresFollower(writer *sql.DB, dsn string) (*sql.DB, error) {
+	reader, err := openPostgresPool(dsn)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var inRecovery bool
+	if err := reader.QueryRowContext(ctx, `SELECT pg_is_in_recovery()`).Scan(&inRecovery); err != nil {
+		_ = reader.Close()
+		return nil, fmt.Errorf("open postgres follower: %w", err)
+	}
+	if !inRecovery {
+		_ = reader.Close()
+		return nil, fmt.Errorf("open postgres follower: %q is not in recovery (a writable database, not a replica)", dsn)
+	}
+	writerID, err := pgSystemIdentifier(ctx, writer)
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	readerID, err := pgSystemIdentifier(ctx, reader)
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	if writerID != readerID {
+		_ = reader.Close()
+		return nil, fmt.Errorf("open postgres follower: %q is a replica of another cluster (system identifier %d, writer's is %d)",
+			dsn, readerID, writerID)
+	}
+	return reader, nil
+}
+
+// pgSystemIdentifier reads a cluster's identifier: every replica of a cluster shares
+// it, so it is what tells "a copy of this database" from "some other database".
+func pgSystemIdentifier(ctx context.Context, db *sql.DB) (int64, error) {
+	var id int64
+	if err := db.QueryRowContext(ctx, `SELECT system_identifier FROM pg_control_system()`).Scan(&id); err != nil {
+		return 0, fmt.Errorf("read system identifier: %w", err)
+	}
+	return id, nil
+}
+
+// Close releases the engine's connection pools — the follower's too, when there is one.
 func (s *PostgresStore) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
+		return nil
+	}
+	if s.reader != nil {
+		_ = s.reader.Close()
+	}
+	if s.db == nil {
 		return nil
 	}
 	return s.db.Close()
@@ -714,6 +838,10 @@ func (s *PostgresStore) insertDerivedMessage(m LLMMessage) error {
 
 // assistantMessageSeq reports whether the run already has its assistant row, and at
 // which seq. A replayed finish must not append a second one.
+//
+// It reads through the writer, not readPool: it is asked while finishing a run this
+// process has just been streaming, so the row it looks for is one this process wrote
+// moments ago (docs/store.md「读写分离」).
 func (s *PostgresStore) assistantMessageSeq(turnID int64) (int, bool, error) {
 	var seq int
 	err := s.db.QueryRow(`SELECT seq FROM llm_messages WHERE turn_id = $1 AND role = $2 ORDER BY seq LIMIT 1`,
@@ -730,7 +858,8 @@ func (s *PostgresStore) assistantMessageSeq(turnID int64) (int, bool, error) {
 // nextMessageSeq is the seq the next llm_messages row of a run takes: one past the
 // highest seq already stored (the user input is 0). It is read from the table rather
 // than derived from the event stream because aggregated rows may already have been
-// written while the run was streaming.
+// written while the run was streaming — this process's own rows, so it reads through
+// the writer, like assistantMessageSeq.
 func (s *PostgresStore) nextMessageSeq(turnID int64) (int, error) {
 	var seq int
 	if err := s.db.QueryRow(
@@ -742,7 +871,7 @@ func (s *PostgresStore) nextMessageSeq(turnID int64) (int, error) {
 
 // ListLLMEvents returns a run's stream events in Seq order for replay/analysis.
 func (s *PostgresStore) ListLLMEvents(turnID int64) ([]LLMEvent, error) {
-	rows, err := s.db.Query(`SELECT seq, offset_token, channel, kind, event_type, role, name, text_delta, payload, elapsed_ms, created_at
+	rows, err := s.readPool().Query(`SELECT seq, offset_token, channel, kind, event_type, role, name, text_delta, payload, elapsed_ms, created_at
 FROM llm_events WHERE turn_id = $1 ORDER BY seq`, turnID)
 	if err != nil {
 		return nil, fmt.Errorf("query llm events: %w", err)
@@ -782,7 +911,7 @@ FROM llm_events WHERE turn_id = $1 ORDER BY seq`, turnID)
 // thinking/tool rows, the assistant return) in Seq order. An assistant row's ParentID
 // is the id of the user row it answers.
 func (s *PostgresStore) ListLLMMessages(turnID int64) ([]LLMMessage, error) {
-	rows, err := s.db.Query(`SELECT id, turn_id, task_id, agent_id, cycle, seq, role, parent_id,
+	rows, err := s.readPool().Query(`SELECT id, turn_id, task_id, agent_id, cycle, seq, role, parent_id,
 content, normalized_content, llm_provider, model, run_id, status, created_at
 FROM llm_messages WHERE turn_id = $1 ORDER BY seq, id`, turnID)
 	if err != nil {
