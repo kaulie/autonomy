@@ -72,7 +72,7 @@ ON CONFLICT (task_id, idx) DO NOTHING`,
 
 // ListCompletionContract reads a task's pinned contract in criterion order.
 func (s *PostgresStore) ListCompletionContract(taskID string) ([]ContractCriterion, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, task_id, idx, plan_id, name, criterion, created_at
 FROM completion_contract WHERE task_id = $1 ORDER BY idx`, taskID)
 	if err != nil {
@@ -114,7 +114,7 @@ RETURNING id`,
 
 // ListVerifications reads a task's verdicts in creation order, oldest first.
 func (s *PostgresStore) ListVerifications(taskID string) ([]Verification, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, task_id, plan_id, cycle, criterion, requirement, method, evidence,
        expected, observed, result, reason, created_at
 FROM verification WHERE task_id = $1 ORDER BY id`, taskID)

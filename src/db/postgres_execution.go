@@ -188,7 +188,7 @@ RETURNING id
 // stream ended mid-flight still has its return as the assistant row).
 func (s *PostgresStore) AssistantMessageID(turnID int64) (int64, bool, error) {
 	var id int64
-	err := s.db.QueryRow(`
+	err := s.readPool().QueryRow(`
 SELECT id FROM llm_messages
  WHERE turn_id = $1 AND role = $2 ORDER BY seq DESC LIMIT 1`,
 		turnID, string(LLMMessageRoleAssistant)).Scan(&id)
@@ -206,7 +206,7 @@ SELECT id FROM llm_messages
 // from any plan of any cycle.
 func (s *PostgresStore) TaskInputMessageID(taskID string) (int64, bool, error) {
 	var id int64
-	err := s.db.QueryRow(`
+	err := s.readPool().QueryRow(`
 SELECT task_input_message_id FROM execution_plan
  WHERE task_id = $1 AND task_input_message_id IS NOT NULL
  ORDER BY id LIMIT 1`, taskID).Scan(&id)
@@ -221,7 +221,7 @@ SELECT task_input_message_id FROM execution_plan
 
 // ListExecutionPlans reads a task's plans in creation order, oldest first.
 func (s *PostgresStore) ListExecutionPlans(taskID string) ([]ExecutionPlan, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, task_id, agent_id, cycle, decision_type, reason, evidence, need, step_count,
        plan_hash, reply_message_id, input_message_id, task_input_message_id, reason_turn_id, created_at
   FROM execution_plan WHERE task_id = $1 ORDER BY id`, taskID)
@@ -256,7 +256,7 @@ SELECT id, task_id, agent_id, cycle, decision_type, reason, evidence, need, step
 
 // ListExecutionStepPlan reads a plan's planned steps in plan order.
 func (s *PostgresStore) ListExecutionStepPlan(planID int64) ([]ExecutionStepPlan, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, plan_id, idx, name, capability, input, expected_effect, evidence_refs, created_at
   FROM execution_step_plan WHERE plan_id = $1 ORDER BY idx`, planID)
 	if err != nil {
@@ -282,7 +282,7 @@ SELECT id, plan_id, idx, name, capability, input, expected_effect, evidence_refs
 
 // ListExecutionSteps reads a plan's executed steps in execution order.
 func (s *PostgresStore) ListExecutionSteps(planID int64) ([]ExecutionStep, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, name, capability, provider, status,
        input, output, error, started_at, ended_at, duration_ms, created_at
   FROM execution_step WHERE plan_id = $1 ORDER BY idx, id`, planID)
@@ -317,7 +317,7 @@ SELECT id, plan_id, plan_step_id, task_id, agent_id, cycle, idx, name, capabilit
 
 // ListExecutionStepInteractions reads one step's interactions in Seq order.
 func (s *PostgresStore) ListExecutionStepInteractions(stepID int64) ([]ExecutionStepInteraction, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.readPool().Query(`
 SELECT id, step_id, seq, kind, provider, reason_turn_id, created_at
   FROM execution_step_interaction WHERE step_id = $1 ORDER BY seq`, stepID)
 	if err != nil {
@@ -349,15 +349,15 @@ SELECT id, step_id, seq, kind, provider, reason_turn_id, created_at
 // planned steps are still there, which is the whole record of it.
 func (s *PostgresStore) ExecutionPlanOutcome(planID int64) (ExecutionPlanOutcome, bool, error) {
 	out := ExecutionPlanOutcome{PlanID: planID}
-	if err := s.db.QueryRow(`SELECT count(*) FROM execution_step_plan WHERE plan_id = $1`, planID).
+	if err := s.readPool().QueryRow(`SELECT count(*) FROM execution_step_plan WHERE plan_id = $1`, planID).
 		Scan(&out.Planned); err != nil {
 		return out, false, fmt.Errorf("count planned steps: %w", err)
 	}
-	if err := s.db.QueryRow(`SELECT count(*) FROM execution_step WHERE plan_id = $1`, planID).
+	if err := s.readPool().QueryRow(`SELECT count(*) FROM execution_step WHERE plan_id = $1`, planID).
 		Scan(&out.Executed); err != nil {
 		return out, false, fmt.Errorf("count executed steps: %w", err)
 	}
-	err := s.db.QueryRow(`
+	err := s.readPool().QueryRow(`
 SELECT id, status, error FROM execution_step
  WHERE plan_id = $1 ORDER BY idx DESC, id DESC LIMIT 1`, planID).
 		Scan(&out.StepID, &out.Status, &out.Error)

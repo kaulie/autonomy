@@ -217,11 +217,24 @@ func TestPostgresStoreTaskAndAgent(t *testing.T) {
 // pgTestDatabase creates a database of its own for one test and returns its name.
 func pgTestDatabase(t *testing.T, admin *sql.DB) string {
 	t.Helper()
+	return pgTestDatabaseOwnedBy(t, admin, "")
+}
+
+// pgTestDatabaseOwnedBy is pgTestDatabase with a named owner. Tests that read the same
+// database as another role — a replica read as the role the runtime uses — need the
+// scratch database owned by that role, because the tables a store creates belong to
+// whoever created them.
+func pgTestDatabaseOwnedBy(t *testing.T, admin *sql.DB, owner string) string {
+	t.Helper()
 	name := fmt.Sprintf("autonomy_test_%d_%d", os.Getpid(), atomic.AddInt64(&pgTestDBCounter, 1))
 	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`); err != nil {
 		t.Fatalf("drop leftover test database: %v", err)
 	}
-	if _, err := admin.Exec(`CREATE DATABASE ` + name); err != nil {
+	create := `CREATE DATABASE ` + name
+	if owner != "" {
+		create += ` OWNER ` + owner
+	}
+	if _, err := admin.Exec(create); err != nil {
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {

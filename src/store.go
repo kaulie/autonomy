@@ -545,7 +545,7 @@ func saveExecutionPlan(plan ExecutionPlan, steps []ExecutionStepPlan) (int64, []
 	if err := s.AppendExecutionStepPlans(steps); err != nil {
 		return planID, nil, err
 	}
-	saved, err := s.ListExecutionStepPlan(planID)
+	saved, err := writerReads(s).ListExecutionStepPlan(planID)
 	if err != nil {
 		return planID, nil, err
 	}
@@ -597,7 +597,7 @@ func taskInputMessageID(taskID string) (int64, bool) {
 	if s == nil {
 		return 0, false
 	}
-	id, found, err := s.TaskInputMessageID(taskID)
+	id, found, err := writerReads(s).TaskInputMessageID(taskID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] read task input message: %v\n", err)
 		return 0, false

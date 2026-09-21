@@ -70,6 +70,10 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 重启，再用 /health 确认，见 docs/store.md「两个引擎，两份数据」。
 # AUTONOMY_STORE_ENGINE=postgres
 # AUTONOMY_POSTGRES_DSN=postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable
+# 读写分离：主库还是写侧，另外给一个**读侧**连接串（本机那份副本），看得多、改得少的读
+# 就走本地。立副本：scripts/local-replica.sh（见 docs/local-replica.md）；读侧连不上不会
+# 失败，只是退回主库并warning。见 docs/store.md「读写分离」。
+# AUTONOMY_STORE_READ_DSN=postgres://user:pass@127.0.0.1:5433/autonomy?sslmode=disable
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——

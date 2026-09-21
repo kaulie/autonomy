@@ -185,8 +185,10 @@ func (r *Autonomy) instruction(task *Task, content string) (*Agent, AgentMessage
 	text := strings.TrimSpace(content)
 	if text == "" {
 		// A request may carry just the task's id: what that task is asked to do is
-		// then its own row — the description an earlier instruction gave it.
-		if store := r.taskStore(); store != nil {
+		// then its own row — the description an earlier instruction gave it. The row
+		// is written again below (persistTask), so it is read from the writer
+		// (docs/store.md「读写分离」).
+		if store := writerReads(r.taskStore()); store != nil {
 			if stored, err := store.GetTask(task.ID); err == nil && stored != nil {
 				text = strings.TrimSpace(stored.Description)
 			}
@@ -274,12 +276,15 @@ func (r *Autonomy) processInstruction(ctx context.Context, cancel context.Cancel
 }
 
 // taskForMessage is the task an instruction is about: its row, or a bare task with
-// that id when the store has none.
+// that id when the store has none. The row is marked running as soon as the message
+// is processed (processInstruction), so it is read from the writer — this message is
+// one this runtime queued, and the row it belongs to may be younger than the
+// replication lag (docs/store.md「读写分离」).
 func (r *Autonomy) taskForMessage(msg AgentMessage) *Task {
 	if strings.TrimSpace(msg.TaskID) == "" {
 		return nil
 	}
-	if store := r.taskStore(); store != nil {
+	if store := writerReads(r.taskStore()); store != nil {
 		if task, err := store.GetTask(msg.TaskID); err == nil && task != nil {
 			return task
 		}

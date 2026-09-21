@@ -143,11 +143,15 @@ func (r contextTaskResolver) ExtraRefs(_ context.Context, refType, id string, _ 
 
 // task reads one of this process's task rows for a task ref. A task this process does not
 // have is not an error: the platform's registry may still know it.
+//
+// The read is taken from the writer: the resolver runs inside a run, on a task this
+// runtime has just queued, and resolving a task to a project from a row that has not
+// replicated yet would resolve the run's world to nothing (docs/store.md「读写分离」).
 func (r contextTaskResolver) task(refType, id string) (*Task, error) {
 	if refType != context_builder.RefTypeTask || r.autonomy == nil || r.autonomy.Store == nil {
 		return nil, nil
 	}
-	return r.autonomy.taskStore().GetTask(id)
+	return writerReads(r.autonomy.taskStore()).GetTask(id)
 }
 
 // activeContextBuilder is the builder this process resolves context with: nil when the

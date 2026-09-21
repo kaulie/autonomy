@@ -26,4 +26,8 @@ var (
 	_ InboxStore        = (*PostgresStore)(nil)
 	_ TurnQueryStore    = (*PostgresStore)(nil)
 	_ Store             = (*PostgresStore)(nil)
+	// Only the postgres engine has a read side to route (docs/store.md「读写分离」): a
+	// sqlite file is one file, and the upper layer asks on either deployment anyway —
+	// writerReads leaves a store that does not implement this untouched.
+	_ StoreReadSplit = (*PostgresStore)(nil)
 )

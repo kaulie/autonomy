@@ -345,6 +345,10 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	// of its own. A request that carries no words of its own changes nothing either:
 	// what is being asked *now* is the message, and a message that says nothing new
 	// is the row's own description (see instruction).
+	//
+	// The read is taken from the writer (writerReads): this request is about to write
+	// the row it just read, so it must see the version this runtime can already have
+	// written (docs/store.md「读写分离」).
 	task := &Task{
 		ID:          taskID,
 		Description: desc,
@@ -355,7 +359,7 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	if stored, err := r.taskStore().GetTask(taskID); err == nil && stored != nil {
+	if stored, err := writerReads(r.taskStore()).GetTask(taskID); err == nil && stored != nil {
 		task.CreatedAt = stored.CreatedAt
 		task.AgentID = stored.AgentID
 		if desc == "" {
@@ -595,7 +599,9 @@ func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 		return nil, fmt.Errorf("store not ready")
 	}
 	taskID = strings.TrimSpace(taskID)
-	stored, err := r.taskStore().GetTask(taskID)
+	// Read-your-writes: the task is about to be marked stopped, so it is read from
+	// the writer (docs/store.md「读写分离」).
+	stored, err := writerReads(r.taskStore()).GetTask(taskID)
 	if err != nil {
 		return nil, err
 	}

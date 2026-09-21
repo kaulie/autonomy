@@ -31,6 +31,16 @@ const (
 	EnvPostgresDSN = "AUTONOMY_POSTGRES_DSN"
 	// EnvPostgresDatabaseURL is the conventional fallback DSN variable.
 	EnvPostgresDatabaseURL = "DATABASE_URL"
+	// EnvPostgresReadDSN is the connection string of the read follower: a streaming
+	// replica of the same database whose rows serve the reads that only observe
+	// (docs/store.md「读写分离」). AUTONOMY_STORE_READ_DSN is accepted as well — it is
+	// the engine-neutral name, the read half of AUTONOMY_STORE_DSN.
+	//
+	// Unset means one database for both: every read goes to the writer, exactly as
+	// before this was configurable.
+	EnvPostgresReadDSN = "AUTONOMY_POSTGRES_READ_DSN"
+	// EnvStoreReadDSN is the engine-neutral read follower variable.
+	EnvStoreReadDSN = "AUTONOMY_STORE_READ_DSN"
 )
 
 func (postgresEngine) Name() string { return StoreEnginePostgres }
@@ -49,9 +59,24 @@ func (postgresEngine) DefaultDSN() (string, error) {
 		StoreEnginePostgres, EnvStoreDSN, EnvPostgresDSN, EnvPostgresDatabaseURL)
 }
 
-// Open connects to the database at dsn and makes the schema it needs.
+// Open connects to the database at dsn and makes the schema it needs. A read
+// follower (AUTONOMY_STORE_READ_DSN / AUTONOMY_POSTGRES_READ_DSN) is attached when
+// one is configured, so reads that only observe are served locally without any
+// caller asking (docs/store.md「读写分离」).
 func (postgresEngine) Open(dsn string) (Store, error) {
-	return OpenPostgresStore(dsn)
+	return OpenPostgresStoreWithFollower(dsn, postgresReadFollowerDSN())
+}
+
+// postgresReadFollowerDSN is the configured read follower, if any. The store-level
+// variable wins over the engine's own, exactly like AUTONOMY_STORE_DSN over
+// AUTONOMY_POSTGRES_DSN: the generic name is the explicit override.
+func postgresReadFollowerDSN() string {
+	for _, env := range []string{EnvStoreReadDSN, EnvPostgresReadDSN} {
+		if dsn := strings.TrimSpace(os.Getenv(env)); dsn != "" {
+			return dsn
+		}
+	}
+	return ""
 }
 
 func init() {

@@ -28,6 +28,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 18. [context-builder.md](context-builder.md) — `context_ref` 的解析器（独立模块）：在 prompt 之前把引用解析成世界（本进程的容器 + 平台的 project / organization / service / task 注册表），失败不致命
 19. [broadcast.md](broadcast.md) — 广播：一句话投递给某个 project 下的、或所有 project 下的所有 agent（`AcceptTask` 的复数，消息本身还是一条普通指令）
 20. [llm-backend.md](llm-backend.md) — LLM 后端（cursor / cline）与怎么切换：后端是 runtime 进程的设置（`AUTONOMY_LLM_BACKEND`），`GET /health` 报当前后端，本地 / 部署两条切换路径
+21. [local-replica.md](local-replica.md) — 本地副本（写远端、读本地）：把远端主库的一份 streaming replica 立在本机，观察类的读走本地、写与「读完就写」的读走远端
 
 ## 终局四对象
 
