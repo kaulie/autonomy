@@ -304,6 +304,10 @@ type TurnFacetValue struct {
 
 // TaskOption is one candidate of the task selector: what the task row says it is,
 // plus what the log says happened to it.
+// TaskOption is one candidate of the task selector: what the task is, how much it has
+// run, and which project and agent it belongs to. The last three are what a list page
+// needs to group or filter the selector by project and to jump straight to that agent's
+// timeline, instead of a follow-up read per row.
 type TaskOption struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
@@ -312,6 +316,19 @@ type TaskOption struct {
 	// LastAt is the newest turn's created_at, verbatim, and "" when the task has
 	// no turns at all (which is a real state: accepted, never run).
 	LastAt string `json:"last_at"`
+	// ProjectID is the project this task's row names (`tasks.context_ref`'s project
+	// key), read literally: a world written as `{"task": …}` — "follow that task's
+	// world" — resolves to a project only through a lookup, and a list does not make
+	// one (it answers from one local query). "" when the row names none, which is also
+	// every task that only appears in the log.
+	ProjectID string `json:"project_id"`
+	// AgentID is the task's owner agent (0 when it has none yet): the id a timeline is
+	// read with (GET /api/tasks/{id}/agents/{agentID}/events).
+	AgentID int64 `json:"agent_id"`
+	// UpdatedAt is the task row's own updated_at (RFC3339 UTC text, "" for a task with
+	// no row): every run advances it, so it is what "how long has this been idle" is
+	// read from.
+	UpdatedAt string `json:"updated_at"`
 }
 
 const (
