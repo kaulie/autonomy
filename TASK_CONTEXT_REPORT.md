@@ -1,12 +1,15 @@
 # Task Context Report — `task-2c438baf5499b592`
 
-> **Purpose.** Document the known context of this task — the task and its goal, the
-> context project and its organization/services, the current World state, the task
-> constraints and the completion contract — so the delegating agent and the Runtime
-> have one grounded reference for the change that flows through `autonomy`.
+> **Purpose.** Document the known context of this task — the task and its current
+> instruction, the context project and its organization/services, the current World
+> state, the task constraints and the completion contract — so the delegating agent
+> and the Runtime have one grounded reference for the change that flows through the
+> `autonomy` / `agent-control-plane` stack.
 >
-> Compiled by **agent-10012** (worker, purpose `code_edit`, backend `cline`,
-> model `deepseek-v4-flash`) for the task delegated by **agent-10002** (cycle 1).
+> Compiled by **agent-10017** (worker, purpose `code_edit`, lifecycle `persistent`,
+> backend `cline`, model `deepseek-v4-flash`) for the task delegated by
+> **agent-10002** (cycle 1). This is a *refresh* of `TASK_CONTEXT_REPORT.md` for the
+> task's current (timeout / resilience) instruction.
 
 ---
 
@@ -21,23 +24,34 @@
 | Context project ref | `project-59c41b54` (project **web-cursor**) |
 | Delegated by | `agent-10002` (cycle 1) |
 
-### 1.1 Goal (as given)
+### 1.1 Current instruction (as given)
 
-> web-cursor 对于通过 autonomy 类型的，主界面要直观显示当前任务的状态：规划中，执行中、阻塞、已完成
+> 界面上显示 ：
+> 读执行方失败：autonomy 超时（>3000ms）
+>
+> 优化：
+> 1.  超时改成 5000ms;
+> 2.  当前端读失败时，不要清空当前内容，给出提醒即可；
 
 Restated requirement:
 
-- For tasks that flow through the **autonomy** type, the **web-cursor** main UI must
-  intuitively display the **current task status**.
-- The status set to render is: **规划中 (planning)**, **执行中 (executing)**,
-  **阻塞 (blocked)**, **已完成 (completed / done)**.
+- **Symptom.** The web-cursor UI shows the error string
+  `读执行方失败：autonomy 超时（>3000ms）` — i.e. the front-end's read of the
+  **执行方** (the autonomy executor backing the task) timed out after 3000 ms.
+- **Optimization 1 — timeout.** Raise the autonomy read timeout from **3000 ms** to
+  **5000 ms** (aligning it with the UI's 5000 ms refresh cadence, so transient
+  slowness stops showing as a false "timeout").
+- **Optimization 2 — resilience.** When a front-end read of the executor fails, do
+  **not** clear the currently displayed content; keep the last-known content in place
+  and surface a **notice/reminder** (提醒) only.
 
 ### 1.2 Objective delegated to this agent
 
 > Produce a Markdown report documenting this task's known context information.
 
-This report is the concrete deliverable of the delegated objective; the UI
-requirement in §1.1 is the underlying feature the report describes.
+This report is the concrete deliverable of the delegated objective; the timeout /
+resilience change in §1.1 is the underlying feature the report describes (§6 records
+that it has already landed).
 
 ---
 
@@ -46,16 +60,16 @@ requirement in §1.1 is the underlying feature the report describes.
 | Field | Value |
 | --- | --- |
 | Delegated by | `agent-10002` (cycle 1) |
-| This agent | `agent-10012` — id 10012, name `agent-10012`, role `worker` |
+| This agent | `agent-10017` — id `10017`, name `agent-10017`, role `worker` |
 | Purpose | `code_edit` |
 | Lifecycle | `persistent` |
 | Backend | `cline` |
 | LLM provider / model | `cline` / `deepseek-v4-flash` |
-| Agent workspace | `/Users/gaolei/agent-workspace-sandbox/agent-10012/` |
+| Agent workspace | `/Users/gaolei/agent-workspace-sandbox/agent-10017/` |
 
 Workspace note: the Goal names the agent workspace as the only writable place. All
 artifacts for this task were produced inside
-`/Users/gaolei/agent-workspace-sandbox/agent-10012/`; no file outside it was changed.
+`/Users/gaolei/agent-workspace-sandbox/agent-10017/`; no file outside it was changed.
 
 ---
 
@@ -71,24 +85,25 @@ artifacts for this task were produced inside
 | Entities | (none declared) |
 | Assets | (none declared) |
 
-`web-cursor` is the web front-end product through which autonomy-typed tasks are
-surfaced to the user; the requirement in §1.1 is a change on its main screen. In the
-web-cursor project registry the project is recorded as
-`project-59c41b54 → web-cursor` (git repo `https://github.com/kaulie/agent-control-plane`).
+`web-cursor` is the web front-end product that surfaces autonomy-typed tasks to the
+user; the instruction in §1.1 is a change in how its main screen handles a failed
+read of the executor. The front-end is served by the **agent-control-plane**
+service (repo `https://github.com/kaulie/agent-control-plane`, `web/` tree).
 
 ### 3.2 Organization & services
 
 | Field | Value |
 | --- | --- |
-| Organization | **AI研发部** (department id `D0005`, type `研发`) |
+| Organization | **AI研发部** (AI R&D Department) |
 
 Services owned by **AI研发部** that are relevant to this task:
 
 | Service | Version / ref | Git repo | Role in this task |
 | --- | --- | --- | --- |
 | `agent-benchmark-tool` | (version not recorded) | `https://github.com/kaulie/agent-benchmark-tool` | agent evaluation / behaviour tagging |
-| `agent-control-plane` | `36ed5434` | `https://github.com/kaulie/agent-control-plane.git` | control plane backing the web-cursor product |
-| `autonomy` | `ff9899c0` | `https://github.com/kaulie/autonomy` | goal-driven agent runtime that produces the autonomy-typed task statuses |
+| `agent-control-plane` | `34346005` | `https://github.com/kaulie/agent-control-plane` | **hosts the web-cursor front-end**; the timeout / resilience change lands here |
+| `autonomy` | `ff9899c0` | `https://github.com/kaulie/autonomy` | goal-driven agent runtime that is the 执行方 (executor) the front-end reads |
+
 
 ---
 
@@ -96,47 +111,42 @@ Services owned by **AI研发部** that are relevant to this task:
 
 | Field | Value |
 | --- | --- |
-| World assets | **none** (`assets: []`) |
+| Assets | **none** — the World supplied for this task is `assets: []` |
 
-The Runtime's World for this delegation carries **no assets**. Consequently no
-`asset.change` is possible or needed: this task is a documentation/feature task, not
-an asset-mutation task. The absence of assets is itself the recorded World state.
-
----
-
-## 5. Constraints
-
-| Ref | Constraint | Source |
-| --- | --- | --- |
-| C-1 | Workspace only: the agent may change files **only inside** `/Users/gaolei/agent-workspace-sandbox/agent-10012/`. | Runtime constraint `workspace_rule` |
-| C-2 | **Deployment is the Runtime's move, not the agent's.** The agent must not trigger or perform a deploy. | Runtime constraint `deploy` |
-| C-3 | Scope: only files relevant to `task-2c438baf5499b592` may be touched. | Runtime constraint `scope` |
-| C-4 | Turn budget: each tool call stays small (≈≤ 6000 chars / ≤ 150 lines); files are written in pieces. | Runtime constraint `turn_output_budget` |
-| C-5 | Branch policy: never edit the default/main branch; work happens on a task-specific branch. | Code-edit workspace policy |
-| C-6 | Commit / PR policy: commit only task changes, push the task branch, open a PR and report its URL; the agent that opened a PR may not merge it. | Code-edit workspace policy |
-| C-7 | Preserve unrelated changes; do not reset, discard or overwrite work the agent does not own. | Code-edit workspace policy |
+There are no World assets registered for this task, so no `asset.change` was possible
+or needed. The current World state carries no target asset state to mutate.
 
 ---
 
-## 6. Verified facts / evidence
+## 5. Task constraints
 
-All items below were checked live while compiling this report.
-
-| Fact | How verified | Result |
+| Ref | Constraint | Meaning for this work |
 | --- | --- | --- |
-| Project `project-59c41b54` is **web-cursor** | web-cursor store `projects` table (`project_id,name,git_repo_url`) | `project-59c41b54 → web-cursor`, repo `https://github.com/kaulie/agent-control-plane` |
-| Organization **AI研发部** exists | organization store `org-store.json` | department `D0005` name `AI研发部`, type `研发` |
-| `agent-control-plane` at `36ed5434` | service registry `services` row + deployed `runtime/web-cursor/{VERSION,COMMIT,DEPLOYMENT,GIT_REPO_URL}` | `36ed5434` / `deployment-36ed5434` / repo `kaulie/agent-control-plane.git`, dept `AI研发部` |
-| `autonomy` at `ff9899c0` | service registry `services` row (`name=autonomy`) + `git show -s ff9899c0` in the autonomy clone | version `ff9899c0`, repo `https://github.com/kaulie/autonomy`; `ff9899c0d5ade8…` = merge of PR **#132** (`feature/task-e997f8b04b6c41f5-message-id-base`) |
-| `agent-benchmark-tool` | service registry `services` row | repo `https://github.com/kaulie/agent-benchmark-tool`, dept `AI研发部`, version blank |
-| Autonomy-typed refactors for this task id land on `main` | `git --no-pager log --oneline` in the autonomy clone at `origin/main` | PR **#133** (`refactor/task-2c438baf5499b592-db-module`), PR **#134** (`…-pull-request-review-no-merge`) and PR **#135** (`…-pull-request-review-readonly`) merged; `main` HEAD `8c036ef` |
+| C-1 | **Only files under the agent workspace may be changed.** The workspace is `/Users/gaolei/agent-workspace-sandbox/agent-10017/`. | All edits/artifacts live inside this directory; nothing outside it is touched. |
+| C-2 | **Deployment is the Runtime's move, not the agent's.** | This agent must not deploy; deploying (`service.deploy`) is performed by the Runtime / delegating plan. |
+| C-3 | **Scope = the files this task touches.** | The change is scoped to the autonomy read timeout + the web-cursor executor-read resilience; no unrelated refactoring. |
+| C-4 | One turn has a bounded output budget; each tool call is kept small and multi-step work is split across calls. | The report is written incrementally. |
+
+---
+
+## 6. Verified evidence
+
+| Claim | How verified | Result |
+| --- | --- | --- |
+| Project `project-59c41b54 → web-cursor` | context/task data supplied by the Runtime | project **web-cursor** |
+| Organization **AI研发部** owns the three services | context/task data supplied by the Runtime | `agent-benchmark-tool`, `agent-control-plane`, `autonomy` |
+| `agent-control-plane` hosts the web-cursor front-end | PR history of `kaulie/agent-control-plane` | `web/` tree (`web/src/components/AutonomyTaskPanel.tsx`, `web/src/autonomy.ts`) carries the autonomy UI |
+| The §1.1 change has **already landed** | PR **#123** on `kaulie/agent-control-plane`, branch `feature/task-2c438baf5499b592-executor-read` | **MERGED** 2026-09-21 — *"fix(autonomy-ui): 读执行方失败不清空内容；autonomy 读超时 3s → 5s"* |
+| Timeout raised 3000 → 5000 ms | diff of PR #123 | `backend/src/config.ts`: `DEFAULT_AUTONOMY_TIMEOUT_MS = 3000` → `5000`; `backend/src/autonomy.ts`: `options.timeoutMs ?? DEFAULT_AUTONOMY_TIMEOUT_MS` |
+| Read failure no longer clears content | diff of PR #123 | `web/src/components/AutonomyTaskPanel.tsx` keeps last-known content and shows a notice; `web/src/style.css` styles it; error copy now `读执行方失败：autonomy 超时（>5000ms）` |
+| Change is regression-tested | tests added in PR #123 | `backend/scripts/test-autonomy-client.mjs`, `web/scripts/test-executor-read-resilience.mjs`, wired via `backend/scripts/run-tests.mjs` |
+| `autonomy` at `ff9899c0` | context/task data supplied by the Runtime | repo `https://github.com/kaulie/autonomy`, version `ff9899c0` |
 | World has no assets | Runtime World state supplied | `assets: []` |
 
-Note: the merged refactor branches carry this task's id
-(`task-2c438baf5499b592`) but change runtime internals (the `src/db` module
-extraction and making `pull_request.review` strictly read-only), **not** the
-web-cursor status UI of §1.1. The UI requirement itself is therefore described here,
-not implemented by this report.
+Note: PR #123 enacts both optimizations of §1.1. It merged into the
+**agent-control-plane** service (the web-cursor front-end host); this document records
+the context around that change rather than re-implementing it.
+
 
 ---
 
@@ -152,10 +162,9 @@ Mapping to this work:
 - **C1** is satisfied by this document (§1–§6 carry the task, project,
   organization/services, World state and constraints) plus the worker's report
   summary.
-- **C2** is a separate `land` step owned by the delegating plan: the refactor PR(s)
-  for this task id are merged on the autonomy base branch — corroborated in §6
-  (#133/#134/#135 merged on `main`, HEAD `8c036ef`). Landing/merging is performed by
-  the runtime pipeline, not by this worker.
+- **C2** is a separate `land` step owned by the delegating plan: refactor PRs tagged
+  with this task id are merged on the autonomy base branch (`kaulie/autonomy`). This
+  worker opens a PR for the report artifact and does not perform the merge.
 
 ---
 
@@ -164,19 +173,17 @@ Mapping to this work:
 | Item | Detail |
 | --- | --- |
 | Deliverable | this Markdown report: `TASK_CONTEXT_REPORT.md` |
-| Location | `/Users/gaolei/agent-workspace-sandbox/agent-10012/TASK_CONTEXT_REPORT.md` |
-| Branch | `docs/task-2c438baf5499b592-context-report` (task-specific; `main` untouched) |
-| Verified by | live inspection of: the service registry (`services`), the organization store (`org-store.json`), the web-cursor store (`projects`), the deployed `runtime/web-cursor/{VERSION,COMMIT,DEPLOYMENT,GIT_REPO_URL}`, and the autonomy clone's git log; plus the World-state / delegation / constraint data supplied by the Runtime. |
+| Location | `/Users/gaolei/agent-workspace-sandbox/agent-10017/TASK_CONTEXT_REPORT.md` |
+| Branch | `docs/task-2c438baf5499b592-context-report-v3` (task-specific; `main` untouched) |
+| Verified by | live inspection of the `kaulie/autonomy` and `kaulie/agent-control-plane` PR history (PR #123 merged; diff of its files/consts), the Runtime-supplied task, project, organization, service and World-state data, and the delegation/constraint data. |
 
 ### Open items / limitations
 
-- The underlying feature (§1.1 — the web-cursor main UI rendering
-  规划中 / 执行中 / 阻塞 / 已完成 for autonomy-typed tasks) is **described** here,
-  not independently re-implemented by this worker, because the delegated objective is
+- The underlying feature (§1.1 — the autonomy read timeout raised to 5000 ms and the
+  web-cursor executor-read failure no longer clearing content) has **already landed**
+  via PR #123 on `agent-control-plane` (§6); it is **described** here, not
+  independently re-implemented by this worker, because the delegated objective is
   explicitly the context report.
 - No World assets exist, so no `asset.change` was possible or needed.
-- Deployment was not performed and must not be: it is the Runtime's move (constraint
-  C-2).
-
-
+- Deployment was **not** performed and must not be: it is the Runtime's move (C-2).
 
