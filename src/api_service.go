@@ -55,6 +55,58 @@ type TaskProgress struct {
 	ContextRef map[string]string  `json:"context_ref,omitempty"`
 	Project    *TaskProject       `json:"project,omitempty"`
 	Plans      []TaskPlanProgress `json:"plans"`
+	// Verification is the engine's own side of "is it done?": the Completion Contract
+	// the first answer pinned and every verdict judged against it since
+	// (docs/verification.md). It is the answer to "why does this task say unverified",
+	// which a status word alone cannot carry.
+	//
+	// Absent (not empty) for a task that never verified anything — accepted but never
+	// run, still planning, or run before the contract was pinned. An absent field is
+	// the honest shape there; `{"contract":[],"verdicts":[]}` would claim the engine
+	// looked and found nothing.
+	Verification *TaskVerificationProgress `json:"verification,omitempty"`
+}
+
+// TaskVerificationProgress is a task's completion contract and its verdict log.
+type TaskVerificationProgress struct {
+	// Contract is the pinned contract in criterion order: `[]` when nothing was ever
+	// pinned (a `done` then has nothing to be verified against — which is itself a
+	// verdict the verdict log records).
+	Contract []TaskContractCriterion `json:"contract"`
+	// Verdicts is every verdict, oldest first, one row per criterion per judged cycle.
+	Verdicts []TaskVerdictProgress `json:"verdicts"`
+}
+
+// TaskContractCriterion is one fact that must hold for the task to be done. Criterion
+// is the JSON the first answer declared, verbatim — the words the task is judged by,
+// kept raw so a reader sees the requirement, its evidence slot and its expectation the
+// way they were written rather than through this side's idea of them.
+type TaskContractCriterion struct {
+	Idx       int             `json:"idx"`
+	Name      string          `json:"name,omitempty"`
+	Criterion json.RawMessage `json:"criterion,omitempty" swaggertype:"object"`
+}
+
+// TaskVerdictProgress is one verdict on one criterion: what the contract said must
+// hold, what the authoritative source answered, and where that answer came from.
+//
+// Evidence is the slot the criterion bound and what it resolved to, as JSON
+// (`{"slot": …, "reference": …}`); Method is who was asked
+// (`world_model` / `registry:<capability>` / `declared:<capability>` / `-` for "nobody
+// authoritative exists, so this cannot be verified"). Result is pass | fail |
+// inconclusive — only pass holds a `done` up.
+type TaskVerdictProgress struct {
+	ID        int64     `json:"id"`
+	PlanID    int64     `json:"plan_id,omitempty"`
+	Cycle     int       `json:"cycle"`
+	Criterion string    `json:"criterion,omitempty"`
+	Result    string    `json:"result"`
+	Method    string    `json:"method,omitempty"`
+	Evidence  string    `json:"evidence,omitempty"`
+	Expected  string    `json:"expected,omitempty"`
+	Observed  string    `json:"observed,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // TaskPlanProgress summarises one decision cycle's plan and its execution.
@@ -390,7 +442,67 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 		item.Steps = planStepProgress(planned, steps)
 		progress.Plans = append(progress.Plans, item)
 	}
+	progress.Verification = r.taskVerificationProgress(taskID)
 	return progress, nil
+}
+
+// taskVerificationProgress reads what the engine itself judged: the contract pinned on
+// cycle 1 and the verdicts appended against it (docs/verification.md).
+//
+// Nothing to read is not an error and not an empty record: a task no verdict was ever
+// written for carries no verification at all, so the field stays absent rather than
+// claiming the engine looked and found nothing. A read failure is reported on stderr
+// and treated the same way — the detail must not fail because a side log could not be
+// read (the same best-effort reading verification itself does).
+func (r *Autonomy) taskVerificationProgress(taskID string) *TaskVerificationProgress {
+	s := r.verificationStore()
+	if s == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	out := &TaskVerificationProgress{}
+	contract, err := s.ListCompletionContract(taskID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] read completion contract %s: %v\n", taskID, err)
+	}
+	for _, row := range contract {
+		out.Contract = append(out.Contract, TaskContractCriterion{
+			Idx:       row.Idx,
+			Name:      row.Name,
+			Criterion: rawJSON(row.Criterion),
+		})
+	}
+	verdicts, err := s.ListVerifications(taskID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] read verifications %s: %v\n", taskID, err)
+	}
+	for _, v := range verdicts {
+		out.Verdicts = append(out.Verdicts, TaskVerdictProgress{
+			ID:        v.ID,
+			PlanID:    v.PlanID,
+			Cycle:     v.Cycle,
+			Criterion: v.Criterion,
+			Result:    v.Result,
+			Method:    v.Method,
+			Evidence:  v.Evidence,
+			Expected:  v.Expected,
+			Observed:  v.Observed,
+			Reason:    v.Reason,
+			CreatedAt: v.CreatedAt,
+		})
+	}
+	// A task that was judged keeps a verdict even when no contract was pinned: that is
+	// a real, readable state ("nothing was ever pinned, so the done could not be
+	// verified"), not an absent one.
+	if out.Contract == nil && out.Verdicts == nil {
+		return nil
+	}
+	if out.Contract == nil {
+		out.Contract = []TaskContractCriterion{}
+	}
+	if out.Verdicts == nil {
+		out.Verdicts = []TaskVerdictProgress{}
+	}
+	return out
 }
 
 func planStepProgress(planned []ExecutionStepPlan, executed []ExecutionStep) []TaskPlanStepProgress {

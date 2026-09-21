@@ -520,6 +520,10 @@ func (r *Autonomy) agentStore() AgentStore               { return r.Store }
 func (r *Autonomy) conversationStore() ConversationStore { return r.Store }
 func (r *Autonomy) executionStore() ExecutionStore       { return r.Store }
 
+// verificationStore is the same narrowing for the verdict log the read API shows on a
+// task detail: the pinned Completion Contract and the verdicts judged against it.
+func (r *Autonomy) verificationStore() VerificationStore { return r.Store }
+
 // saveExecutionPlan writes one plan and its steps before any of them runs, and
 // returns the steps as stored — with their row ids, because plan_step_id is the row
 // an execution step belongs to and only the database knows that id. The error is

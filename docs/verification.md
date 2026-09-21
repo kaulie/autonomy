@@ -70,6 +70,8 @@ World Model / 只读能力 → pass / fail / inconclusive
 ## 落库
 
 - `completion_contract`：一条判据一行，**首轮写一次**（`INSERT OR IGNORE`）——「合同不可改」是 schema 的事实，不是谁记得去检查。
+- 读法：`GET /api/tasks/{task_id}` 的 `verification`（`contract` + `verdicts`，[http-api.md](http-api.md)）——
+  和这张表同一份事实，页面不必读库。
 - `verification`：一次判定一行，只追加：`requirement` / `method`（`world_model`、`registry:<能力>`、`declared:<能力>`）/ `evidence`（槽 + 解析出的 reference）/ `expected` / `observed` / `result` / `reason`。
 
 两张表的形状见 [execution-step.md](execution-step.md)。
