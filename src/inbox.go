@@ -36,6 +36,14 @@ type Inbox struct {
 	gen     map[string]int                // agent name → bumped by every enqueue
 	current map[string]context.CancelFunc // agent name → cancel of the message being processed
 	waiters map[int64]*messageWaiter      // message id → the caller waiting for it
+	// paused is asked before a consumer is started and before an instruction already
+	// taken off the queue is processed: while it answers yes, new runs are held back
+	// (the runtime is draining for a graceful restart, src/graceful.go). nil means
+	// nothing is ever held.
+	paused func() bool
+	// held is the agents whose run was held back — the work the runtime owes back
+	// when the drain ends (resumePaused).
+	held map[string]*Agent
 }
 
 // MessageHandler processes one message: the plane the queue hands work to. cancel
@@ -69,7 +77,26 @@ func NewInbox(store InboxStore, handle MessageHandler, drained func(agent *Agent
 		gen:     map[string]int{},
 		current: map[string]context.CancelFunc{},
 		waiters: map[int64]*messageWaiter{},
+		held:    map[string]*Agent{},
 	}
+}
+
+// holdWhile is what makes the queue stop starting new runs while the answer says so:
+// the owner hands in the runtime's drain here (src/graceful.go), so an instruction that
+// arrives while a restart is being drained for is accepted — it is a row, that part
+// already happened — and started later, by the drain's end (resumePaused) or by the
+// process after the restart.
+//
+// What is held is a *run*, not a message: a stop's record and a capability's delegated
+// prompt are not new runs of the agent's own task, and holding them would stop an
+// in-flight run from finishing — which is the very thing a drain waits for.
+func (i *Inbox) holdWhile(paused func() bool) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	i.paused = paused
+	i.mu.Unlock()
 }
 
 // Enqueue adds one message to an agent's inbox and makes sure that agent has a
@@ -223,8 +250,15 @@ func (i *Inbox) Ahead(agent *Agent, id int64) int {
 // start makes sure the agent has a consumer. The first message of an idle agent
 // starts one; while one is running this is a no-op, and the message it just
 // enqueued is picked up by the drain loop (or by the re-check in finished).
+//
+// While the runtime is draining for a restart this is a no-op too, and the agent is
+// remembered instead: starting it now would cut a run at the restart. The message it
+// was called for is already a row, so nothing is lost (holdStart).
 func (i *Inbox) start(agent *Agent) {
 	if i == nil || agent == nil {
+		return
+	}
+	if i.holdStart(agent) {
 		return
 	}
 	i.mu.Lock()
@@ -236,6 +270,55 @@ func (i *Inbox) start(agent *Agent) {
 	gen := i.gen[agent.Name]
 	i.mu.Unlock()
 	go i.drain(agent, gen)
+}
+
+// holdStart reports whether starting this agent has to wait: the runtime is draining
+// for a restart, so the run about to begin must not. The agent is remembered by name,
+// which is what resumePaused starts again, and by identity, which is the handle the
+// drain owes its work back to.
+func (i *Inbox) holdStart(agent *Agent) bool {
+	if i == nil || agent == nil {
+		return false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.paused == nil || !i.paused() {
+		return false
+	}
+	if i.held == nil {
+		i.held = map[string]*Agent{}
+	}
+	i.held[agent.Name] = agent
+	return true
+}
+
+// resumePaused starts the consumers that were held back while the runtime was
+// draining — the drain ended without a restart (its safety timeout, src/graceful.go),
+// so the instructions that arrived meanwhile are the agents' to process again. It
+// returns how many agents it started.
+func (i *Inbox) resumePaused() int {
+	if i == nil {
+		return 0
+	}
+	i.mu.Lock()
+	held := i.held
+	i.held = map[string]*Agent{}
+	i.mu.Unlock()
+	for _, agent := range held {
+		i.start(agent)
+	}
+	return len(held)
+}
+
+// heldAgents is how many agents are waiting for a start this runtime is holding back:
+// what the restart status reports as held work.
+func (i *Inbox) heldAgents() int {
+	if i == nil {
+		return 0
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return len(i.held)
 }
 
 // drain is one agent's consumer: claim the next message, process it, repeat, and
@@ -257,6 +340,21 @@ func (i *Inbox) drain(agent *Agent, gen int) {
 			return
 		}
 		if !found {
+			i.endDrain(agent, gen)
+			return
+		}
+		if msg.Kind == MessageKindInstruction && i.holdStart(agent) {
+			// This instruction is a *new run*, and the runtime is draining for a
+			// restart: it must not start now. Put it back where it was (its row id is
+			// its place in the queue) and let this consumer end — the drain's end
+			// starts it again (resumePaused), and if the reload never comes, the
+			// process after the restart does (resumeAcceptedInstructions). A stop's
+			// record and a delegated prompt are not held: they are not new runs, and
+			// an in-flight run waiting on a worker is exactly what the drain waits
+			// for.
+			if err := i.store.RequeueMessage(msg.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "[autonomy] %s inbox: hold message %d: %v\n", agent.Name, msg.ID, err)
+			}
 			i.endDrain(agent, gen)
 			return
 		}

@@ -36,7 +36,14 @@ type Autonomy struct {
 	// (src/inbox.go). It is also how an instruction reaches an agent — including
 	// one that arrives while the agent is busy, which is what makes instructions
 	// continuously acceptable.
-	Inbox    *Inbox
+	Inbox *Inbox
+	// Drain is the graceful restart this runtime is in the middle of, when it is:
+	// an announced restart stops the inbox from starting new runs, and the two
+	// endpoints the deployment platform talks to (POST /api/ops/restart-notify,
+	// GET /api/ops/restart-status) are this field's story (src/graceful.go). It is
+	// built on demand — wiring the inbox asks for it, so a runtime that never
+	// queues anything never has one.
+	Drain    *RestartDrain
 	MaxSteps int
 }
 
@@ -105,6 +112,12 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// cycle resolves its task's context_ref through it (fillContextSections).
 	_autonomy.ContextBuilder = newContextBuilder(_autonomy)
 
+	// Last, once every manager a decision cycle reads is wired: the instructions a
+	// previous process left queued (a restart in the middle of a drain holds them
+	// back) are started here, so accepting an instruction across a restart is not a
+	// way to lose it (src/graceful.go).
+	_autonomy.resumeAcceptedInstructions()
+
 	bootstrapFlag = true
 	return _autonomy, nil
 }
@@ -123,6 +136,11 @@ func (r *Autonomy) agentInbox() *Inbox {
 			store = activeStore()
 		}
 		r.Inbox = NewInbox(store, r.processMessage, r.drainedAgent)
+		// The drain, when there is one, is what holds new runs back: an announced
+		// restart stops the inbox from starting an agent on an instruction that
+		// arrived after it (src/graceful.go). Nothing is lost: the message is a row,
+		// and the next process starts it.
+		r.Inbox.holdWhile(r.restartDrain().paused)
 		if r.Runtime != nil {
 			r.Runtime.SetInbox(r.Inbox)
 		}
@@ -140,6 +158,11 @@ func (r *Autonomy) SetWorld(world *World) {
 // session id on its row is what the next process resumes.
 func (r *Autonomy) Close() error {
 	var first error
+	// A drain that is still armed must not come back to life while teardown is
+	// closing the store under it: there is nothing left to resume (src/graceful.go).
+	if r != nil && r.Drain != nil {
+		r.Drain.stop()
+	}
 	// Agents are resident (see drainedAgent), so teardown is where their provider
 	// sessions are torn down: the rows and handles stay, and the session ids they
 	// recorded are what a later process resumes.

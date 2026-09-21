@@ -63,6 +63,12 @@ type InboxStore interface {
 	// running, so one consumer at a time owns it. found is false when the inbox is
 	// empty (or when another consumer won that message).
 	ClaimNextMessage(agentID int64) (AgentMessage, bool, error)
+	// RequeueMessage puts one claimed message back where it was, queued: the run it
+	// asked for must not start yet (the runtime is draining for a graceful restart,
+	// src/graceful.go), so it waits for the consumer that starts next. It is the
+	// single-message sibling of RequeueRunningMessages, and its row id still is its
+	// place in the queue.
+	RequeueMessage(id int64) error
 	// FinishAgentMessage records how one message ended (done / failed / stopped).
 	FinishAgentMessage(id int64, status AgentMessageStatus, errText string) error
 	// RequeueRunningMessages puts an agent's running messages back in the queue: a

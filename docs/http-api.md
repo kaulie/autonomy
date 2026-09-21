@@ -37,6 +37,43 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 
 部署平台对每个服务统一探的路径。`GET /healthz` 是同一处理函数的别名。
 
+### `POST /api/ops/restart-notify` — 优雅重启：通知进入 drain
+
+部署平台重启本服务前的通知（见 [graceful-restart.md](graceful-restart.md)）。受理之后：
+
+- **不再启动新 run**：这之后到达的指令照常受理（进 inbox 排队），但不会被启动；
+- 在途 run 继续跑完；
+- 应答里给出此刻的状态（`running` 是在途 run，`canRestart` 说现在能不能重启）。
+
+请求体是平台自述（`requestId` 必填；`serviceId` / `deployment` / `version` / `message` 是它说的话）：
+
+```json
+{"serviceId": "autonomy", "requestId": "deploy-1", "deployment": "deployment-abc12345",
+ "version": "abc12345", "message": "deployment service will restart this runtime after graceful wait"}
+```
+
+`202` 返回 `RestartStatus`（见下）；`400` 是请求不是合法 JSON 或缺 `requestId`。
+
+### `GET /api/ops/restart-status` — 优雅重启：现在能不能重启
+
+平台在通知之后每 15s 轮一次，直到 `canRestart` 为真（或它自己的等待超时）。
+
+```json
+{"canRestart": false, "canDeploy": false, "ready": false, "draining": true, "running": 1,
+ "runningTasks": ["task-2f1c…"], "held": 2, "reason": "1 run(s) in flight; new instructions are held until the restart",
+ "notice": {"requestId": "deploy-1", "deployment": "deployment-abc12345"},
+ "notifiedAt": "2026-09-18T04:21:44Z", "deadline": "2026-09-18T04:31:44Z"}
+```
+
+| 字段 | 含义 |
+|------|------|
+| `canRestart` | **无在途 run** 时为真；平台读的就是它。`canDeploy` / `ready` 是平台另一套命名，三个同义（任一为真即放行） |
+| `draining` | 是否在「已通知、尚未重启」的窗口里 —— 「现在没人跑」和「为了重启先不启动新 run」是两件事 |
+| `running` / `runningTasks` | 此刻在途的 run（`inFlightTasks`，与 `/stop` 取消的是同一份登记） |
+| `held` | 被 drain 拦下、等待新进程（或 drain 结束）启动的指令数（本进程内存，重启后 0） |
+| `reason` | 同一件事的人话版本 |
+| `notice` / `notifiedAt` / `deadline` | 谁通知的、什么时候、这次 drain 什么时候自己恢复（`AUTONOMY_DRAIN_TIMEOUT`，默认 10 分钟；`0` = 不恢复） |
+
 ### `POST /api/tasks`
 
 接受一条任务指令：立刻返回 `task_id` / `agent_id`，并把这条指令作为**消息**放进这只 agent 的 inbox

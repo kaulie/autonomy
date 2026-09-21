@@ -61,6 +61,7 @@ func (fakeStore) EnqueueMessage(AgentMessage) (int64, error) { return 0, nil }
 func (fakeStore) ClaimNextMessage(int64) (AgentMessage, bool, error) {
 	return AgentMessage{}, false, nil
 }
+func (fakeStore) RequeueMessage(int64) error                                 { return nil }
 func (fakeStore) FinishAgentMessage(int64, AgentMessageStatus, string) error { return nil }
 func (fakeStore) RequeueRunningMessages(int64) error                         { return nil }
 func (fakeStore) ListAgentMessages(int64, int) ([]AgentMessage, error)       { return nil, nil }
