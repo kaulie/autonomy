@@ -71,7 +71,7 @@ func TestDispatchExecuteRunsOffThePlannerLoop(t *testing.T) {
 // TestRunObservesAfterCycleDone keeps the decide → execute → observe order for one
 // task: a failed cycle is observed and the planner decides again (budget 2).
 func TestRunObservesAfterCycleDone(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestRunObservesAfterCycleDone(t *testing.T) {
 		t.Fatal("Run returned nil; the last cycle failed")
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 2 {

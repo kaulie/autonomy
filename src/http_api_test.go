@@ -12,7 +12,7 @@ import (
 )
 
 func TestStoreQueryTaskAgentAndStream(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "api.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestStoreQueryTaskAgentAndStream(t *testing.T) {
 }
 
 func TestHTTPAPIAcceptProgressAgentStream(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "http.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "http.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestHTTPAPIAcceptProgressAgentStream(t *testing.T) {
 // and it has to answer with a 404 rather than an empty conversation when the ids do not
 // name one.
 func TestAgentStreamCarriesTheRunAndTheToolCall(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "stream.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "stream.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,9 +44,9 @@ func (p *inboxProbe) processed() []string {
 }
 
 // inboxStore opens a store and an agent row to queue messages for.
-func inboxStore(t *testing.T) (*SQLiteStore, int64, string) {
+func inboxStore(t *testing.T) (rawStore, int64, string) {
 	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "inbox.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "inbox.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func inboxStore(t *testing.T) (*SQLiteStore, int64, string) {
 
 // waitForMessageStatus waits until the message has the status a test expects, so no
 // test depends on how fast a consumer goroutine is.
-func waitForMessageStatus(t *testing.T, store *SQLiteStore, agentID, id int64, want AgentMessageStatus) AgentMessage {
+func waitForMessageStatus(t *testing.T, store rawStore, agentID, id int64, want AgentMessageStatus) AgentMessage {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

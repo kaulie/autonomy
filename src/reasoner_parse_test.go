@@ -16,7 +16,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	t.Setenv("PROJECT_ROOT", root)
 
 	path := filepath.Join(root, "data", "autonomy.db")
-	store, err := OpenSQLiteStore(path)
+	store, err := openStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,8 +460,8 @@ func TestNormalizeReasonOutput(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := normalizeReasonOutput(tc.raw); got != tc.want {
-				t.Fatalf("normalizeReasonOutput()=%q want %q", got, tc.want)
+			if got := NormalizeReasonOutput(tc.raw); got != tc.want {
+				t.Fatalf("NormalizeReasonOutput()=%q want %q", got, tc.want)
 			}
 		})
 	}

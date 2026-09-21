@@ -17,9 +17,9 @@ import (
 
 // broadcastFixture is a runtime over its own store, with the process-wide store
 // pointing at it (the agents' consumers write through the same one).
-func broadcastFixture(t *testing.T) (*Autonomy, *SQLiteStore) {
+func broadcastFixture(t *testing.T) (*Autonomy, rawStore) {
 	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "broadcast.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "broadcast.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func broadcastFixture(t *testing.T) (*Autonomy, *SQLiteStore) {
 // where the process already holds it rather than rebuilt from its row and
 // re-attached to a provider session (that round trip is the subject of
 // agent_resume_test.go, not this file's).
-func projectTask(t *testing.T, auto *Autonomy, store *SQLiteStore, taskID, projectID string) (*Task, *Agent) {
+func projectTask(t *testing.T, auto *Autonomy, store rawStore, taskID, projectID string) (*Task, *Agent) {
 	t.Helper()
 	row := &Agent{State: "idle", Lifecycle: AgentLifecyclePersistent}
 	if err := store.UpsertAgent(row); err != nil {
@@ -75,7 +75,7 @@ func projectTask(t *testing.T, auto *Autonomy, store *SQLiteStore, taskID, proje
 }
 
 // inboxOf reads an agent's inbox in arrival order.
-func inboxOf(t *testing.T, store *SQLiteStore, agentID int64) []AgentMessage {
+func inboxOf(t *testing.T, store rawStore, agentID int64) []AgentMessage {
 	t.Helper()
 	messages, err := store.ListAgentMessages(agentID, 0)
 	if err != nil {

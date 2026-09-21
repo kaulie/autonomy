@@ -92,7 +92,7 @@ func TestADelegatedWorkerCycleCountsItsOwnInteractionRounds(t *testing.T) {
 	installFakeClineClient(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestADelegatedWorkerCycleCountsItsOwnInteractionRounds(t *testing.T) {
 		}
 	}
 
-	rows, err := store.db.Query(`SELECT id, cycle, mode FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
+	rows, err := store.RawDB().Query(`SELECT id, cycle, mode FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestRuntimeAcquireAgentWithoutWorkspaceUsesItsOwn(t *testing.T) {
 // current_task_id (it used to stay empty while its runs already recorded the
 // task).
 func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
 	defer func() { _ = sess.Release(context.Background()) }()
 
 	var taskID, state string
-	if err := store.db.QueryRow(`SELECT current_task_id, state FROM agents WHERE name = ?`, sess.ID()).
+	if err := store.RawDB().QueryRow(`SELECT current_task_id, state FROM agents WHERE name = ?`, sess.ID()).
 		Scan(&taskID, &state); err != nil {
 		t.Fatal(err)
 	}

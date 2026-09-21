@@ -84,7 +84,7 @@ func TestLLMTraceRecordsRunStreamAndHeader(t *testing.T) {
 	// The raw stream is opt-in (see llmEventStreamEnabled): this test is the
 	// "turned on" half of the switch.
 	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestLLMTraceRecordsRunStreamAndHeader(t *testing.T) {
 		runID, status, rawOut, normalized, mode, llmAgentID string
 		eventCount, inputTokens, totalTokens                int
 	)
-	err = store.db.QueryRow(`SELECT id, run_id, status, raw_output, normalized_output, mode, llm_agent_id, event_count, input_tokens, total_tokens
+	err = store.RawDB().QueryRow(`SELECT id, run_id, status, raw_output, normalized_output, mode, llm_agent_id, event_count, input_tokens, total_tokens
 FROM reason_turns WHERE agent_id = ?`, 77).
 		Scan(&turnID, &runID, &status, &rawOut, &normalized, &mode, &llmAgentID, &eventCount, &inputTokens, &totalTokens)
 	if err != nil {
@@ -166,7 +166,7 @@ FROM reason_turns WHERE agent_id = ?`, 77).
 
 	// Run id is backfilled onto events written before it was known.
 	var unbackfilled int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ? AND run_id = ''`, turnID).Scan(&unbackfilled); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ? AND run_id = ''`, turnID).Scan(&unbackfilled); err != nil {
 		t.Fatal(err)
 	}
 	if unbackfilled != 0 {
@@ -175,7 +175,7 @@ FROM reason_turns WHERE agent_id = ?`, 77).
 }
 
 func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 2 {
@@ -246,7 +246,7 @@ func TestLLMEventStreamEnabledParsing(t *testing.T) {
 // table carries a column shaped like a pointer to one of its rows. That is what makes
 // the table droppable on its own: replay is the only thing that depends on it.
 func TestNoOtherTableReferencesLLMEvents(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestNoOtherTableReferencesLLMEvents(t *testing.T) {
 
 	// No foreign key into llm_events (there are none at all: links are soft ids).
 	var inboundFKs int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master m
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM sqlite_master m
 JOIN pragma_foreign_key_list(m.name) fk
 WHERE m.type = 'table' AND fk."table" = 'llm_events'`).Scan(&inboundFKs); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ WHERE m.type = 'table' AND fk."table" = 'llm_events'`).Scan(&inboundFKs); err !=
 	}
 
 	// No column outside llm_events is shaped like a link back to one of its rows.
-	rows, err := store.db.Query(`SELECT m.name || '.' || p.name FROM sqlite_master m
+	rows, err := store.RawDB().Query(`SELECT m.name || '.' || p.name FROM sqlite_master m
 JOIN pragma_table_info(m.name) p
 WHERE m.type = 'table' AND m.name <> 'llm_events'
   AND (lower(p.name) LIKE '%llm_event%' OR lower(p.name) LIKE '%event_id%')`)
@@ -285,7 +285,7 @@ WHERE m.type = 'table' AND m.name <> 'llm_events'
 
 	// The one edge that does exist is written as a soft id: turn_id names the header.
 	var turnIDColumn int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('llm_events') WHERE name = 'turn_id'`).Scan(&turnIDColumn); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('llm_events') WHERE name = 'turn_id'`).Scan(&turnIDColumn); err != nil {
 		t.Fatal(err)
 	}
 	if turnIDColumn != 1 {
@@ -301,7 +301,7 @@ WHERE m.type = 'table' AND m.name <> 'llm_events'
 func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 	for _, value := range []string{"", "0"} {
 		t.Run("AUTONOMY_LLM_EVENTS="+value, func(t *testing.T) {
-			store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+			store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -321,14 +321,14 @@ func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 				turnID int64
 				status string
 			)
-			if err := store.db.QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
+			if err := store.RawDB().QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
 				t.Fatal(err)
 			}
 			if status != string(LLMStatusFinished) {
 				t.Fatalf("status=%q, want %q (run header must still be written)", status, LLMStatusFinished)
 			}
 			var count int
-			if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
+			if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if count != 0 {
@@ -336,7 +336,7 @@ func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 			}
 			// The conversation is not the replay: input + assistant are recorded anyway.
 			var messages int
-			if err := store.db.QueryRow(`SELECT COUNT(*) FROM llm_messages WHERE turn_id = ?`, turnID).Scan(&messages); err != nil {
+			if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM llm_messages WHERE turn_id = ?`, turnID).Scan(&messages); err != nil {
 				t.Fatal(err)
 			}
 			if messages < 2 {

@@ -119,7 +119,7 @@ func TestATruncatedTurnIsRetriedOnTheSameSession(t *testing.T) {
 		t.Fatal("the retry answered nothing")
 	}
 
-	rows, err := store.db.Query(`SELECT status, error_message, input FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
+	rows, err := store.RawDB().Query(`SELECT status, error_message, input FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestATruncatedTurnIsNotRetriedForever(t *testing.T) {
 		t.Fatal("expected the truncated run to surface with retries off")
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 1 {
@@ -200,7 +200,7 @@ func TestOtherFailuresAreNotRetried(t *testing.T) {
 		t.Fatalf("err=%v, want the provider's own failure", err)
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 1 {

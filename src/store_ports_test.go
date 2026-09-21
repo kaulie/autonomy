@@ -14,28 +14,11 @@ import (
 // its own record-keeping through the ports alone, and no file outside an engine may
 // reach for a database driver or a concrete engine.
 
-// Both engines implement each port, so an engine can also be built port by port (or be
-// a decorator over one port) and still compose with Store. The two implementations are
-// independent — different SQL, different schema, different drivers — and they answer to
-// the same contract, which is what makes the database a configuration choice.
+// A fake that implements every port still composes with Store, so an engine can be
+// built port by port (or be a decorator over one port). The concrete engines' own
+// "implements every port" assertions live with the engines (src/db).
 var (
-	_ TaskStore         = (*SQLiteStore)(nil)
-	_ AgentStore        = (*SQLiteStore)(nil)
-	_ ConversationStore = (*SQLiteStore)(nil)
-	_ ExecutionStore    = (*SQLiteStore)(nil)
-	_ VerificationStore = (*SQLiteStore)(nil)
-	_ InboxStore        = (*SQLiteStore)(nil)
-	_ TurnQueryStore    = (*SQLiteStore)(nil)
-	_ Store             = (*SQLiteStore)(nil)
-	_ TaskStore         = (*PostgresStore)(nil)
-	_ AgentStore        = (*PostgresStore)(nil)
-	_ ConversationStore = (*PostgresStore)(nil)
-	_ ExecutionStore    = (*PostgresStore)(nil)
-	_ VerificationStore = (*PostgresStore)(nil)
-	_ InboxStore        = (*PostgresStore)(nil)
-	_ TurnQueryStore    = (*PostgresStore)(nil)
-	_ Store             = (*PostgresStore)(nil)
-	_ Store             = fakeStore{}
+	_ Store = fakeStore{}
 )
 
 // recordingStore is fakeStore (a no-op Store) plus a memory of what the
@@ -156,7 +139,7 @@ func TestOnlyTheStorageEngineMayImportADriver(t *testing.T) {
 	}
 	// The concrete engines' own names: the upper layer takes the port, never the
 	// type behind it.
-	concrete := []string{"SQLiteStore", "OpenSQLiteStore", "sqliteEngine", "PostgresStore", "OpenPostgresStore", "postgresEngine", "sql.Open("}
+	concrete := []string{"SQLiteStore", "openStore", "sqliteEngine", "PostgresStore", "OpenPostgresStore", "postgresEngine", "sql.Open("}
 
 	var engineFiles, driverImports, checked int
 	err := filepath.Walk("..", func(path string, info os.FileInfo, err error) error {

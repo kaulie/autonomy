@@ -10,7 +10,7 @@ import (
 // capability delegated to this agent was prompted by another agent, so its input
 // row is role=agent — the user only authors the top-level task.
 func TestDelegatedRunInputIsAttributedToTheAgent(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

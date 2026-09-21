@@ -1,4 +1,6 @@
-package autonomy
+package db
+
+import . "github.com/kaulie/autonomy/src"
 
 import (
 	"database/sql"
@@ -19,6 +21,11 @@ import (
 type SQLiteStore struct {
 	db *sql.DB
 }
+
+// RawDB exposes the engine's underlying connection. It is the seam the root
+// package's storage tests use to assert on rows the ports do not surface (the
+// schema, the sequence floors); the runtime itself never calls it.
+func (s *SQLiteStore) RawDB() *sql.DB { return s.db }
 
 // OpenSQLiteStore creates/opens the DB at path and migrates schema.
 func OpenSQLiteStore(path string) (*SQLiteStore, error) {
@@ -700,7 +707,7 @@ func (s *SQLiteStore) backfillReasonTurnNormalizedOutputs() error {
 			rows.Close()
 			return err
 		}
-		normalized := normalizeReasonOutput(raw)
+		normalized := NormalizeReasonOutput(raw)
 		if normalized != "" {
 			updates = append(updates, normalizedUpdate{id: id, normalized: normalized})
 		}
@@ -914,7 +921,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		turn.CreatedAt = time.Now()
 	}
 	if turn.NormalizedOutput == "" {
-		turn.NormalizedOutput = normalizeReasonOutput(turn.RawOutput)
+		turn.NormalizedOutput = NormalizeReasonOutput(turn.RawOutput)
 	}
 	if turn.Status == "" {
 		turn.Status = string(LLMStatusFinished)
@@ -934,7 +941,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		_ = tx.Rollback()
 		return err
 	}
-	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, InputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -944,7 +951,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		TaskID:            turn.TaskID,
 		AgentID:           turn.AgentID,
 		Cycle:             turn.Cycle,
-		Seq:               llmMessageSeqAssistant,
+		Seq:               LLMMessageSeqAssistant,
 		Role:              LLMMessageRoleAssistant,
 		ParentID:          inputID,
 		Content:           turn.RawOutput,
@@ -984,7 +991,7 @@ func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
 	}
-	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, InputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
@@ -1036,7 +1043,7 @@ func (s *SQLiteStore) FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) err
 	if h.TurnID == 0 {
 		return nil
 	}
-	normalized := normalizeReasonOutput(res.RawOutput)
+	normalized := NormalizeReasonOutput(res.RawOutput)
 	_, err := s.db.Exec(`
 UPDATE reason_turns SET
   raw_output = ?, normalized_output = ?,
@@ -1109,7 +1116,7 @@ INSERT OR IGNORE INTO llm_messages
 SELECT id, task_id, agent_id, cycle, ?, ?, ?, ?, ?, llm_provider, model, ?, ?, ?
 FROM reason_turns WHERE id = ?
 `, seq, string(LLMMessageRoleAssistant), parent,
-		res.RawOutput, normalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
+		res.RawOutput, NormalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
 		formatTime(ended), h.TurnID)
 	if err != nil {
 		return fmt.Errorf("insert assistant message: %w", err)
@@ -1123,7 +1130,7 @@ FROM reason_turns WHERE id = ?
 // assumed here, because the same rows may already have been written while the run
 // was streaming. Re-writing a row is an upsert, so a replayed finish is a no-op.
 func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) error {
-	for _, m := range aggregateChatMessages(events) {
+	for _, m := range AggregateChatMessages(events) {
 		m.TurnID = turnID
 		m.ParentID = parentID
 		if err := s.insertDerivedMessage(m); err != nil {
@@ -1337,7 +1344,7 @@ WHERE (t.input <> '' OR t.raw_output <> '')
 			return err
 		}
 		if normalized == "" {
-			normalized = normalizeReasonOutput(raw)
+			normalized = NormalizeReasonOutput(raw)
 		}
 		pending = append(pending, pendingTurn{id: id, turn: ReasonTurn{
 			TaskID: taskID, AgentID: agentID, Cycle: cycle, LLMProvider: LLMProvider(provider), Model: model,
@@ -1368,7 +1375,7 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 	if err != nil {
 		return err
 	}
-	derived := aggregateChatMessages(events)
+	derived := AggregateChatMessages(events)
 	for i := range derived {
 		derived[i].TurnID = turnID
 		derived[i].TaskID = turn.TaskID
@@ -1383,7 +1390,7 @@ func (s *SQLiteStore) backfillReasonTurnMessages(turnID int64, turn ReasonTurn) 
 	if err != nil {
 		return err
 	}
-	inputID, err := insertMessageTx(tx, inputMessage(turnID, turn))
+	inputID, err := insertMessageTx(tx, InputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return err

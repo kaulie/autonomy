@@ -10,7 +10,7 @@ import (
 )
 
 func TestTaskProgressIncludesPlanStepsAndExecution(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "progress.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "progress.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestTaskProgressIncludesPlanStepsAndExecution(t *testing.T) {
 }
 
 func TestStopTaskCancelsTheRun(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "stop.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "stop.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

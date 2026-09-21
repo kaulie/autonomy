@@ -39,6 +39,10 @@ import (
 	"strings"
 
 	autonomy "github.com/kaulie/autonomy/src"
+	// Link the database module so its engines (sqlite, postgres) register
+	// themselves with the root package's engine registry, which is what
+	// autonomy.BootstrapAutonomy -> OpenDefaultStore opens through.
+	_ "github.com/kaulie/autonomy/src/db"
 )
 
 // version is stamped by build.sh (-X main.version=$APP_VERSION).

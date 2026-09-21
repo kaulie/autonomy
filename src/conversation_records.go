@@ -8,18 +8,18 @@ package autonomy
 // them down, so the record construction lives here — outside every engine file —
 // and no engine has to keep a second copy of it in step.
 
-// llmMessageSeqUser is the seq of a run's user-input message. The assistant
+// LLMMessageSeqUser is the seq of a run's user-input message. The assistant
 // (final return) row is placed one past the aggregated thinking/tool rows, so
 // with no aggregated rows it keeps the original seq 1 layout.
 const (
-	llmMessageSeqUser      = 0
-	llmMessageSeqAssistant = 1
+	LLMMessageSeqUser      = 0
+	LLMMessageSeqAssistant = 1
 )
 
-// inputMessage builds a run's input llm_messages row. Its role names who authored
+// InputMessage builds a run's input llm_messages row. Its role names who authored
 // the prompt: the user (the default) for the runtime's own prompts, agent when
 // another agent delegated this run to the agent that is running it.
-func inputMessage(turnID int64, turn ReasonTurn) LLMMessage {
+func InputMessage(turnID int64, turn ReasonTurn) LLMMessage {
 	role := turn.InputRole
 	if role == "" {
 		role = LLMMessageRoleUser
@@ -29,7 +29,7 @@ func inputMessage(turnID int64, turn ReasonTurn) LLMMessage {
 		TaskID:      turn.TaskID,
 		AgentID:     turn.AgentID,
 		Cycle:       turn.Cycle,
-		Seq:         llmMessageSeqUser,
+		Seq:         LLMMessageSeqUser,
 		Role:        role,
 		Content:     turn.Input,
 		LLMProvider: turn.LLMProvider,

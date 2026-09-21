@@ -9,7 +9,7 @@ import (
 // are stored as two independent llm_messages rows, and the return traces back to
 // the exact input it answers via parent_id.
 func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 		t.Fatalf("messages=%d, want 2 (input + output)", len(msgs))
 	}
 	in, out := msgs[0], msgs[1]
-	if in.Role != LLMMessageRoleUser || in.Content != "what is 2+2?" || in.Seq != llmMessageSeqUser {
+	if in.Role != LLMMessageRoleUser || in.Content != "what is 2+2?" || in.Seq != LLMMessageSeqUser {
 		t.Fatalf("input message=%+v", in)
 	}
 	if in.AgentID != 11 || in.TaskID != "t-msg" || in.Cycle != 2 || in.LLMProvider != LLMProviderCursor {
@@ -48,7 +48,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	if in.ParentID != 0 {
 		t.Fatalf("input parent_id=%d, want 0", in.ParentID)
 	}
-	if out.Role != LLMMessageRoleAssistant || out.Content != "4" || out.Seq != llmMessageSeqAssistant {
+	if out.Role != LLMMessageRoleAssistant || out.Content != "4" || out.Seq != LLMMessageSeqAssistant {
 		t.Fatalf("output message=%+v", out)
 	}
 	if out.RunID != "run-9" || out.Status != string(LLMStatusFinished) {
@@ -62,7 +62,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	// The run header keeps the content columns (not removed): the pair is also
 	// mirrored there for backward compatibility.
 	var headerInput, headerOutput string
-	if err := store.db.QueryRow(`SELECT input, raw_output FROM reason_turns WHERE id = ?`, handle.TurnID).
+	if err := store.RawDB().QueryRow(`SELECT input, raw_output FROM reason_turns WHERE id = ?`, handle.TurnID).
 		Scan(&headerInput, &headerOutput); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 // path: the header plus the user input and assistant output are written together
 // and linked.
 func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
 	}
 
 	var turnID int64
-	if err := store.db.QueryRow(`SELECT id FROM reason_turns WHERE agent_id = ?`, 12).Scan(&turnID); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT id FROM reason_turns WHERE agent_id = ?`, 12).Scan(&turnID); err != nil {
 		t.Fatal(err)
 	}
 	msgs, err := store.ListLLMMessages(turnID)
@@ -132,7 +132,7 @@ func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
 // TestLLMTraceRecordsLinkedMessages proves the streamed provider path also
 // records the input/output pair.
 func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
 	trace.Finish(LLMRunResult{ProviderRunID: "run-m", Status: LLMStatusFinished, RawOutput: "answer"})
 
 	var turnID int64
-	if err := store.db.QueryRow(`SELECT id FROM reason_turns WHERE agent_id = ?`, 55).Scan(&turnID); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT id FROM reason_turns WHERE agent_id = ?`, 55).Scan(&turnID); err != nil {
 		t.Fatal(err)
 	}
 	msgs, err := store.ListLLMMessages(turnID)
@@ -171,12 +171,12 @@ func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
 // reason_turns rows written before it existed, and is idempotent across reopens.
 func TestBackfillLLMMessagesFromExistingTurns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := OpenSQLiteStore(path)
+	store, err := openStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Simulate a row written by the pre-message-table code path.
-	if _, err := store.db.Exec(`INSERT INTO reason_turns
+	if _, err := store.RawDB().Exec(`INSERT INTO reason_turns
 (task_id, agent_id, cycle, mode, llm_provider, model, input, raw_output, normalized_output, run_id, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"t-old", 3, 2, string(ReasonModeAgent), string(LLMProviderCursor), "composer-2",
@@ -189,12 +189,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 
 	// Reopening migrates and backfills.
-	reopened, err := OpenSQLiteStore(path)
+	reopened, err := openStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var turnID int64
-	if err := reopened.db.QueryRow(`SELECT id FROM reason_turns WHERE task_id = ?`, "t-old").Scan(&turnID); err != nil {
+	if err := reopened.RawDB().QueryRow(`SELECT id FROM reason_turns WHERE task_id = ?`, "t-old").Scan(&turnID); err != nil {
 		reopened.Close()
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 
 	// A second reopen must not duplicate the pair.
-	again, err := OpenSQLiteStore(path)
+	again, err := openStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // per streamed delta), ordered by occurrence, with the assistant return last and
 // every row tracing back to the user input.
 func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
 		t.Fatalf("messages=%d, want 4 (user, thinking, tool, assistant): %+v", len(msgs), msgs)
 	}
 	input := msgs[0]
-	if input.Role != LLMMessageRoleUser || input.Content != "do it" || input.Seq != llmMessageSeqUser {
+	if input.Role != LLMMessageRoleUser || input.Content != "do it" || input.Seq != LLMMessageSeqUser {
 		t.Fatalf("input message=%+v", input)
 	}
 

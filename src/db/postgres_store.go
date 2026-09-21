@@ -1,4 +1,6 @@
-package autonomy
+package db
+
+import . "github.com/kaulie/autonomy/src"
 
 import (
 	"context"
@@ -34,6 +36,10 @@ import (
 type PostgresStore struct {
 	db *sql.DB
 }
+
+// RawDB exposes the engine's underlying connection. See SQLiteStore.RawDB: it is
+// the seam tests use, not something the runtime calls.
+func (s *PostgresStore) RawDB() *sql.DB { return s.db }
 
 // OpenPostgresStore connects to the database at dsn, checks the connection, and
 // makes the schema it needs.
@@ -436,7 +442,7 @@ func (s *PostgresStore) InsertReasonTurn(turn ReasonTurn) error {
 		turn.CreatedAt = time.Now()
 	}
 	if turn.NormalizedOutput == "" {
-		turn.NormalizedOutput = normalizeReasonOutput(turn.RawOutput)
+		turn.NormalizedOutput = NormalizeReasonOutput(turn.RawOutput)
 	}
 	if turn.Status == "" {
 		turn.Status = string(LLMStatusFinished)
@@ -456,7 +462,7 @@ func (s *PostgresStore) InsertReasonTurn(turn ReasonTurn) error {
 		_ = tx.Rollback()
 		return err
 	}
-	inputID, err := pgInsertMessageTx(tx, inputMessage(turnID, turn))
+	inputID, err := pgInsertMessageTx(tx, InputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -466,7 +472,7 @@ func (s *PostgresStore) InsertReasonTurn(turn ReasonTurn) error {
 		TaskID:            turn.TaskID,
 		AgentID:           turn.AgentID,
 		Cycle:             turn.Cycle,
-		Seq:               llmMessageSeqAssistant,
+		Seq:               LLMMessageSeqAssistant,
 		Role:              LLMMessageRoleAssistant,
 		ParentID:          inputID,
 		Content:           turn.RawOutput,
@@ -506,7 +512,7 @@ func (s *PostgresStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, erro
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
 	}
-	inputID, err := pgInsertMessageTx(tx, inputMessage(turnID, turn))
+	inputID, err := pgInsertMessageTx(tx, InputMessage(turnID, turn))
 	if err != nil {
 		_ = tx.Rollback()
 		return ReasonTurnHandle{}, err
@@ -559,7 +565,7 @@ func (s *PostgresStore) FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) e
 	if h.TurnID == 0 {
 		return nil
 	}
-	normalized := normalizeReasonOutput(res.RawOutput)
+	normalized := NormalizeReasonOutput(res.RawOutput)
 	_, err := s.db.Exec(`
 UPDATE reason_turns SET
   raw_output = $1, normalized_output = $2,
@@ -627,7 +633,7 @@ SELECT id, task_id, agent_id, cycle, $1, $2, $3, $4, $5, llm_provider, model, $6
 FROM reason_turns WHERE id = $9
 ON CONFLICT (turn_id, seq) DO NOTHING
 `, seq, string(LLMMessageRoleAssistant), nullID(h.InputMessageID),
-		res.RawOutput, normalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
+		res.RawOutput, NormalizeReasonOutput(res.RawOutput), res.ProviderRunID, string(res.Status),
 		pgTime(ended), h.TurnID)
 	if err != nil {
 		return fmt.Errorf("insert assistant message: %w", err)
@@ -639,7 +645,7 @@ ON CONFLICT (turn_id, seq) DO NOTHING
 // and writes them (seq 1..N, parent_id = the user input). Re-writing a row is an
 // upsert, so a replayed finish is a no-op.
 func (s *PostgresStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) error {
-	for _, m := range aggregateChatMessages(events) {
+	for _, m := range AggregateChatMessages(events) {
 		m.TurnID = turnID
 		m.ParentID = parentID
 		if err := s.insertDerivedMessage(m); err != nil {

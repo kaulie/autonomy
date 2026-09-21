@@ -437,7 +437,7 @@ type ReasonTurn struct {
 
 // LLMMessageRole identifies the author/kind of one llm_messages row. user is the
 // input, assistant the run's final return, and thinking/tool are the aggregated
-// intermediates derived from the run's raw stream (see aggregateChatMessages).
+// intermediates derived from the run's raw stream (see AggregateChatMessages).
 type LLMMessageRole string
 
 const (
