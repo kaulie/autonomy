@@ -153,6 +153,18 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 
 `plans[].steps[]` 按计划顺序：`status` 为 `pending`（计划了还没跑）、`ok` 或 `failed`。已跑的步带上实际 `input` / `output` / `error`。
 
+`verification`：**引擎自己那一侧的「做完了吗」**（[verification.md](verification.md)）—— 这条 task 的**完成契约**
+（cycle 1 钉住，之后不改写）与**每一次判定**。任务被读成 `unverified` 时，答案就在这个字段里，而不是只有
+一个状态字：哪个判据、问的谁、期望什么、实际答什么、为什么没过。
+
+| 字段 | 含义 |
+|------|------|
+| `contract[]` | 钉住的契约，按判据顺序：`{idx, name, criterion}`。`criterion` 是**第一轮答复写下的原文**（JSON：`requirement` / 证据槽 `evidence` / 期望 `expect`），这一侧不改写它 —— 改写了就不是判定时用的那份合同。没钉过就是 `[]` |
+  | `verdicts[]` | 每一次判定，早的在前：`{id, plan_id, cycle, criterion, result, method, evidence, expected, observed, reason, created_at}`。`result` ∈ `pass`/`fail`/`inconclusive`（**只有 `pass` 撑得起 `done`**）；`method` 是问的谁（`world_model` / `registry:<capability>` / `declared:<capability>` / `-` = 没有权威来源，判不了）；`evidence` 是判据绑的证据槽与它解析成了什么 |
+
+**没被判定过的 task 不带这个字段**（不是空对象）：没有判定就是没有判定，不假装「看过但没找到」。同一次判定
+一行、只追加，所以同一条判据会有多行（每轮 `done` 各一行）。
+
 ### `GET /api/tasks/{task_id}/agents/{agent_id}`
 
 查询该 agent 的工作状态。若正在工作（有 `reason_turns.status=running`，或 `agents.state=running`）：
