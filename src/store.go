@@ -304,6 +304,26 @@ type TurnFacetValue struct {
 
 // TaskOption is one candidate of the task selector: what the task row says it is,
 // plus what the log says happened to it.
+// Where the id spaces a *consumer* sees begin. Ids a consumer keys its own rows by are
+// part of the contract, not an engine's private business, so these two floors live here
+// and both engines honour them (sqlite via sqlite_sequence, postgres via the identity
+// sequence behind each column):
+//
+//   - AgentIDBase: agents.id — agent-10000 is a machine's first agent.
+//   - MessageIDBase: the *message* spaces — agent_messages.id (the message_id
+//     POST /api/tasks answers with, and a message's place in an agent's queue) and
+//     llm_messages.id (the message_seq cursor the conversation stream is polled with).
+//     They start high on purpose: a consumer that numbers its own rows from 1 — the
+//     control plane's timeline does — can hold autonomy's messages in the same table and
+//     still tell the two apart, without a mapping layer of its own.
+//
+// A floor is not a mapping: opening an existing database never rewinds a sequence below
+// the highest id already stored, so rows written before this rule keep the ids they have.
+const (
+	AgentIDBase   int64 = 10000
+	MessageIDBase int64 = 1000000
+)
+
 // TaskOption is one candidate of the task selector: what the task is, how much it has
 // run, and which project and agent it belongs to. The last three are what a list page
 // needs to group or filter the selector by project and to jump straight to that agent's

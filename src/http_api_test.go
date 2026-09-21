@@ -100,6 +100,11 @@ func TestHTTPAPIAcceptProgressAgentStream(t *testing.T) {
 	if accepted.TaskID == "" {
 		t.Fatal("missing task_id")
 	}
+	// The message id the caller gets back is in the contract's message space: a consumer
+	// that numbers its own rows from 1 can keep both in one table and tell them apart.
+	if accepted.MessageID < MessageIDBase {
+		t.Fatalf("accepted message_id = %d, want at least %d", accepted.MessageID, MessageIDBase)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec = httptest.NewRecorder()
@@ -162,6 +167,12 @@ func TestHTTPAPIAcceptProgressAgentStream(t *testing.T) {
 	}
 	if stream.TaskID != accepted.TaskID || stream.AgentID != agentID {
 		t.Fatalf("stream=%+v", stream)
+	}
+	// The poll cursor lives in the same message space as the accept's message_id.
+	for _, event := range stream.Events {
+		if event.MessageSeq < MessageIDBase {
+			t.Fatalf("event message_seq = %d, want at least %d", event.MessageSeq, MessageIDBase)
+		}
 	}
 }
 

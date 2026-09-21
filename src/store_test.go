@@ -968,3 +968,58 @@ func TestSQLiteStoreMigratesTaskError(t *testing.T) {
 		t.Fatalf("tasks.error=%q, want the latest failure to round-trip", reason)
 	}
 }
+
+// TestSQLiteStoreIDsStartAtTheContractFloor: the ids a consumer keys its own rows by begin
+// high (AgentIDBase for agents, MessageIDBase for the message spaces), and reopening the
+// database never rewinds them onto ids that are in use. It is the same rule for the other
+// engine (src/postgres_store_test.go), because it is the contract's, not an engine's.
+func TestSQLiteStoreIDsStartAtTheContractFloor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ids.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &Agent{}
+	if err := store.UpsertAgent(agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.ID < AgentIDBase {
+		t.Fatalf("first agent id = %d, want at least %d", agent.ID, AgentIDBase)
+	}
+	handle, err := store.BeginReasonTurn(ReasonTurn{TaskID: "task-1", AgentID: agent.ID, Input: "ask"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle.TurnID == 0 || handle.InputMessageID < MessageIDBase {
+		t.Fatalf("first run = turn %d message %d, want a message id of at least %d",
+			handle.TurnID, handle.InputMessageID, MessageIDBase)
+	}
+	inboxID, err := store.EnqueueMessage(AgentMessage{AgentID: agent.ID, TaskID: "task-1", Content: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inboxID < MessageIDBase {
+		t.Fatalf("first inbox message id = %d, want at least %d", inboxID, MessageIDBase)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	second := &Agent{}
+	if err := reopened.UpsertAgent(second); err != nil {
+		t.Fatal(err)
+	}
+	next, err := reopened.EnqueueMessage(AgentMessage{AgentID: agent.ID, TaskID: "task-1", Content: "go again"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID <= agent.ID || next <= inboxID {
+		t.Fatalf("after reopen: agent %d then %d, message %d then %d — ids must advance",
+			agent.ID, second.ID, inboxID, next)
+	}
+}
