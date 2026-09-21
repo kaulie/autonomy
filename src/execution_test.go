@@ -15,9 +15,9 @@ import (
 
 // executionTestStore opens a store and points the package's active store at it, so
 // persistTask / saveExecutionPlan write here.
-func executionTestStore(t *testing.T) *SQLiteStore {
+func executionTestStore(t *testing.T) rawStore {
 	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestAPlanWithNothingToExecuteIsStillWritten(t *testing.T) {
 
 // planFailStore is a store that cannot write a plan, to pin what that means: a plan
 // is authoritative, so nothing runs when it cannot be recorded.
-type planFailStore struct{ *SQLiteStore }
+type planFailStore struct{ Store }
 
 func (planFailStore) CreateExecutionPlan(ExecutionPlan) (int64, error) {
 	return 0, errors.New("the plan could not be recorded")
@@ -217,7 +217,7 @@ func TestAPlanIsOneShotAndItsRowsNeverChange(t *testing.T) {
 
 // plannerRun wires a real Run against the fake bridge, so the loop, the planner's
 // reply and the execution records are all exercised together.
-func plannerRun(t *testing.T, description string) (*SQLiteStore, *Autonomy) {
+func plannerRun(t *testing.T, description string) (rawStore, *Autonomy) {
 	t.Helper()
 	installFakeClineClient(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
@@ -253,7 +253,7 @@ func TestRunVerifiesADoneAgainstTheCompletionContract(t *testing.T) {
 	}
 
 	var status string
-	if err := store.db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, req.ID).Scan(&status); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status FROM tasks WHERE id = ?`, req.ID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusCompleted {
@@ -307,7 +307,7 @@ func TestRunEndsUnverifiedWhenTheContractDoesNotHold(t *testing.T) {
 	}
 
 	var status, taskError string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusUnverified {
@@ -343,7 +343,7 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 			}
 
 			var turns int
-			if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, taskID).Scan(&turns); err != nil {
+			if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, taskID).Scan(&turns); err != nil {
 				t.Fatal(err)
 			}
 			if turns != 1 {
@@ -364,7 +364,7 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 			}
 
 			var status, taskError string
-			if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, taskID).Scan(&status, &taskError); err != nil {
+			if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, taskID).Scan(&status, &taskError); err != nil {
 				t.Fatal(err)
 			}
 			if status != tc.status {
@@ -400,7 +400,7 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	}
 
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 4 {
@@ -413,7 +413,7 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	}
 
 	var status, taskError string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); err != nil {
 		t.Fatal(err)
 	}
 	if status != TaskStatusUnverified {
@@ -446,7 +446,7 @@ func TestRunRecordsThePlanAndWhatItTalkedTo(t *testing.T) {
 	// The reply the plan points at is the planner's own answer, and the plan it wrote
 	// is what that answer said — checked against the message, not against a re-parse.
 	var replyContent string
-	if err := store.db.QueryRow(`SELECT content FROM llm_messages WHERE id = ?`, plan.ReplyMessageID).Scan(&replyContent); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT content FROM llm_messages WHERE id = ?`, plan.ReplyMessageID).Scan(&replyContent); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(replyContent, "the fake planner decided") {
@@ -537,7 +537,7 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 	}
 	// The run it points at is the worker's own, not the planner's.
 	var mode, taskID string
-	if err := store.db.QueryRow(`SELECT mode, task_id FROM reason_turns WHERE id = ?`, got.ReasonTurnID).Scan(&mode, &taskID); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT mode, task_id FROM reason_turns WHERE id = ?`, got.ReasonTurnID).Scan(&mode, &taskID); err != nil {
 		t.Fatal(err)
 	}
 	if mode != string(ReasonModeAgent) || taskID != "task-exec" {

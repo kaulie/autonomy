@@ -107,7 +107,7 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cy
 	t.aggregator = newChatAggregator()
 	t.active = true
 	// The input is an llm_messages row too, so the run's log starts with it.
-	logLLMMessage(LLMMessage{Seq: llmMessageSeqUser, Role: inputRole, Content: input})
+	logLLMMessage(LLMMessage{Seq: LLMMessageSeqUser, Role: inputRole, Content: input})
 	return t
 }
 

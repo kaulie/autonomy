@@ -74,7 +74,7 @@ func TestOneSessionServesThePlannerAndTheWorker(t *testing.T) {
 
 			var mode, taskID string
 			var cycle int
-			if err := store.db.QueryRow(`SELECT mode, cycle, task_id FROM reason_turns WHERE id = ?`, res.Origin.ReasonTurnID).
+			if err := store.RawDB().QueryRow(`SELECT mode, cycle, task_id FROM reason_turns WHERE id = ?`, res.Origin.ReasonTurnID).
 				Scan(&mode, &cycle, &taskID); err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +118,7 @@ func TestAPlannerTurnIsRetriedWhenTheTurnWasCutOff(t *testing.T) {
 		t.Fatalf("a truncated turn should be retried, not reported: %v", err)
 	}
 
-	rows, err := store.db.Query(`SELECT cycle, status, input FROM reason_turns WHERE task_id = 'task-1' ORDER BY id`)
+	rows, err := store.RawDB().Query(`SELECT cycle, status, input FROM reason_turns WHERE task_id = 'task-1' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}

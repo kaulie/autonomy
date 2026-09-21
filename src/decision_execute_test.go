@@ -171,7 +171,7 @@ func TestMaxStepsComesFromTheEnvironment(t *testing.T) {
 // two cycles the task must decide twice instead of aborting after the first
 // failure, and end reporting the failure.
 func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 		t.Fatal("Run returned nil; the last cycle failed")
 	}
 	var turns int
-	if err := store.db.QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 2 {
@@ -202,7 +202,7 @@ func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
 	// The row says why, not only that: the terminal that printed the failure is
 	// not a record anyone can look at later.
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" {
@@ -228,7 +228,7 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	// The raw stream is opt-in: this test is about the stream carrying the reason.
 	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
 
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	}
 
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" || !strings.Contains(reason, "Insufficient Balance") {
@@ -259,7 +259,7 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	// The reason is in the recorded stream as well, marked as sourced from the run
 	// result: it arrived after the provider's own error event said nothing.
 	var events int
-	if err := store.db.QueryRow(`
+	if err := store.RawDB().QueryRow(`
 SELECT count(*) FROM llm_events e JOIN reason_turns r ON r.id = e.turn_id
 WHERE r.task_id = ? AND json_extract(e.payload, '$.source') = 'run_result'
   AND json_extract(e.payload, '$.error.message') = 'Insufficient Balance'`, req.ID).Scan(&events); err != nil {
@@ -280,7 +280,7 @@ func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {
 	t.Setenv("AUTONOMY_REASONER", "llm")
 	t.Setenv("PROJECT_ROOT", "")
 
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {
 	}
 
 	var status, reason string
-	if err := store.db.QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &reason); err != nil {
 		t.Fatal(err)
 	}
 	if status != "error" {

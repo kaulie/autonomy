@@ -10,7 +10,7 @@ import (
 // and tool call is persisted the moment the stream completes it, so a consumer
 // can follow a long run instead of waiting for Finish.
 func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
 	}
 }
 
-func mustListMessages(t *testing.T, store *SQLiteStore, turnID int64) []LLMMessage {
+func mustListMessages(t *testing.T, store rawStore, turnID int64) []LLMMessage {
 	t.Helper()
 	msgs, err := store.ListLLMMessages(turnID)
 	if err != nil {
@@ -90,7 +90,7 @@ func mustListMessages(t *testing.T, store *SQLiteStore, turnID int64) []LLMMessa
 // not llm_messages.
 func TestLLMTraceWritesMessagesWithRawStreamDisabled(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_EVENTS", "0")
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestChatAggregatorEmitsEveryMessageOnce(t *testing.T) {
 	}
 	collect(agg.flush())
 
-	want := aggregateChatMessages(events)
+	want := AggregateChatMessages(events)
 	if len(want) != 4 {
 		t.Fatalf("whole-stream messages=%d, want 4: %+v", len(want), want)
 	}

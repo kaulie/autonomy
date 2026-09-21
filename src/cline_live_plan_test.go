@@ -19,7 +19,7 @@ func TestLLMTraceLivePlanTurns(t *testing.T) {
 	if os.Getenv("CLINE_LIVE") != "1" {
 		t.Skip("set CLINE_LIVE=1 to run")
 	}
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

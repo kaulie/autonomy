@@ -61,7 +61,7 @@ func pinCriterion(t *testing.T, taskID, criterion string) {
 }
 
 // lastVerdicts reads the verdicts a task's contract produced, oldest first.
-func lastVerdicts(t *testing.T, store *SQLiteStore, taskID string) []Verification {
+func lastVerdicts(t *testing.T, store rawStore, taskID string) []Verification {
 	t.Helper()
 	verdicts, err := store.ListVerifications(taskID)
 	if err != nil {

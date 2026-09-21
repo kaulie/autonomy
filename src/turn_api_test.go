@@ -25,9 +25,9 @@ var turnLogAt = time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
 
 // seedTurnLog opens a store and writes the fixture log. Row ids come from SQLite in
 // insert order, so A < B < … < F (F is inserted last and holds the highest id).
-func seedTurnLog(t *testing.T) (*SQLiteStore, map[string]int64) {
+func seedTurnLog(t *testing.T) (rawStore, map[string]int64) {
 	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "turns.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "turns.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func seedTurnLog(t *testing.T) (*SQLiteStore, map[string]int64) {
 		// The fixture is keyed by letter, not by "the ids are 1, 2, 3": what a row's
 		// id actually is belongs to the database.
 		var id int64
-		if err := store.db.QueryRow(`
+		if err := store.RawDB().QueryRow(`
 SELECT id FROM reason_turns WHERE task_id = ? AND agent_id = ? AND cycle = ? AND mode = ?`,
 			turn.TaskID, turn.AgentID, turn.Cycle, string(turn.Mode)).Scan(&id); err != nil {
 			t.Fatal(err)
@@ -114,11 +114,11 @@ SELECT id FROM reason_turns WHERE task_id = ? AND agent_id = ? AND cycle = ? AND
 
 	// F: agent_id as the pre-integer-id schema wrote it (a uuid in a TEXT column), and
 	// a created_at older than every turn above.
-	res, err := store.db.Exec(`
+	res, err := store.RawDB().Exec(`
 INSERT INTO reason_turns (task_id, agent_id, cycle, mode, input, raw_output, normalized_output, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"task-28", "a-old", 1, "plan", "legacy row", "legacy", "legacy", string(LLMStatusFinished),
-		formatTime(turnLogAt.Add(-time.Hour)))
+		turnLogAt.Add(-time.Hour).UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ import (
 // messages instead of fragments. Sharing this as a pure function keeps the
 // aggregation database-agnostic: any Store engine feeds it its own events.
 
-// aggregateChatMessages turns a run's raw stream into aggregated intermediate
+// AggregateChatMessages turns a run's raw stream into aggregated intermediate
 // messages, in the order the events occurred:
 //
 //   - each maximal run of consecutive thinking events becomes one thinking
@@ -32,7 +32,7 @@ import (
 // It is a thin wrapper over chatAggregator — the very accumulator a live run
 // feeds event by event — so a stream derived at the end and a stream derived
 // while it runs can never disagree.
-func aggregateChatMessages(events []LLMEvent) []LLMMessage {
+func AggregateChatMessages(events []LLMEvent) []LLMMessage {
 	agg := newChatAggregator()
 	bySeq := map[int]LLMMessage{}
 	for _, ev := range events {
@@ -54,7 +54,7 @@ func aggregateChatMessages(events []LLMEvent) []LLMMessage {
 // chatAggregator folds a run's stream into aggregated messages. It is the single
 // implementation behind both derivations:
 //
-//   - aggregateChatMessages folds a whole stream (finish/backfill/replay);
+//   - AggregateChatMessages folds a whole stream (finish/backfill/replay);
 //   - LLMTrace feeds it events as they arrive and persists each message the
 //     moment it is complete, so a live run is readable in llm_messages instead
 //     of only appearing once the run ends.

@@ -12,7 +12,7 @@ import (
 // no world continues the task with the one the row has (accept → the run's prompt).
 
 func TestTaskRowKeepsItsGoalTypeAndContextRef(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestTaskRowKeepsItsGoalTypeAndContextRef(t *testing.T) {
 
 	// The row itself carries them, not just the value that was written.
 	var column string
-	if err := store.db.QueryRow(`SELECT context_ref FROM tasks WHERE id = ?`, written.ID).Scan(&column); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT context_ref FROM tasks WHERE id = ?`, written.ID).Scan(&column); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(column, "project-2") || !strings.Contains(column, "team-1") {

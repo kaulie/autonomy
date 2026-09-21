@@ -1,4 +1,6 @@
-package autonomy
+package db
+
+import . "github.com/kaulie/autonomy/src"
 
 import (
 	"encoding/json"

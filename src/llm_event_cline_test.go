@@ -248,7 +248,7 @@ func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
 	end.CreatedAt = start.Add(1200 * time.Millisecond)
 	clineEvents = append(clineEvents, end)
 
-	msgs := aggregateChatMessages(clineEvents)
+	msgs := AggregateChatMessages(clineEvents)
 	if len(msgs) != 1 {
 		t.Fatalf("cline thinking messages=%d want 1: %+v", len(msgs), msgs)
 	}
@@ -260,7 +260,7 @@ func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
 	}
 
 	// Cursor: one thinking message per block, duration reported by the provider.
-	cursorMsgs := aggregateChatMessages([]LLMEvent{{
+	cursorMsgs := AggregateChatMessages([]LLMEvent{{
 		Seq: 0, Channel: LLMChannelThought, EventType: "thinking", TextDelta: "hmm", CreatedAt: start,
 		Payload: map[string]any{"text": "hmm", "thinking_duration_ms": float64(3456)},
 	}})

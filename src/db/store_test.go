@@ -1,9 +1,10 @@
-package autonomy
+package db
+
+import . "github.com/kaulie/autonomy/src"
 
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -299,139 +300,6 @@ func TestSQLiteStoreRebuildsLegacyAgentsSchema(t *testing.T) {
 	}
 }
 
-func TestLocalReasonerPersistsTurn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := OpenSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
-
-	task := &Task{ID: "t-local"}
-	agent := &Agent{ID: 42, CurrentTask: task}
-	r := NewLocalReasoner("local")
-	_, err = r.Reason(DecisionContext{Task: task, Agent: agent, Cycle: 2}, ReasoningInput{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cycle int
-	var input, rawOutput, normalizedOutput, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT cycle, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 42).
-		Scan(&cycle, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cycle != 2 || input == "" || rawOutput == "" || normalizedOutput == "" {
-		t.Fatalf("cycle=%d input=%q raw_output=%q normalized_output=%q", cycle, input, rawOutput, normalizedOutput)
-	}
-	if mode != string(ReasonModePlan) {
-		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
-	}
-	if llmProvider != "" || model != "" {
-		t.Fatalf("llm_provider=%q model=%q, want empty for local reasoner", llmProvider, model)
-	}
-}
-
-func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := OpenSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
-
-	agent := &Agent{ID: 9, Backend: AgentBackendCursor, LLMProvider: LLMProviderCursor, Model: "composer-2"}
-	recordReasonIO(DecisionContext{Agent: agent, Task: &Task{ID: "t-cursor"}, Cycle: 1}, "in", "out")
-
-	var mode string
-	err = store.db.QueryRow(`SELECT mode FROM reason_turns WHERE agent_id = ?`, 9).Scan(&mode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode != string(ReasonModePlan) {
-		t.Fatalf("mode=%q, want %q", mode, ReasonModePlan)
-	}
-}
-
-func TestRecordAgentPromptPersistsTurn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := OpenSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
-
-	agent := &Agent{
-		ID: 7, LLMProvider: LLMProviderCursor, Model: "composer-2",
-	}
-	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
-
-	var taskID, input, rawOutput, normalizedOutput, mode, llmProvider, model string
-	err = store.db.QueryRow(`SELECT task_id, input, raw_output, normalized_output, mode, llm_provider, model FROM reason_turns WHERE agent_id = ?`, 7).
-		Scan(&taskID, &input, &rawOutput, &normalizedOutput, &mode, &llmProvider, &model)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if taskID != "task-1" {
-		t.Fatalf("task_id=%q, want %q", taskID, "task-1")
-	}
-	if input != "please edit code" || rawOutput != "changed files: a.go" {
-		t.Fatalf("input=%q raw_output=%q", input, rawOutput)
-	}
-	if normalizedOutput != "changed files: a.go" {
-		t.Fatalf("normalized_output=%q, want raw text for non-JSON output", normalizedOutput)
-	}
-	if mode != string(ReasonModeAgent) {
-		t.Fatalf("mode=%q, want %q", mode, ReasonModeAgent)
-	}
-	if llmProvider != string(LLMProviderCursor) || model != "composer-2" {
-		t.Fatalf("llm_provider=%q model=%q", llmProvider, model)
-	}
-}
-
-// TestFinishAgentSoftDeletesAnEphemeralAgentInStore: deleting is what happens to
-// an agent somebody asked to throw away (ephemeral), and the row records it. The
-// default keeps the agent instead (see TestFinishAgentKeepsTheDefaultAgentInTheStore).
-func TestFinishAgentSoftDeletesAnEphemeralAgentInStore(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := OpenSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
-
-	auto := &Autonomy{AgentFactory: NewAgentFactory(), Store: store}
-	task := &Task{ID: "t-soft"}
-	agent := auto.AgentFactory.Create(task)
-	agent.Lifecycle = AgentLifecycleEphemeral
-	id := agent.ID
-	name := agent.Name
-	auto.finishAgent(agent)
-	if got := auto.AgentFactory.Get(name); got != nil {
-		t.Fatal("still in factory")
-	}
-	var deletedAt sql.NullString
-	err = store.db.QueryRow(`SELECT deleted_at FROM agents WHERE id = ?`, id).Scan(&deletedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !deletedAt.Valid {
-		t.Fatal("expected soft delete in sqlite")
-	}
-}
-
 // TestUpsertTaskKeepsTheAgentWhenTheWriteNamesNone: the runtime upserts Task values
 // that need not carry the agent id (a cycle's own write, a stop, a failure). Those
 // writes must not un-pair the task — the pairing is what a later instruction
@@ -459,29 +327,6 @@ func TestUpsertTaskKeepsTheAgentWhenTheWriteNamesNone(t *testing.T) {
 	if got.Status != TaskStatusRunning {
 		t.Fatalf("status=%q, want the write's own status", got.Status)
 	}
-}
-
-// preparePolicyRoot is a PROJECT_ROOT holding the runtime's agent policy and the
-// runtime's policy file (src/agent_policy/), so a prompt rendered against it is
-// the one a deployment renders. Both are files now: the policy wording is not in
-// the code that renders the prompt.
-func preparePolicyRoot(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	dir := filepath.Join(root, "src", "agent_policy")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"AGENT_V2.md", "CONSTRAINTS.json"} {
-		b, err := os.ReadFile(filepath.Join("agent_policy", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
 }
 
 // TestSQLiteStoreMigratesExecutionStepName: the execution tables gained the step's
@@ -516,16 +361,16 @@ func TestSQLiteStoreMigratesExecutionStepName(t *testing.T) {
 		t.Fatalf("open a pre-name database: %v", err)
 	}
 	defer store.Close()
-	// saveExecutionPlan writes through the process's active store.
-	prevStore := _store
-	_store = store
-	t.Cleanup(func() { _store = prevStore })
-
-	planID, planned, err := saveExecutionPlan(
+	// The plan is written through the execution port, the way the runtime does.
+	planID, err := store.CreateExecutionPlan(
 		ExecutionPlan{TaskID: "task-1", DecisionType: "plan", StepCount: 1, CreatedAt: time.Now()},
-		[]ExecutionStepPlan{{Idx: 1, Name: "implement", Capability: "code_edit", Input: `{"instruction":"do it"}`}},
 	)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendExecutionStepPlans([]ExecutionStepPlan{
+		{PlanID: planID, Idx: 1, Name: "implement", Capability: "code_edit", Input: `{"instruction":"do it"}`},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	steps, err := store.ListExecutionStepPlan(planID)
@@ -533,7 +378,7 @@ func TestSQLiteStoreMigratesExecutionStepName(t *testing.T) {
 		t.Fatalf("planned=%+v err=%v, want the name read back", steps, err)
 	}
 	if _, err := store.AppendExecutionStep(ExecutionStep{
-		PlanID: planID, PlanStepID: planned[0].ID, Name: "implement", Capability: "code_edit",
+		PlanID: planID, PlanStepID: steps[0].ID, Name: "implement", Capability: "code_edit",
 		Status: "ok", Input: `{"instruction":"do it"}`, Output: `{}`, StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

@@ -1,4 +1,6 @@
-package autonomy
+package db
+
+import . "github.com/kaulie/autonomy/src"
 
 import (
 	"context"
@@ -262,10 +264,10 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	if msgs[0].ID < MessageIDBase {
 		t.Fatalf("first message id = %d, want at least %d (the message space starts high)", msgs[0].ID, MessageIDBase)
 	}
-	if msgs[0].Role != LLMMessageRoleUser || msgs[0].Content != "do it" || msgs[0].Seq != llmMessageSeqUser {
+	if msgs[0].Role != LLMMessageRoleUser || msgs[0].Content != "do it" || msgs[0].Seq != LLMMessageSeqUser {
 		t.Fatalf("input message = %+v", msgs[0])
 	}
-	if msgs[1].Role != LLMMessageRoleAssistant || msgs[1].ParentID != msgs[0].ID || msgs[1].Seq != llmMessageSeqAssistant {
+	if msgs[1].Role != LLMMessageRoleAssistant || msgs[1].ParentID != msgs[0].ID || msgs[1].Seq != LLMMessageSeqAssistant {
 		t.Fatalf("assistant message does not answer the input: %+v", msgs[1])
 	}
 	if id, found, err := store.AssistantMessageID(turnID); err != nil || !found || id != msgs[1].ID {
@@ -802,34 +804,59 @@ func TestPostgresStoreTurnQueries(t *testing.T) {
 // pluggable, and this is that claim exercised against a real server instead of a fake.
 func TestPostgresStoreServesTheRuntimesWriters(t *testing.T) {
 	store := newPostgresStore(t)
-	prev := _store
-	_store = store
-	t.Cleanup(func() { _store = prev })
 
-	persistTask(&Task{ID: "task-1", Description: "ship it", GoalType: GoalType("merge")})
-	persistAgent(&Agent{ID: 10050, Name: "agent-10050", State: "running"})
-	recordReasonTurn(&Agent{ID: 10050, LLMProvider: LLMProvider("cline"), Model: "m"}, "task-1", 1, ReasonModePlan, "ask", `{"type":"plan"}`)
+	if err := store.UpsertTask(&Task{ID: "task-1", Description: "ship it", GoalType: GoalType("merge")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgent(&Agent{ID: 10050, Name: "agent-10050", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertReasonTurn(ReasonTurn{
+		TaskID: "task-1", AgentID: 10050, Cycle: 1, Mode: ReasonModePlan,
+		LLMProvider: LLMProvider("cline"), Model: "m", Input: "ask", RawOutput: `{"type":"plan"}`,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	planID, saved, err := saveExecutionPlan(
-		ExecutionPlan{TaskID: "task-1", AgentID: 10050, Cycle: 1, DecisionType: "plan", StepCount: 2},
-		[]ExecutionStepPlan{{Idx: 1, Name: "build", Capability: "shell"}, {Idx: 2, Name: "verify", Capability: "http"}},
+	planID, err := store.CreateExecutionPlan(
+		ExecutionPlan{TaskID: "task-1", AgentID: 10050, Cycle: 1, DecisionType: "plan", StepCount: 2, CreatedAt: time.Now()},
 	)
 	if err != nil {
-		t.Fatalf("saveExecutionPlan: %v", err)
+		t.Fatalf("CreateExecutionPlan: %v", err)
+	}
+	if err := store.AppendExecutionStepPlans([]ExecutionStepPlan{
+		{PlanID: planID, Idx: 1, Name: "build", Capability: "shell"},
+		{PlanID: planID, Idx: 2, Name: "verify", Capability: "http"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.ListExecutionStepPlan(planID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if planID == 0 || len(saved) != 2 || saved[0].ID == 0 || saved[0].PlanID != planID {
 		t.Fatalf("the plan did not come back with row ids: plan=%d steps=%+v", planID, saved)
 	}
-	stepID := saveExecutionStep(ExecutionStep{
+	stepID, err := store.AppendExecutionStep(ExecutionStep{
 		PlanID: planID, PlanStepID: saved[0].ID, TaskID: "task-1", AgentID: 10050, Cycle: 1, Idx: 1,
 		Name: "build", Capability: "shell", Status: "ok", Input: `{"cmd":"make"}`, Output: `{"exit":0}`,
 	})
-	saveExecutionStepInteraction(ExecutionStepInteraction{StepID: stepID, Seq: 1, Kind: "local", Provider: "local"})
-	saveVerification(Verification{TaskID: "task-1", PlanID: planID, Cycle: 1, Criterion: "it builds", Result: "pass"})
-	pinCompletionContract(
-		Decision{Ctx: DecisionContext{Task: &Task{ID: "task-1"}}, Contract: []Criterion{{Name: "it builds", Raw: `{"requirement":"the artifact exists"}`}}},
-		planID,
-	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendExecutionStepInteraction(ExecutionStepInteraction{StepID: stepID, Seq: 1, Kind: "local", Provider: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendVerification(Verification{TaskID: "task-1", PlanID: planID, Cycle: 1, Criterion: "it builds", Result: "pass"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendCompletionContract(ContractCriterion{
+		TaskID: "task-1", Idx: 1, PlanID: planID, Name: "it builds",
+		Criterion: `{"requirement":"the artifact exists"}`, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Read it all back through the ports the upper layer reads with.
 	task, err := store.GetTask("task-1")

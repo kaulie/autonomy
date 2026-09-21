@@ -15,9 +15,9 @@ import (
 
 // resumeTestStore opens a store and points the package's active store at it, so the
 // runtime's own persistence calls (persistTask / persistAgent) land here.
-func resumeTestStore(t *testing.T) *SQLiteStore {
+func resumeTestStore(t *testing.T) rawStore {
 	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func resumeTestStore(t *testing.T) *SQLiteStore {
 
 // pairedTask is what a process that ran a task leaves behind: the task row with
 // its agent_id, and the agent row — id, name, provider session — that row names.
-func pairedTask(t *testing.T, store *SQLiteStore, taskID string) (*Task, *Agent) {
+func pairedTask(t *testing.T, store rawStore, taskID string) (*Task, *Agent) {
 	t.Helper()
 	task := &Task{ID: taskID, Description: "ship it", Status: TaskStatusRunning}
 	agent := &Agent{
@@ -181,14 +181,14 @@ func TestARestartedRuntimeRunsTheInstructionOnTheTasksAgent(t *testing.T) {
 	_, _ = restarted.Run(AcceptTaskRequest{ID: task.ID})
 
 	var agentID int64
-	if err := store.db.QueryRow(`SELECT agent_id FROM reason_turns WHERE task_id = ? LIMIT 1`, task.ID).Scan(&agentID); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT agent_id FROM reason_turns WHERE task_id = ? LIMIT 1`, task.ID).Scan(&agentID); err != nil {
 		t.Fatalf("the instruction left no run for the task: %v", err)
 	}
 	if agentID != agent.ID {
 		t.Fatalf("reason_turns.agent_id=%d, want the task's own agent %d", agentID, agent.ID)
 	}
 	var agents int
-	if err := store.db.QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
 		t.Fatal(err)
 	}
 	if agents != 1 {
@@ -245,7 +245,7 @@ func TestASecondInstructionIsAcceptedOnTheSameAgent(t *testing.T) {
 		t.Fatalf("both instructions are message %d, want one message each", first.MessageID)
 	}
 	var agents int
-	if err := store.db.QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM agents`).Scan(&agents); err != nil {
 		t.Fatal(err)
 	}
 	if agents != 1 {
@@ -289,7 +289,7 @@ func TestATaskWhoseAgentWasLetGoGetsANewOne(t *testing.T) {
 
 // waitForInboxDry waits until the agent has no queued or running message left, so a
 // test can read everything the instructions produced.
-func waitForInboxDry(t *testing.T, store *SQLiteStore, agentID int64) {
+func waitForInboxDry(t *testing.T, store rawStore, agentID int64) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -338,7 +338,7 @@ func TestAQueuedInstructionReachesTheCycleThatAnswersIt(t *testing.T) {
 	}
 	waitForInboxDry(t, store, agent.ID)
 
-	rows, err := store.db.Query(`SELECT input FROM reason_turns WHERE task_id = ? ORDER BY id`, task.ID)
+	rows, err := store.RawDB().Query(`SELECT input FROM reason_turns WHERE task_id = ? ORDER BY id`, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
