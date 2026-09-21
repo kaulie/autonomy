@@ -143,8 +143,9 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		{"asset.change", "target", "", true, "state"},
 		{"code_edit", "instruction", "goal", true, "summary"},
 		{"service.deploy", "service", "service_id", true, "pipeline_id"},
-		// task-15's shape: name the pull request by its url, read the merge sha.
-		{"pull_request.review", "pr", "pr_url", false, "sha"},
+		// task-15's shape: name the pull request by its url, read its reviews
+		// (the capability never merges — a human does that).
+		{"pull_request.review", "pr", "pr_url", false, "reviews"},
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},

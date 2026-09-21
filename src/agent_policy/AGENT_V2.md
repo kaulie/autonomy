@@ -421,11 +421,10 @@ Each step should include:
     "evidence_refs": ["E1", "E2"]
   },
   {
-    "name": "land",
+    "name": "review",
     "capability": "pull_request.review",
     "inputs": {
-      "pr": {"source": "step:edit.output.pr_url"},
-      "method": "squash"
+      "pr": {"source": "step:edit.output.pr_url"}
     },
     "expected_effect": {},
     "evidence_refs": ["E2"]
@@ -433,9 +432,10 @@ Each step should include:
 ]
 ```
 
-The first step's `instruction` and the second step's `method` are literals you write;
-`pr` is bound to the output `edit` is expected to report — that is the difference
-between a value you have and a value that does not exist yet.
+The first step's `instruction` is a literal you write; `pr` is bound to the output
+`edit` is expected to report — that is the difference between a value you have and
+a value that does not exist yet. `pull_request.review` only reads the pull
+request's reviews and never merges it — a human must approve and land it.
 
 `expected_effect` describes the intended World State change. It must not be presented as a fact unless supported by capability semantics or prior observations.
 

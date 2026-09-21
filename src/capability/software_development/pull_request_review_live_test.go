@@ -13,10 +13,10 @@ import (
 // resolution (GIT_REPO_URL → owner/name) and the head/base filter.
 //
 // It asks about a branch pair that cannot have an open pull request, so it only
-// ever reads — the refusal it expects arrives before any merge call, which is
-// also why it is safe to run against a real repository. Follows the CLINE_LIVE /
-// CURSOR_LIVE convention: set GITHUB_LIVE=1 (plus a credential, and GIT_REPO_URL
-// or GITHUB_REPOSITORY) to run it.
+// ever reads — the capability never merges, which is also why it is safe to run
+// against a real repository. Follows the CLINE_LIVE / CURSOR_LIVE convention:
+// set GITHUB_LIVE=1 (plus a credential, and GIT_REPO_URL or GITHUB_REPOSITORY)
+// to run it.
 func TestPullRequestReviewLiveReadsTheBranchPair(t *testing.T) {
 	if os.Getenv("GITHUB_LIVE") != "1" {
 		t.Skip("set GITHUB_LIVE=1 to run")
