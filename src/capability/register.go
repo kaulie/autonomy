@@ -28,9 +28,10 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// service.deploy talks to the deployment control plane over HTTP, so it needs
 	// no host hook: DEPLOYMENT_API_URL (or the local default) is its wiring.
 	f.Register(sd.DeployService{})
-	// pull_request.review lands a pull request — named by its URL or by the branch
-	// pair it was opened from. Like service.deploy it is code over someone else's
-	// API (GitHub's REST API) rather than a delegation, so its wiring is the
+	// pull_request.review reads a pull request's review opinions — named by its
+	// URL or by the branch pair it was opened from. It does NOT merge; landing is
+	// left to a human. Like service.deploy it is code over someone else's API
+	// (GitHub's REST API) rather than a delegation, so its wiring is the
 	// credential (GITHUB_TOKEN / GH_TOKEN, else the gh CLI's own — see
 	// github_credential.go) plus GITHUB_API_URL, and no host hook is needed.
 	f.Register(sd.PullRequestReview{})

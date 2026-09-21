@@ -45,11 +45,11 @@ func TestPullRequestReviewCredentialSources(t *testing.T) {
 			if _, err := c.Run(map[string]string{"from": "feature/x", "to": "main"}); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			merges := stub.calls(http.MethodPut, "/merge")
-			if len(merges) != 1 {
-				t.Fatalf("merge calls=%d, want 1", len(merges))
+			reads := stub.calls(http.MethodGet, "/reviews")
+			if len(reads) != 1 {
+				t.Fatalf("review calls=%d, want 1", len(reads))
 			}
-			if got, want := merges[0].auth, "Bearer "+tc.want; got != want {
+			if got, want := reads[0].auth, "Bearer "+tc.want; got != want {
 				t.Fatalf("Authorization=%q, want %q", got, want)
 			}
 		})
@@ -79,9 +79,9 @@ func TestGitHubCredentialFallsBackToTheGhCLI(t *testing.T) {
 	if _, err := (sd.PullRequestReview{APIURL: srv.URL, HTTPClient: srv.Client()}).Run(map[string]string{"from": "feature/x", "to": "main"}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	merges := stub.calls(http.MethodPut, "/merge")
-	if len(merges) != 1 || merges[0].auth != "Bearer gho_from_cli" {
-		t.Fatalf("merge calls=%+v, want one authorized with the gh CLI's token", merges)
+	reads := stub.calls(http.MethodGet, "/reviews")
+	if len(reads) != 1 || reads[0].auth != "Bearer gho_from_cli" {
+		t.Fatalf("review calls=%+v, want one authorized with the gh CLI's token", reads)
 	}
 }
 

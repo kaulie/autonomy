@@ -101,19 +101,16 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`；`IDENTITY_ROLE` / `IDENTITY_ID` 覆盖署谁的名，缺省 `agent` / `autonomy`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 
-## `pull_request.review`（按 PR 本身或分支对合入 PR）
+## `pull_request.review`（读某个 PR 的评审意见，**不合并**）
 
-- 语义：把**指定的那个 PR** 合入它的 base 分支。合入 ≠ 写代码：`code_edit` 负责产出 PR（也可以合自己开的那条，见 `src/agent_policy/CODE_EDIT.md`），而这个能力是通用的那一个 —— 谁来开的 PR 都合。
+- 语义：读**指定的那个 PR** 的评审意见（reviews）并返回给调用方。它**绝不合并** —— 合入由人来批准并执行，能力只把观察结果交出来，并明确报告「未合并、需要人工批准/合并」。原来那条自动合入的代码路径连同 merge-method / `mergeable_state` 的处理一起删掉了：不是关掉的可选项，而是根本没有这条路径。
 - 指名方式有两种，**给 PR 自己的引用最直接**（`code_edit` 的报告里就有这个 URL）：
   - `{"pr":"https://github.com/owner/name/pull/43"}`（`pr_url` / `pull_request` 亦可）：按编号直接读这个 PR，**不做分支对查询**，head/base 以 PR 自己为准。认得的写法：`https://<host>/owner/name/pull/43`（任意 host；`/pulls/43`、结尾 `/`、`?query`、`#discussion_r1` 都认）、`owner/name#43`、以及 `43` / `#43`（仓库另有出处时）。
   - `{"from":"<head/topic 分支>","to":"<base 分支>"}`（`from_branch`/`head`、`to_branch`/`base` 亦可；`to` 留空 = 主干：`PR_BASE_BRANCH` → 仓库自己的 `default_branch` → `main`）。
-- 可选 `method`：`merge`（默认）/ `squash` / `rebase`。
-- 输出：`{"from","to","number","pr","merged":"true","method","sha","checks"}`；`sha` 是主干上那个合并提交，`checks` 是 `passed` / `none`。
-- **是代码，不是 agent**：合入是确定性动作（触发已知、结果可验证），所以直接走 GitHub REST API，不拿 worker（对比 `code_edit` / `deployment.monitor` 的委托）。
-- **拒绝也是契约**（绝不硬合，原因原样返回）：`not_found`（该分支对没有开着的 PR，或该编号的 PR 已经不在）、`draft`、`conflict`（`mergeable_state=dirty`）、`checks_failed`（点名失败的 check）、`checks_pending`（还没跑完，下一轮再问）、`blocked`（branch protection 不满足）。
-- **读不懂的引用是失败，不是猜**：给了 `pr` 但解析不出 PR（例如只给了仓库 URL、`owner/name`、`#abc`、没有编号）在**发出任何请求之前**就报 `cannot read a pull request from ...`；给了 `pr` 又给了互相矛盾的 `repo` / `from` / `to`（同一个调用点了两件不同的东西）也一样拒绝 —— 静默合掉其中一个正是这个能力不该有的行为。
-- 合入时把**刚检查过的那个 head commit** 一并交给 GitHub（`sha`）：期间分支被人推了新提交，GitHub 会拒（409），而不是把没人看过的提交合进去。
-- 没配 CI 的仓库视为通过（报 `checks: none`）—— 不是失败，只是没有东西要等。
+- 输出：`{"from","to","number","pr","title","state","draft","merged":"false","requires_human_approval":"true","reviews","reviews_count","review_summary"}` —— `reviews` 是评审意见（`author` / `state` / `body` / …）的 JSON 数组；`merged` 恒为 `false`、`requires_human_approval` 恒为 `true`：**能力没有合并这条路径**，所以调用方永远读不出「已合并」，人必须自己批准并执行合并。
+- **是代码，不是 agent**：读 PR 与它的评审是确定性动作（触发已知、结果可验证），所以直接走 GitHub REST API，不拿 worker（对比 `code_edit` / `deployment.monitor` 的委托）。
+- **拒绝也是契约**（只读，原因原样返回）：`not_found`（该分支对没有开着的 PR，或该编号的 PR 已经不在）。git host 自己对读评审的拒绝（限额、权限等）原样进 error。
+- **读不懂的引用是失败，不是猜**：给了 `pr` 但解析不出 PR（例如只给了仓库 URL、`owner/name`、`#abc`、没有编号）在**发出任何请求之前**就报 `cannot read a pull request from ...`；给了 `pr` 又给了互相矛盾的 `repo` / `from` / `to`（同一个调用点了两件不同的东西）也一样拒绝 —— 静默读掉其中一个正是这个能力不该有的行为。
 - 配置：凭据**按顺序**取 —— capability 自己的 `Token` → `GITHUB_TOKEN` → `GH_TOKEN` → **`gh` CLI 自己的凭据（`gh auth token`）**；四处都没有才拒绝，且拒绝信息点名这几处（`src/capability/software_development/github_credential.go`）。最后一档是有意加的：这台机器上 worker 开 PR 就是跑 `gh`（web-cursor 的 GitHub 动作也全是 `gh`），所以"已经 `gh auth login` 的机器"不该因为 runtime 进程环境里没有 `GITHUB_TOKEN` 就走不通。仓库取 PR 引用 → 输入 `repo` → `GITHUB_REPOSITORY` → `GIT_REPO_URL`（任务工作区的 origin，`owner/name`、https、ssh 三种写法都认）；`GITHUB_API_URL` 换 API 基地址（GitHub Enterprise / 测试）。
 
 ## 不变式

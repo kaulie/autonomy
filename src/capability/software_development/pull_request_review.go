@@ -66,21 +66,18 @@ const (
 	// nor PR_BASE_BRANCH nor the repository itself says what it is.
 	DefaultBaseBranch = "main"
 
-	// The three ways GitHub can land a pull request. merge is the default: it
-	// keeps the branch's commits, the way the pull requests of this repository
-	// have been landed so far.
-	mergeMethodMerge  = "merge"
-	mergeMethodSquash = "squash"
-	mergeMethodRebase = "rebase"
+	// The review states GitHub reports on a review opinion. They are named
+	// lower-case in the output so a caller reads them the same way it reads the
+	// rest of the answer.
+	reviewStateApproved         = "approved"
+	reviewStateChangesRequested = "changes_requested"
+	reviewStateCommented        = "commented"
+	reviewStateDismissed        = "dismissed"
+	reviewStatePending          = "pending"
 
-	// mergeStateDirty / mergeStateBlocked are the two `mergeable_state` values
-	// that are a refusal rather than a retry: a conflict, and branch protection
-	// (required reviews or checks) that is not satisfied.
-	mergeStateDirty   = "dirty"
-	mergeStateBlocked = "blocked"
-
-	// reviewHTTPTimeout bounds one GitHub call. A merge is a single small
-	// request; anything slower than this is a network problem, not patience.
+	// reviewHTTPTimeout bounds one GitHub call. Reading a pull request and its
+	// reviews is a couple of small requests; anything slower than this is a
+	// network problem, not patience.
 	reviewHTTPTimeout = 30 * time.Second
 	// reviewMaxBody bounds how much of a GitHub response is read into memory.
 	reviewMaxBody = 1 << 20
@@ -91,20 +88,19 @@ const (
 	reviewSnippetChars = 200
 )
 
-// PullRequestReview merges one pull request into the base branch, identified
-// either by its own reference (`pr`: its URL, or owner/name#number) or by the
-// branch pair it was opened from (`from` → `to`).
+// PullRequestReview reads the review opinions on one pull request and reports
+// them back, identified either by its own reference (`pr`: its URL, or
+// owner/name#number) or by the branch pair it was opened from (`from` → `to`).
 //
-// It is deliberately not an agent. Merging is a deterministic action against the
-// git host with a verifiable answer, so it is code over the GitHub REST API and
-// acquires no worker. code_edit may merge the pull request it opened itself (see
-// src/agent_policy/CODE_EDIT.md); this capability is the general one — it merges
-// the pull request it was pointed at, whoever opened it.
+// It deliberately does NOT merge. Landing a change is a decision a human has to
+// make and own, so the capability stops at the observation and says so plainly:
+// the answer carries `merged:"false"` and `requires_human_approval:"true"` next
+// to the pull request's reviews, and it never touches GitHub's merge endpoint —
+// there is no merge path to trigger, not an optional one that is turned off.
 //
-// What it refuses is as much of its contract as what it does. A draft, a
-// conflict, red or unfinished checks, or unsatisfied branch protection stop the
-// merge and come back as the reason (conflict / checks_failed / checks_pending /
-// draft / blocked / not_found) instead of a merge that "sort of" happened.
+// It is deliberately not an agent. Reading a pull request and its reviews is a
+// deterministic call against the git host with a verifiable answer, so it is
+// code over the GitHub REST API and acquires no worker.
 type PullRequestReview struct {
 	// APIURL overrides GITHUB_API_URL / the public API (tests, or an explicit
 	// per-call host).
@@ -128,37 +124,41 @@ func (PullRequestReview) Domain() string { return ReviewDomain }
 func (PullRequestReview) Provider() string { return ReviewProvider }
 
 func (PullRequestReview) Description() string {
-	return `merge one pull request into the base branch. Name it either outright — "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted) — or by its branches: {"from":"<head/topic branch>","to":"<base branch>"} ("from_branch"/"head" and "to_branch"/"base" work too; an empty "to" means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main). A "repo" that contradicts the pull request url is refused rather than guessed at. optional "method": merge (default) / squash / rebase. The merge happens only when the pull request is open, not a draft, free of conflict and its checks are green; otherwise it fails with the reason (not_found / draft / conflict / checks_failed / checks_pending / blocked) instead of merging. output: {"from","to","number","pr","merged":"true","method","sha","checks"} — sha is the merge commit on the base branch, checks is "passed"/"none"`
+	return `read one pull request's review opinions — it does NOT merge. Name the pull request either outright — "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted) — or by its branches: {"from":"<head/topic branch>","to":"<base branch>"} ("from_branch"/"head" and "to_branch"/"base" work too; an empty "to" means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main). A "repo" that contradicts the pull request url is refused rather than guessed at. The answer is the pull request's reviews plus merged:"false" and requires_human_approval:"true": the capability never merges, so a human has to approve and perform the merge. output: {"from","to","number","pr","title","state","draft","merged":"false","requires_human_approval":"true","reviews","reviews_count","review_summary"} — reviews is the review opinions (author / state / body) as JSON`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
 func (PullRequestReview) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Description: "the pull request to land, named outright — the url everyone already has from it: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository. Required unless the pull request is named by from/to instead; nothing is read from the branches when it is given"},
-		{Name: "from", Aliases: []string{"from_branch", "head", "source"}, Description: "the head/topic branch whose pull request to merge — required unless pr names the pull request; when both are given they must agree"},
+		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Description: "the pull request to read, named outright — the url everyone already has from it: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository. Required unless the pull request is named by from/to instead; nothing is read from the branches when it is given"},
+		{Name: "from", Aliases: []string{"from_branch", "head", "source"}, Description: "the head/topic branch whose pull request to read — required unless pr names the pull request; when both are given they must agree"},
 		{Name: "to", Aliases: []string{"to_branch", "base", "target"}, Description: "the base branch; empty means the trunk: PR_BASE_BRANCH, else the repository's default branch, else main. With pr it must match the pull request's own base"},
 		{Name: "repo", Aliases: []string{"repository"}, Description: "owner/name, when neither pr nor GITHUB_REPOSITORY / GIT_REPO_URL names the repository; it must not contradict pr"},
-		{Name: "method", Aliases: []string{"merge_method"}, Description: "how to land it: merge (default) / squash / rebase"},
 	}
 }
 
 func (PullRequestReview) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "from", Description: "the head branch the pull request came from"},
-		{Name: "to", Description: "the base branch it was merged into"},
+		{Name: "to", Description: "the base branch the pull request targets"},
 		{Name: "number", Description: "the pull request number"},
 		{Name: "pr", Description: "the pull request's url"},
-		{Name: "merged", Description: `"true" — a merge happened`},
-		{Name: "method", Description: "the merge method that was used"},
-		{Name: "sha", Description: "the merge commit on the base branch"},
-		{Name: "checks", Description: `the gate's verdict: "passed", or "none" when the repository has no checks at all`},
+		{Name: "title", Description: "the pull request's title"},
+		{Name: "state", Description: `the pull request's state: "open" / "closed"`},
+		{Name: "draft", Description: `"true" when the pull request is a draft`},
+		{Name: "merged", Description: `always "false": this capability never merges`},
+		{Name: "requires_human_approval", Description: `always "true": a human must approve and perform the merge`},
+		{Name: "reviews", Description: "the pull request's review opinions as a JSON array of {author, state, body, submitted_at, url}"},
+		{Name: "reviews_count", Description: "how many review opinions the pull request has"},
+		{Name: "review_summary", Description: `a one-line tally of the review states, e.g. "1 approved, 1 changes_requested"`},
 	}
 }
 
-// Run resolves which pull request this call is about, checks the gates, then
-// merges it. Every gate is evaluated before the merge call, and each failure
-// carries its own reason, so a refusal reaches the planner as evidence rather
-// than as a generic error.
+// Run resolves which pull request this call is about, reads its review opinions
+// and reports them back. It never merges: landing the change is left to a human,
+// which the answer says outright (merged:"false", requires_human_approval:"true").
+// Every refusal carries its own reason, so it reaches the planner as evidence
+// rather than as a generic error.
 func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) {
 	// A pull request can be named two ways: by its own reference — the URL
 	// everyone already has from it (a code_edit report, a previous action's
@@ -169,11 +169,11 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	}
 	from := strings.TrimSpace(firstNonEmpty(in[inputFrom], in[inputFromAlt], in[inputFromHead], in[inputFromSrc]))
 	if named.number == 0 && from == "" {
-		return nil, fmt.Errorf("%s: missing from (the head branch whose pull request should be merged) and no pull request was named (pass \"pr\":\"<pull request url>\")", ReviewName)
+		return nil, fmt.Errorf("%s: missing from (the head branch whose pull request should be read) and no pull request was named (pass \"pr\":\"<pull request url>\")", ReviewName)
 	}
 	// What the caller names outright wins over the environment's default
 	// repository, and a "repo" that contradicts it is a mistake rather than a
-	// choice to be made here: merging a different repository than the one the
+	// choice to be made here: reading a different repository than the one the
 	// caller named is exactly the silent outcome this capability must not have.
 	repo := normalizeRepo(firstNonEmpty(in["repo"], in["repository"], c.Repo))
 	if named.repo != "" {
@@ -192,15 +192,6 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	if token == "" {
 		return nil, noCredential()
 	}
-	method := strings.ToLower(strings.TrimSpace(firstNonEmpty(in["method"], in["merge_method"])))
-	if method == "" {
-		method = mergeMethodMerge
-	}
-	switch method {
-	case mergeMethodMerge, mergeMethodSquash, mergeMethodRebase:
-	default:
-		return nil, fmt.Errorf("%s: unknown method %q (want merge, squash or rebase)", ReviewName, method)
-	}
 
 	client := c.HTTPClient
 	if client == nil {
@@ -208,53 +199,52 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	}
 	apiURL := strings.TrimRight(strings.TrimSpace(firstNonEmpty(c.APIURL, os.Getenv(EnvGitHubAPIURL), DefaultGitHubAPIURL)), "/")
 
-	// Which pull request this call is about is settled before any gate, so every
-	// gate below is about one concrete pull request with a base branch.
+	// Which pull request this call is about is settled before any read, so the
+	// reviews fetched below are about one concrete pull request with a base
+	// branch.
 	requested := firstNonEmpty(in[inputTo], in[inputToAlt], in[inputToBase], in[inputToTarget])
-	pr, to, err := c.identifyPull(client, apiURL, repo, token, named, from, requested)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", ReviewName, err)
-	}
-	if pr.Draft {
-		return nil, fmt.Errorf("%s: draft: pull request #%d (%s) is a draft and is not merged", ReviewName, pr.Number, pr.HTMLURL)
-	}
-	if pr.conflicted() {
-		return nil, fmt.Errorf("%s: conflict: pull request #%d (%s) cannot be merged into %s (mergeable_state=%s): resolve it, then ask again", ReviewName, pr.Number, pr.HTMLURL, to, firstNonEmpty(pr.MergeableState, "unknown"))
-	}
-	if pr.MergeableState == mergeStateBlocked {
-		return nil, fmt.Errorf("%s: blocked: pull request #%d (%s) is held by branch protection on %s (required reviews or checks are not satisfied)", ReviewName, pr.Number, pr.HTMLURL, to)
-	}
-	checks, err := c.gateChecks(client, apiURL, repo, token, pr.Head.SHA)
+	pr, _, err := c.identifyPull(client, apiURL, repo, token, named, from, requested)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ReviewName, err)
 	}
 
-	merge, err := c.mergePullRequest(client, apiURL, repo, token, pr, method)
+	reviews, err := c.listReviews(client, apiURL, repo, token, pr.Number)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ReviewName, err)
 	}
-	// The base/environment GitHub reports is what is echoed back, not the request:
-	// the merge really happened against the branch GitHub names.
+	opinions, err := json.Marshal(reviewOpinions(reviews))
+	if err != nil {
+		return nil, fmt.Errorf("%s: encode reviews: %w", ReviewName, err)
+	}
+
+	// The answer is the observation, never a merge. merged is always false and
+	// requires_human_approval always true: this capability has no merge path, by
+	// design, so a caller can never read a merge out of it — a human has to
+	// approve and perform that.
 	return map[string]string{
-		"from":   pr.Head.Ref,
-		"to":     pr.Base.Ref,
-		"number": strconv.Itoa(pr.Number),
-		"pr":     pr.HTMLURL,
-		"merged": "true",
-		"method": method,
-		"sha":    merge.SHA,
-		"checks": checks,
+		"from":                    pr.Head.Ref,
+		"to":                      pr.Base.Ref,
+		"number":                  strconv.Itoa(pr.Number),
+		"pr":                      pr.HTMLURL,
+		"title":                   pr.Title,
+		"state":                   pr.State,
+		"draft":                   strconv.FormatBool(pr.Draft),
+		"merged":                  "false",
+		"requires_human_approval": "true",
+		"reviews":                 string(opinions),
+		"reviews_count":           strconv.Itoa(len(reviews)),
+		"review_summary":          reviewSummary(reviews),
 	}, nil
 }
 
 // identifyPull settles which pull request this call is about, and which branch it
-// must land on.
+// targets.
 //
 // A reference the caller named (its URL, its number) needs no list lookup: the
 // pull request is read by number, and the branch pair the caller may have passed
 // alongside has to agree with what the pull request actually is — a call that
-// names two different things is a mistake, and merging one of them silently is
-// exactly what this capability must never do. Without a reference, the base
+// names two different things is a mistake, and reading one of them silently is
+// exactly what this capability must not do. Without a reference, the base
 // branch is resolved first and the open pull request from `from` into it is the
 // one meant.
 func (c PullRequestReview) identifyPull(client *http.Client, apiURL, repo, token string, named pullReference, from, requested string) (gitHubPull, string, error) {
@@ -362,119 +352,23 @@ func (c PullRequestReview) getPullRequest(client *http.Client, apiURL, repo, tok
 	return pr, nil
 }
 
-// gateChecks refuses the merge unless the head commit's checks are green, and
-// reports what it found: "passed", or "none" when the repository has no checks
-// at all. A repository without CI is not a failing repository — nothing is
-// waiting to be satisfied, and inventing a failure there would make the
-// capability unusable on it.
-//
-// Both vocabularies are read, because both are in use: GitHub's check runs
-// (Actions, and anything posting through the Checks API) and the legacy commit
-// statuses. A check that is still running is not green either: it comes back as
-// checks_pending so the planner can ask again on a later cycle rather than
-// blocking this call.
-func (c PullRequestReview) gateChecks(client *http.Client, apiURL, repo, token, sha string) (string, error) {
-	if strings.TrimSpace(sha) == "" {
-		return "", fmt.Errorf("cannot check %s: the pull request reports no head commit", repo)
-	}
-	runs, err := c.checkRuns(client, apiURL, repo, token, sha)
-	if err != nil {
-		return "", err
-	}
-	if failed := runs.failing(); len(failed) > 0 {
-		return "", fmt.Errorf("checks_failed: %s on %s", strings.Join(failed, ", "), shortSHA(sha))
-	}
-	if pending := runs.pending(); len(pending) > 0 {
-		return "", fmt.Errorf("checks_pending: %s on %s — ask again once they finish", strings.Join(pending, ", "), shortSHA(sha))
-	}
-
-	legacy, err := c.commitStatus(client, apiURL, repo, token, sha)
-	if err != nil {
-		return "", err
-	}
-	// The combined status endpoint reports "pending" when there are no statuses
-	// at all, so the count decides whether there is anything to judge.
-	if legacy.TotalCount > 0 {
-		switch strings.ToLower(strings.TrimSpace(legacy.State)) {
-		case "success":
-		case "pending":
-			return "", fmt.Errorf("checks_pending: commit status on %s is pending — ask again once it finishes", shortSHA(sha))
-		case "":
-			return "", fmt.Errorf("checks_failed: commit status on %s has no state to judge", shortSHA(sha))
-		default:
-			return "", fmt.Errorf("checks_failed: commit status on %s is %s", shortSHA(sha), legacy.State)
-		}
-	}
-
-	if runs.TotalCount > 0 || legacy.TotalCount > 0 {
-		return "passed", nil
-	}
-	return "none", nil
-}
-
-// checkRuns reads GitHub's check runs for one commit.
-func (c PullRequestReview) checkRuns(client *http.Client, apiURL, repo, token, sha string) (gitHubCheckRuns, error) {
-	endpoint := fmt.Sprintf("%s/repos/%s/commits/%s/check-runs?per_page=100", apiURL, repo, url.PathEscape(sha))
+// listReviews reads the pull request's review opinions — the reviews people left
+// on it (approved / changes_requested / commented / …). This is the observation
+// the capability reports back in place of a merge.
+func (c PullRequestReview) listReviews(client *http.Client, apiURL, repo, token string, number int) ([]gitHubReview, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/pulls/%d/reviews?per_page=100", apiURL, repo, number)
 	status, body, err := c.get(client, endpoint, token)
 	if err != nil {
-		return gitHubCheckRuns{}, err
+		return nil, err
 	}
-	if err := gitHubExpect(status, body, "list check runs"); err != nil {
-		return gitHubCheckRuns{}, err
+	if err := gitHubExpect(status, body, fmt.Sprintf("list reviews for %s#%d", repo, number)); err != nil {
+		return nil, err
 	}
-	var runs gitHubCheckRuns
-	if err := json.Unmarshal(body, &runs); err != nil {
-		return gitHubCheckRuns{}, fmt.Errorf("decode check runs: %w", err)
+	var reviews []gitHubReview
+	if err := json.Unmarshal(body, &reviews); err != nil {
+		return nil, fmt.Errorf("decode reviews: %w", err)
 	}
-	return runs, nil
-}
-
-// commitStatus reads the legacy combined status for one commit.
-func (c PullRequestReview) commitStatus(client *http.Client, apiURL, repo, token, sha string) (gitHubStatus, error) {
-	endpoint := fmt.Sprintf("%s/repos/%s/commits/%s/status", apiURL, repo, url.PathEscape(sha))
-	status, body, err := c.get(client, endpoint, token)
-	if err != nil {
-		return gitHubStatus{}, err
-	}
-	if err := gitHubExpect(status, body, "read commit status"); err != nil {
-		return gitHubStatus{}, err
-	}
-	var combined gitHubStatus
-	if err := json.Unmarshal(body, &combined); err != nil {
-		return gitHubStatus{}, fmt.Errorf("decode commit status: %w", err)
-	}
-	return combined, nil
-}
-
-// mergePullRequest lands the pull request. The head commit that was just checked
-// is sent along as `sha`: if the branch moved between the gate and this call,
-// GitHub refuses (409) rather than merging a commit nobody looked at.
-func (c PullRequestReview) mergePullRequest(client *http.Client, apiURL, repo, token string, pr gitHubPull, method string) (gitHubMerge, error) {
-	endpoint := fmt.Sprintf("%s/repos/%s/pulls/%d/merge", apiURL, repo, pr.Number)
-	body, err := json.Marshal(map[string]string{"merge_method": method, "sha": pr.Head.SHA})
-	if err != nil {
-		return gitHubMerge{}, err
-	}
-	status, payload, err := c.request(client, http.MethodPut, endpoint, token, body)
-	if err != nil {
-		return gitHubMerge{}, err
-	}
-	if status < 200 || status > 299 {
-		return gitHubMerge{}, gitHubError(status, payload, fmt.Sprintf("merge pull request #%d", pr.Number))
-	}
-	var merged gitHubMerge
-	if err := json.Unmarshal(payload, &merged); err != nil {
-		return gitHubMerge{}, fmt.Errorf("decode merge result: %w", err)
-	}
-	// A 2xx that does not claim a merge is not a merge: reporting success here
-	// would hand the planner a merge that never happened.
-	if !merged.Merged {
-		return gitHubMerge{}, fmt.Errorf("merge pull request #%d: GitHub accepted the request without merging (%s)", pr.Number, firstNonEmpty(merged.Message, "no message"))
-	}
-	if strings.TrimSpace(merged.SHA) == "" {
-		return gitHubMerge{}, fmt.Errorf("merge pull request #%d: merged without reporting the merge commit", pr.Number)
-	}
-	return merged, nil
+	return reviews, nil
 }
 
 func (c PullRequestReview) get(client *http.Client, endpoint, token string) (int, []byte, error) {
@@ -696,24 +590,14 @@ func headParam(repo, head string) string {
 	return owner + ":" + head
 }
 
-// shortSHA is the short form used in messages, so a reason names the commit it
-// is about without pasting a 40-character hash into every error.
-func shortSHA(sha string) string {
-	if len(sha) <= 8 {
-		return sha
-	}
-	return sha[:8]
-}
-
-// gitHubPull is the slice of a pull request this capability decides on.
+// gitHubPull is the slice of a pull request this capability observes.
 type gitHubPull struct {
-	Number         int    `json:"number"`
-	HTMLURL        string `json:"html_url"`
-	Title          string `json:"title"`
-	Draft          bool   `json:"draft"`
-	Mergeable      *bool  `json:"mergeable"`
-	MergeableState string `json:"mergeable_state"`
-	Head           struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	Head    struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
@@ -722,69 +606,80 @@ type gitHubPull struct {
 	} `json:"base"`
 }
 
-// conflicted reports whether the pull request cannot be merged as it stands.
-// GitHub computes `mergeable` asynchronously, so a null is "not known yet" and
-// is not read as a conflict; mergeable_state says "dirty" when the branch really
-// has one.
-func (p gitHubPull) conflicted() bool {
-	if p.Mergeable != nil && !*p.Mergeable {
-		return true
-	}
-	return p.MergeableState == mergeStateDirty
-}
-
 // gitHubRepo is the slice of a repository used to learn the trunk.
 type gitHubRepo struct {
 	FullName      string `json:"full_name"`
 	DefaultBranch string `json:"default_branch"`
 }
 
-// gitHubCheckRuns is GitHub's check-run list for one commit.
-type gitHubCheckRuns struct {
-	TotalCount int `json:"total_count"`
-	CheckRuns  []struct {
-		Name       string `json:"name"`
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-	} `json:"check_runs"`
+// gitHubReview is one review on a pull request, as GitHub reports it.
+type gitHubReview struct {
+	ID   int64 `json:"id"`
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	State       string `json:"state"`
+	Body        string `json:"body"`
+	SubmittedAt string `json:"submitted_at"`
+	HTMLURL     string `json:"html_url"`
 }
 
-// failing names the checks that finished badly. Only the passing conclusions are
-// named as passing: an unrecognised one is not green, so the gate fails closed
-// rather than merging on a vocabulary it does not know.
-func (r gitHubCheckRuns) failing() []string {
-	var out []string
-	for _, run := range r.CheckRuns {
-		switch run.Conclusion {
-		case "", "success", "neutral", "skipped":
-			continue
-		default:
-			out = append(out, fmt.Sprintf("%s (%s)", run.Name, run.Conclusion))
-		}
+// reviewOpinion is the slice of a review this capability hands back: who left it,
+// what they concluded, and what they wrote.
+type reviewOpinion struct {
+	Author    string `json:"author"`
+	State     string `json:"state"`
+	Body      string `json:"body"`
+	Submitted string `json:"submitted_at,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
+// reviewOpinions renders the reviews the caller reads back.
+func reviewOpinions(reviews []gitHubReview) []reviewOpinion {
+	out := make([]reviewOpinion, 0, len(reviews))
+	for _, r := range reviews {
+		out = append(out, reviewOpinion{
+			Author:    r.User.Login,
+			State:     reviewState(r.State),
+			Body:      strings.TrimSpace(r.Body),
+			Submitted: r.SubmittedAt,
+			URL:       r.HTMLURL,
+		})
 	}
 	return out
 }
 
-// pending names the checks that have not finished yet.
-func (r gitHubCheckRuns) pending() []string {
-	var out []string
-	for _, run := range r.CheckRuns {
-		if !strings.EqualFold(run.Status, "completed") {
-			out = append(out, fmt.Sprintf("%s (%s)", run.Name, firstNonEmpty(run.Status, "queued")))
-		}
+// reviewState lower-cases GitHub's review state. An unrecognised one (or an
+// empty one) reads as a comment rather than being dropped: the review is still
+// an opinion someone left.
+func reviewState(state string) string {
+	s := strings.ToLower(strings.TrimSpace(state))
+	switch s {
+	case reviewStateApproved, reviewStateChangesRequested, reviewStateCommented, reviewStateDismissed, reviewStatePending:
+		return s
+	default:
+		return reviewStateCommented
 	}
-	return out
 }
 
-// gitHubStatus is the legacy combined commit status for one commit.
-type gitHubStatus struct {
-	State      string `json:"state"`
-	TotalCount int    `json:"total_count"`
-}
-
-// gitHubMerge is GitHub's answer to a merge request.
-type gitHubMerge struct {
-	SHA     string `json:"sha"`
-	Merged  bool   `json:"merged"`
-	Message string `json:"message"`
+// reviewSummary is a one-line tally of the review states, so a caller reads the
+// gist without parsing the JSON.
+func reviewSummary(reviews []gitHubReview) string {
+	if len(reviews) == 0 {
+		return "no reviews yet"
+	}
+	counts := map[string]int{}
+	var order []string
+	for _, r := range reviews {
+		state := reviewState(r.State)
+		if counts[state] == 0 {
+			order = append(order, state)
+		}
+		counts[state]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, state := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[state], state))
+	}
+	return strings.Join(parts, ", ")
 }
