@@ -163,10 +163,11 @@ The backend is the **runtime's** (`autonomyd`) setting, not the CLI's: `cmd/auto
 is an HTTP client, so exporting the variable around `go run ./cmd/autonomy` changes
 nothing — that run's failure is what the runtime decided. A running runtime says
 which backend it is on: `GET /health` → `{"status":"ok","llm_backend":"cursor","llm_model":"composer-2"}`.
-How to switch it (dev and deployed, and the one boundary that matters on a deployed
-runtime — the release package does **not** ship the Cline bridge), plus how to read
-the `empty model response … You're out of usage` failure that motivates a switch:
-[docs/llm-backend.md](docs/llm-backend.md).
+How to switch it (dev and deployed) — and the one boundary that matters on a deployed
+runtime, where the release package now **ships the Cline bridge** (its sources plus a
+packed production install of `@cline/sdk`, extracted by `scripts/start.sh` on start, so
+every deploy refreshes it) — plus how to read the `empty model response … You're out of
+usage` failure that motivates a switch: [docs/llm-backend.md](docs/llm-backend.md).
 
 ```bash
 ./scripts/install-cline-bridge.sh            # npm install @cline/sdk for the bridge

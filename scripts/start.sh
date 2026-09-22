@@ -58,7 +58,7 @@ mkdir -p "${DATA_DIR}"
 # .env 里的旧值把服务卡在旧端口上。
 if [ ! -f "${ENV_FILE}" ]; then
   umask 077
-  cat > "${ENV_FILE}" <<EOF
+  cat > "${ENV_FILE}" <<'EOF'
 # autonomy 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
 # 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4300。
 # 数据库：全机只有一份（默认 ~/database/autonomy/autonomy.db），autonomy、
@@ -77,13 +77,13 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——
-# 发版包不带 Cline 桥，所以要把 AUTONOMY_CLINE_BRIDGE_SCRIPT 指到一个装好
-# @cline/sdk 的桥脚本（发版包外的一份 checkout 即可），provider/model 不设
-# 则由 `cline auth` 保存的配置解析。改完走平台重启，再用 /health 确认。
+# 发版包自带 cline 桥（src/clinesdk/bridge + 依赖包，start.sh 自动解包并指过去），
+# 所以 provider/model 不设就由 `cline auth` 保存的配置解析。这一行只在包的桥
+# 不可用时才需要（指到一个装好 @cline/sdk 的桥脚本）。改完走平台重启，再用 /health 确认。
 # AUTONOMY_LLM_BACKEND=cline
 # AUTONOMY_CLINE_PROVIDER=deepseek
 # AUTONOMY_CLINE_MODEL=deepseek-v4-pro
-# AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/autonomy/src/clinesdk/bridge/bridge.mjs
+# AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/some/checkout/src/clinesdk/bridge/bridge.mjs
 # AUTONOMY_MAX_STEPS=4
 # provider 原始事件流（llm_events，一行一个逐 token 事件）默认不落库：它是一张叶子表，
 # 只服务回放，run header（reason_turns）与对话（llm_messages）照常记录。需要回放/分析时再打开：
@@ -121,6 +121,42 @@ if [ -z "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-br
   export CURSOR_SDK_BRIDGE_BIN="${RUNTIME_DIR}/bin/cursor-sdk-bridge"
 fi
 
+# cline bridge: the release package carries it (build.sh) — its sources, plus a tarball
+# of their production install (@cline/sdk and its tree: 251MB unpacked, ~27MB packed).
+# The dependencies are extracted next to the sources when the tarball is new, and
+# AUTONOMY_CLINE_BRIDGE_SCRIPT is pointed at them — so the deployed cline backend runs
+# the bridge *this release* shipped, refreshed by every deploy.
+#
+# backend/.env is overridden on purpose, the same rule as the port above: it survives
+# every deploy, so a path into some checkout would pin the bridge to code nobody
+# updates. Set AUTONOMY_CLINE_BRIDGE_SCRIPT in .env only for a deployment whose package
+# carries no bridge (or to run an external one).
+CLINE_BRIDGE_DIR="${RUNTIME_DIR}/src/clinesdk/bridge"
+if [ -f "${CLINE_BRIDGE_DIR}/bridge.mjs" ]; then
+  DEPS_TGZ="${CLINE_BRIDGE_DIR}/bridge-deps.tgz"
+  if [ -f "${DEPS_TGZ}" ]; then
+    if command -v shasum >/dev/null 2>&1; then
+      wanted="$(shasum -a 256 "${DEPS_TGZ}" | cut -d' ' -f1)"
+    else
+      wanted="$(sha256sum "${DEPS_TGZ}" | cut -d' ' -f1)"
+    fi
+    current="$(cat "${CLINE_BRIDGE_DIR}/.deps-sha256" 2>/dev/null || true)"
+    if [ -n "${wanted}" ] && [ "${wanted}" != "${current}" ]; then
+      log "解包 cline bridge 依赖（$(du -h "${DEPS_TGZ}" | cut -f1)）"
+      if tar xzf "${DEPS_TGZ}" -C "${CLINE_BRIDGE_DIR}"; then
+        printf '%s' "${wanted}" > "${CLINE_BRIDGE_DIR}/.deps-sha256"
+      else
+        log "警告：cline bridge 依赖解包失败（沿用已有 node_modules，如果有）"
+      fi
+    fi
+  fi
+  if [ -d "${CLINE_BRIDGE_DIR}/node_modules" ]; then
+    export AUTONOMY_CLINE_BRIDGE_SCRIPT="${CLINE_BRIDGE_DIR}/bridge.mjs"
+  else
+    log "警告：包里有 cline bridge 却没有依赖（bridge-deps.tgz 不在/解包失败）；沿用 AUTONOMY_CLINE_BRIDGE_SCRIPT=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
+  fi
+fi
+
 if [ -f "${PID_FILE}" ]; then
   old="$(tr -d '[:space:]' < "${PID_FILE}" || true)"
   if [ -n "${old}" ] && kill -0 "${old}" 2>/dev/null; then
@@ -139,9 +175,9 @@ if command -v lsof >/dev/null 2>&1; then
 fi
 
 if [ "${STORE_ENGINE}" = "sqlite" ]; then
-  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=sqlite 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=sqlite 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
 else
-  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=${STORE_ENGINE} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置}"
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=${STORE_ENGINE} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
 fi
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"

@@ -50,9 +50,10 @@ go run ./cmd/autonomyd                        # runtime 起在这里；另开一
 
 ## 部署的 runtime 切到 Cline
 
-部署包只有 `bin/autonomyd`、`scripts/`、`src/agent_policy/` 和 `backend/`：**发版包不带
-Cline 桥**（`build.sh` 只打 cursor bridge，`@cline/sdk` 需要 npm install，见 build.sh 的注释）。
-所以部署运行时切 Cline 是两步：
+部署包只有 `bin/autonomyd`、`scripts/`、`src/agent_policy/`、`src/clinesdk/bridge/` 和
+`backend/`：**cline 桥随包发出**（源码 + 依赖包 `bridge-deps.tgz`，`build.sh` 在打包时
+`npm ci --omit=dev` 装好再压；`scripts/start.sh` 在启动时按 sha256 判断要不要解包，
+然后**强制**把 `AUTONOMY_CLINE_BRIDGE_SCRIPT` 指到包里的桥）。所以部署运行时切 Cline 是两步：
 
 1. 在 `~/runtime/<service>/backend/.env` 里加（`scripts/start.sh` 生成的模板里这几行已有注释版）：
 
@@ -60,16 +61,21 @@ Cline 桥**（`build.sh` 只打 cursor bridge，`@cline/sdk` 需要 npm install�
    AUTONOMY_LLM_BACKEND=cline
    AUTONOMY_CLINE_PROVIDER=deepseek
    AUTONOMY_CLINE_MODEL=deepseek-v4-pro
-   # 包外的桥：一个装好 @cline/sdk 的 checkout 的桥脚本
-   AUTONOMY_CLINE_BRIDGE_SCRIPT=/path/to/autonomy/src/clinesdk/bridge/bridge.mjs
+   # 桥不用指：包自带（src/clinesdk/bridge），start.sh 会解包依赖并指过去。
+   # 只有当包里没有桥（老包）或你要用外部桥时，才写这一行：
+   # AUTONOMY_CLINE_BRIDGE_SCRIPT=/path/to/some/checkout/src/clinesdk/bridge/bridge.mjs
    ```
 
 2. **走部署平台重启**（`~/runtime/agent-control-plane-deployment` 的 UI / 管线）。不要在
    agent 进程里同步跑重启脚本——那会把网关一起带走。
 
+为什么 start.sh 要*强制*包里的桥（而不是尊重 `.env` 里的值）：`backend/.env` 每次部署都保留，
+一条指向某个 checkout 的路径会把桥钉死在那份没人更新的代码上（这正是 2026-09-21 线上那次
+的现场：`.env` 指着 `~/Projects/autonomy/...`，桥的改动永远不生效）。要跑外部桥，就把那行
+写在 `.env` 里并接受它不随部署更新（或者让包里那份缺席）。
+
 起来后 `curl -s 127.0.0.1:4300/health` 应看到 `"llm_backend":"cline"`，`backend/server.log`
-里会出现 `[cline-bridge] …`。想真正把桥打进发版包（部署机上没有 checkout 可用时），改
-`build.sh` 让它随包发出 `src/clinesdk/bridge`——那是打包决定，不是运行期开关。
+里会出现 `[cline-bridge] …`（还有 start.sh 的 `cline桥=…` 一行，写的是它实际用的路径）。
 
 ### Cline 的会话落盘在哪（重启怎么续）
 
