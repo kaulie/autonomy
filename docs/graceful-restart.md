@@ -65,8 +65,35 @@ autonomy 这一侧就是这两个端点（[http-api.md](http-api.md)）：
 没有这半边，SIGTERM 会把进程直接带走：deferred 的 `Close` 不跑，桥上的会话只会过期，
 而 stop.sh 在 15s 之后补的那一刀更是想写什么都写不进去。
 
-## 有界
+## 开机自愈：被切断的 run 不等指令
 
+重启之后，**每个 agent 自己看自己的状态并接着做**（`resumeInterruptedRuns`，`Autonomy` 装配完成时执行），
+而不是等用户再想起它、再发一条指令：
+
+| 判据（只有这些算被切断） | 说明 |
+|---|---|
+| 该 agent 有一条 `running` 的消息 | 上一个进程把它取走了、没放回来（`agent_messages.status=running`）——这是「跑到一半」的唯一物证 |
+| 任务行是 `pending`/`running`（硬 kill，没来得及写结局）或 `stopped` 且原因是**运行时**停的 | 后者是优雅收尾留下的行；**用户自己停的任务不在此列**（那是决定，不是意外） |
+| 切断时间在 `AUTONOMY_RESUME_MAX_AGE` 之内 | 默认 24h；更旧的留给下一条指令——几天前切断的 run 不该在开机时自己复活 |
+
+接续方式分两层，先会话后记录：
+
+1. **能从会话续就从会话续**：任务行记着 provider 的 session id，桥用它的 transcript 给新会话播种
+   （[session.md](session.md)、`src/clinesdk/bridge/resume.mjs`）——对话本身接着走；
+2. **会话不在了才用记录重建**：`briefing` 里带着既有轮次、它们的产出、当前状态、**被切断在哪一步**
+   （`state.interrupted`：原因 + `stopped_at_step` + `next_step`）以及还差什么（`open_criteria`）——
+   `docs/execution-loop.md`。
+
+两个开关（都在 `backend/.env`）：`AUTONOMY_RESUME_INTERRUPTED=0` 整体关掉自愈；
+`AUTONOMY_RESUME_MAX_AGE=<时长>`（如 `30m`；`0` = 不限）调整年龄上限。日志里能看到它做了什么：
+`开机自愈：续做 N 个被切断的 run（M 个因超龄跳过）`，以及每个 agent 的
+`… 上一轮在 <时间> 被切断，开机自动续做（会话可用则续会话，否则按记录重建）`。
+
+与「已受理、从未开始」的指令是两条**互不重叠**的路径：那条由 `resumeAcceptedInstructions` 在开机时启动，
+判据是消息还 `queued`；这条只管消息已经 `running` 的。两条加起来，重启既不丢已受理的指令，
+也不丢跑到一半的 run。
+
+## 有界
 drain 不会无限期：通知之后 **`AUTONOMY_DRAIN_TIMEOUT`（默认 10 分钟）** 内没有等到重启，
 autonomy 自己恢复（把 hold 住的指令放回去跑）。理由是部署可能死在通知之后（打包失败、冲突），
 而「服务从此不再受理新 run」是比「这次重启不优雅」严重得多的故障。

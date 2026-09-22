@@ -411,6 +411,165 @@ func (r *Autonomy) resumeAcceptedInstructions() {
 	}
 }
 
+// resumeInterruptedRuns starts the runs a *previous* process died in the middle of.
+//
+// This is the runtime healing itself instead of waiting to be told: on boot, every task
+// whose run was cut (its message is still `running` — the process that claimed it is
+// gone, and nothing in this one is processing it) gets its consumer started, and the
+// queue hands that work back to it (InboxStore.RequeueRunningMessages). The agent then
+// continues the way it always continues:
+//
+//  1. from its session, when the provider still has one — the task's agent row names the
+//     session, and the bridge seeds the new session from that transcript
+//     (src/clinesdk/bridge/resume.mjs);
+//  2. from its own record, when it does not — the briefing carries the earlier rounds,
+//     what they produced, where the cut landed and what is still missing
+//     (src/task_record.go).
+//
+// Nothing else is restarted. A task that ended (`done` / `blocked` / `need_input` /
+// `error`) answered for itself, and a task a person stopped was stopped on purpose: this
+// runtime does not re-enter either of those on boot. AUTONOMY_RESUME_INTERRUPTED=0 (or
+// false) switches the whole thing off; AUTONOMY_RESUME_MAX_AGE (a duration, default 24h,
+// 0 = no bound) leaves an older interruption to the next instruction — a run cut days ago
+// is not something to re-enter by itself.
+func (r *Autonomy) resumeInterruptedRuns() {
+	if r == nil {
+		return
+	}
+	if !resumeInterruptedEnabled() {
+		fmt.Fprintf(os.Stderr, "[autonomy] 开机自愈关闭（AUTONOMY_RESUME_INTERRUPTED=%s）\n", os.Getenv(resumeInterruptedEnv))
+		return
+	}
+	store := r.Store
+	if store == nil {
+		store = activeStore()
+	}
+	if store == nil {
+		return
+	}
+	tasks, err := store.ListTasks()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] resume interrupted runs: %v\n", err)
+		return
+	}
+	maxAge := resumeMaxAge()
+	resumed, skipped := 0, 0
+	for _, task := range tasks {
+		if task == nil || task.AgentID == 0 {
+			continue
+		}
+		if !resumableAfterCut(task) {
+			continue
+		}
+		cutAt, cut := interruptedRunSince(store, task.AgentID, task.ID)
+		if !cut {
+			continue
+		}
+		if maxAge > 0 && time.Since(cutAt) > maxAge {
+			fmt.Fprintf(os.Stderr, "[autonomy] task %s 的上一轮在 %s 被切断，超过 AUTONOMY_RESUME_MAX_AGE(%s)，不自动续做\n",
+				task.ID, cutAt.Format(time.RFC3339), maxAge)
+			skipped++
+			continue
+		}
+		agent, err := r.resumeAgentForTask(task)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] resume interrupted task %s: %v\n", task.ID, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[autonomy] %s / task %s：上一轮在 %s 被切断，开机自动续做（会话可用则续会话，否则按记录重建）\n",
+			agent.Name, task.ID, cutAt.Format(time.RFC3339))
+		r.agentInbox().start(agent)
+		resumed++
+	}
+	if resumed > 0 || skipped > 0 {
+		fmt.Fprintf(os.Stderr, "[autonomy] 开机自愈：续做 %d 个被切断的 run（%d 个因超龄跳过）\n", resumed, skipped)
+	}
+}
+
+// resumableAfterCut is which task rows a cut run can leave behind: `pending` / `running`
+// when the process died before it could even mark the task (a hard kill), and `stopped`
+// when the runtime's own stop is what ended it. A person's stop is a decision — that task
+// is left alone until its next instruction, whoever sends it.
+func resumableAfterCut(task *Task) bool {
+	if task == nil {
+		return false
+	}
+	switch task.Status {
+	case TaskStatusPending, TaskStatusRunning:
+		return true
+	case TaskStatusStopped:
+		return isRuntimeStopRecord(task)
+	default:
+		return false
+	}
+}
+
+// interruptedRunSince says whether this agent has a message a previous process claimed
+// and never put down (still `running`, for this task), and when that was.
+func interruptedRunSince(store InboxStore, agentID int64, taskID string) (time.Time, bool) {
+	messages, err := store.ListAgentMessages(agentID, 0)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var cutAt time.Time
+	found := false
+	for _, msg := range messages {
+		if msg.Status != MessageStatusRunning {
+			continue
+		}
+		if taskID != "" && msg.TaskID != "" && msg.TaskID != taskID {
+			continue
+		}
+		at := msg.StartedAt
+		if at.IsZero() {
+			at = msg.CreatedAt
+		}
+		if !found || at.After(cutAt) {
+			cutAt, found = at, true
+		}
+	}
+	return cutAt, found
+}
+
+const (
+	// resumeInterruptedEnv turns the boot-time self-heal off (it is on by default: an
+	// interrupted run is the runtime's own business, not the user's to remember).
+	resumeInterruptedEnv = "AUTONOMY_RESUME_INTERRUPTED"
+	// resumeMaxAgeEnv bounds how old an interrupted run may be for the boot to re-enter
+	// it (a duration; empty = the default, 0 or less = no bound).
+	resumeMaxAgeEnv = "AUTONOMY_RESUME_MAX_AGE"
+)
+
+func resumeInterruptedEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(resumeInterruptedEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+// resumeMaxAge is how old a cut run may be and still be picked up at boot. The default is
+// a day: a restart happens seconds after the cut, so anything older is not a restart's
+// leftovers but a task nobody is looking at, and starting it on boot is not this
+// runtime's call to make.
+func resumeMaxAge() time.Duration {
+	const fallback = 24 * time.Hour
+	raw := strings.TrimSpace(os.Getenv(resumeMaxAgeEnv))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] %s=%q 不是时长，按默认 %s 处理\n", resumeMaxAgeEnv, raw, fallback)
+		return fallback
+	}
+	if d <= 0 {
+		return 0
+	}
+	return d
+}
+
 // Shutdown is the runtime's own side of a graceful process stop — SIGTERM, which is how
 // scripts/stop.sh and the deployment platform end this process:
 //

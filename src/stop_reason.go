@@ -33,7 +33,21 @@ const (
 	// stoppedByRuntime is a stop this process made for itself: a restart cutting what
 	// is in flight during the shutdown grace (src/graceful.go).
 	stoppedByRuntime = "runtime"
+	// runtimeStopReasonMarker is the part of a runtime stop's error text that says so —
+	// what a reader looks for to tell a restart's stop from a person's (the writer below
+	// and the readers, src/graceful.go and src/task_record.go, share it).
+	runtimeStopReasonMarker = "stopped by the runtime"
 )
+
+// isRuntimeStopRecord says whether a task row records the runtime as the one that stopped
+// it, as opposed to a person. Both boot-time readers ask this before they touch a stopped
+// task: a person's stop is a decision, and nothing reopens it.
+func isRuntimeStopRecord(task *Task) bool {
+	if task == nil || task.Status != TaskStatusStopped {
+		return false
+	}
+	return strings.Contains(task.Error, runtimeStopReasonMarker)
+}
 
 // stopReasons maps a task that is being stopped to why. A sync.Map like inFlightTasks,
 // and for the same reason: the writers are doors and the reader is a run.
