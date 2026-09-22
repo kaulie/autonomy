@@ -80,6 +80,27 @@ rsync 不碰 `.cache/`，所以每次部署不用重解；按 sha 去重、只�
 起来后 `curl -s 127.0.0.1:4300/health` 应看到 `"llm_backend":"cline"`，`backend/server.log`
 里会出现 `[cline-bridge] …`（还有 start.sh 的 `cline桥=…` 一行，写的是它实际用的路径）。
 
+### 启动前自检：桥不可用 = 这次部署失败（不是起个坏服务）
+
+`scripts/start.sh` 在拉起 `autonomyd` 之前会检查**所选后端**的桥（`AUTONOMY_REASONER=local`
+跳过；要临时放行设 `AUTONOMY_SKIP_BRIDGE_CHECK=1`）：
+
+- `cline`：桥脚本存在、依赖能被 Node 从脚本目录向上解析到（`node_modules/@cline/sdk`），并且**真加载一次**
+  （`printf '{"id":"…","cmd":"ping"}' | node bridge.mjs` 要回 `"type":"ready"`；不联网、不用凭据）；
+- `cursor`：`CURSOR_SDK_BRIDGE_URL` 有值，或 `CURSOR_SDK_BRIDGE_BIN` 指向可执行文件（包里的
+  `bin/cursor-sdk-bridge` 会被自动指上）。
+
+**不过就 `die`（非 0 退出）**，于是部署平台把这次部署判为失败、线上留在上一个可用版本——桥是 LLM
+后端唯一的执行通道，缺了它 `/health` 照样 `ok`，但每个任务都会失败在「ping the bridge」那一步；
+与其静默降级，不如让部署失败（`.cache` 里保留上一版的依赖，回滚不用重新解包）。
+
+对应的构建侧约束：`build.sh` 拿不到 cline 桥依赖时**直接报错**（不再只警告），三条来源依次是
+（1）checkout 的 `node_modules`、（2）构建机缓存 `${AUTONOMY_CACHE_DIR:-~/.cache/autonomy}/cline-bridge-deps/<package-lock.json 的 sha256>.tgz`、
+（3）`npm ci --omit=dev`（`AUTONOMY_NPM_BIN` 可指定 npm）。缓存命中时**构建不需要 npm、也不需要网**；
+确实要发一个不带桥的包时用 `AUTONOMY_ALLOW_MISSING_CLINE_BRIDGE=1`（例如部署的 `.env` 把
+`AUTONOMY_CLINE_BRIDGE_SCRIPT` 指到了外部 checkout）。
+
+
 ### Cline 的会话落盘在哪（重启怎么续）
 
 Cline SDK 把每个会话写进 **Cline 数据目录**，默认 `~/.cline/data/sessions/<sessionId>/`：
