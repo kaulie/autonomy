@@ -49,14 +49,47 @@ cp -R "${ROOT}/src/agent_policy/." "${OUT}/src/agent_policy/"
 # cursor bridge: the runtime spawns it (src/cursorsdk), so the release package
 # carries it — scripts/start.sh then points CURSOR_SDK_BRIDGE_BIN at
 # ${RUNTIME_DIR}/bin/cursor-sdk-bridge. Without it a deployed runtime fails every
-# task at the decision that pings the bridge (the Cline bridge is not packaged:
-# it needs `@cline/sdk` installed, see scripts/install-cline-bridge.sh).
+# task at the decision that pings the bridge.
 BRIDGE="${ROOT}/third_party/bin/cursor-sdk-bridge"
 if [ -x "${BRIDGE}" ]; then
   cp "${BRIDGE}" "${OUT}/bin/cursor-sdk-bridge"
 else
   echo "[build][警告] 没有 ${BRIDGE}（先跑 scripts/fetch-bridge.sh）；发版包不自带 cursor bridge，" >&2
   echo "[build][警告] 部署上的 llm 任务会失败在 cursor bridge ping 处。" >&2
+fi
+
+# cline bridge: same idea, but it is a Node script with a dependency tree
+# (@cline/sdk), so the package carries the sources plus a tarball of a production
+# install — scripts/start.sh extracts it next to them and points
+# AUTONOMY_CLINE_BRIDGE_SCRIPT there, which is what makes a deployed runtime's
+# cline backend come from *this release* instead of some checkout on the machine
+# (node_modules is 251MB unpacked / ~27MB packed; a deploy re-extracts only when
+# the tarball changes).
+CLINE_BRIDGE="${ROOT}/src/clinesdk/bridge"
+if [ -f "${CLINE_BRIDGE}/bridge.mjs" ]; then
+  mkdir -p "${OUT}/src/clinesdk/bridge"
+  # 只带运行时那四个模块（tests/smoke 是开发用的，不进部署包）。
+  for m in bridge.mjs config.mjs resume.mjs trace.mjs; do
+    [ -f "${CLINE_BRIDGE}/${m}" ] && cp "${CLINE_BRIDGE}/${m}" "${OUT}/src/clinesdk/bridge/"
+  done
+  cp "${CLINE_BRIDGE}/package.json" "${OUT}/src/clinesdk/bridge/"
+  [ -f "${CLINE_BRIDGE}/package-lock.json" ] && cp "${CLINE_BRIDGE}/package-lock.json" "${OUT}/src/clinesdk/bridge/"
+  # A production install of the bridge's dependencies. Installed here (build time,
+  # where npm and the network are) and shipped packed, so a deploy needs neither.
+  if [ ! -d "${CLINE_BRIDGE}/node_modules" ]; then
+    echo "[build] 安装 cline bridge 依赖（npm ci --omit=dev，首次或 node_modules 被清了）"
+    (cd "${CLINE_BRIDGE}" && npm ci --omit=dev --no-audit --no-fund) || {
+      echo "[build][警告] cline bridge 依赖安装失败；发版包不带 cline bridge，部署上的 cline 后端需要" >&2
+      echo "[build][警告] 自己指向一个装好 @cline/sdk 的桥（AUTONOMY_CLINE_BRIDGE_SCRIPT）。" >&2
+    }
+  fi
+  if [ -d "${CLINE_BRIDGE}/node_modules" ]; then
+    tar czf "${OUT}/src/clinesdk/bridge/bridge-deps.tgz" -C "${CLINE_BRIDGE}" node_modules
+    echo "[build] cline bridge 随包发出：$(du -h "${OUT}/src/clinesdk/bridge/bridge-deps.tgz" | cut -f1) 依赖包 + $(ls "${OUT}/src/clinesdk/bridge"/*.mjs | wc -l | tr -d ' ') 个脚本"
+  else
+    echo "[build][警告] 没有 ${CLINE_BRIDGE}/node_modules：发版包不带 cline bridge 依赖，" >&2
+    echo "[build][警告] 部署上的 cline 后端要自己指一个装好 @cline/sdk 的桥。" >&2
+  fi
 fi
 
 chmod +x "${OUT}/bin/"* "${OUT}/scripts/"*.sh

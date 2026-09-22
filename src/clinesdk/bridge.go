@@ -93,7 +93,7 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 	}
 	if len(m.Command) == 0 {
 		if _, err := os.Stat(abs); err != nil {
-			return nil, bridgeErr("bridge script not found at %s (set AUTONOMY_CLINE_BRIDGE_SCRIPT; install deps with scripts/install-cline-bridge.sh)", abs)
+			return nil, bridgeErr("bridge script not found at %s (set AUTONOMY_CLINE_BRIDGE_SCRIPT; the release package ships the bridge with its dependencies, a dev checkout needs scripts/install-cline-bridge.sh)", abs)
 		}
 	}
 	dir := m.Dir

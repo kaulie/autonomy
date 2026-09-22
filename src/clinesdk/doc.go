@@ -26,7 +26,9 @@
 //
 //	AUTONOMY_CLINE_NODE_BIN      node executable (default "node")
 //	AUTONOMY_CLINE_BRIDGE_SCRIPT path to bridge.mjs (default: the script shipped
-//	                             under src/clinesdk/bridge/, or $PROJECT_ROOT/...)
+//	                             under src/clinesdk/bridge/ — the release package
+//	                             carries it with its dependencies, and
+//	                             scripts/start.sh points this at it)
 //	AUTONOMY_CLINE_PROVIDER      Cline provider id, e.g. "deepseek", "anthropic"
 //	AUTONOMY_CLINE_MODEL         model id, e.g. "deepseek-v4-pro"
 //	AUTONOMY_CLINE_API_KEY       provider API key (optional: the bridge also sees
