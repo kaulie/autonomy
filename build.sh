@@ -77,21 +77,54 @@ if [ -f "${CLINE_BRIDGE}/bridge.mjs" ]; then
   done
   cp "${CLINE_BRIDGE}/package.json" "${OUT}/src/clinesdk/bridge/"
   [ -f "${CLINE_BRIDGE}/package-lock.json" ] && cp "${CLINE_BRIDGE}/package-lock.json" "${OUT}/src/clinesdk/bridge/"
-  # A production install of the bridge's dependencies. Installed here (build time,
-  # where npm and the network are) and shipped packed, so a deploy needs neither.
-  if [ ! -d "${CLINE_BRIDGE}/node_modules" ]; then
-    echo "[build] 安装 cline bridge 依赖（npm ci --omit=dev，首次或 node_modules 被清了）"
-    (cd "${CLINE_BRIDGE}" && npm ci --omit=dev --no-audit --no-fund) || {
-      echo "[build][警告] cline bridge 依赖安装失败；发版包不带 cline bridge，部署上的 cline 后端需要" >&2
-      echo "[build][警告] 自己指向一个装好 @cline/sdk 的桥（AUTONOMY_CLINE_BRIDGE_SCRIPT）。" >&2
-    }
+  # A production install of the bridge's dependencies, shipped packed. Three sources,
+  # in order, so a build never silently produces a package without the bridge:
+  #   1. the checkout's own node_modules (a dev machine that ran install-cline-bridge.sh),
+  #   2. this machine's build cache, keyed by the lockfile's sha256 — a cache hit means
+  #      builds keep working with neither npm nor the network (and it is fed by every
+  #      build that had the tree), 
+  #   3. `npm ci --omit=dev` (needs npm + the network; AUTONOMY_NPM_BIN overrides npm).
+  # Failing all three is a build error, not a warning: a package without the bridge
+  # fails scripts/start.sh's pre-start self-check at deploy time anyway — better to say
+  # so here. AUTONOMY_ALLOW_MISSING_CLINE_BRIDGE=1 accepts the gap (e.g. a deployment
+  # whose .env points AUTONOMY_CLINE_BRIDGE_SCRIPT at an external checkout).
+  DEPS_TGZ_OUT="${OUT}/src/clinesdk/bridge/bridge-deps.tgz"
+  DEPS_CACHE="${AUTONOMY_CACHE_DIR:-${HOME}/.cache/autonomy}/cline-bridge-deps"
+  lock_sha=""
+  if [ -f "${CLINE_BRIDGE}/package-lock.json" ]; then
+    if command -v shasum >/dev/null 2>&1; then
+      lock_sha="$(shasum -a 256 "${CLINE_BRIDGE}/package-lock.json" | cut -d' ' -f1)"
+    else
+      lock_sha="$(sha256sum "${CLINE_BRIDGE}/package-lock.json" | cut -d' ' -f1)"
+    fi
   fi
-  if [ -d "${CLINE_BRIDGE}/node_modules" ]; then
-    tar czf "${OUT}/src/clinesdk/bridge/bridge-deps.tgz" -C "${CLINE_BRIDGE}" node_modules
-    echo "[build] cline bridge 随包发出：$(du -h "${OUT}/src/clinesdk/bridge/bridge-deps.tgz" | cut -f1) 依赖包 + $(ls "${OUT}/src/clinesdk/bridge"/*.mjs | wc -l | tr -d ' ') 个脚本"
+  cached_tgz="${DEPS_CACHE}/${lock_sha:-nolock}.tgz"
+  if [ -d "${CLINE_BRIDGE}/node_modules" ] &&
+    tar czf "${DEPS_TGZ_OUT}" -C "${CLINE_BRIDGE}" node_modules; then
+    mkdir -p "${DEPS_CACHE}"
+    cp -f "${DEPS_TGZ_OUT}" "${cached_tgz}" 2>/dev/null || true
+  elif [ -f "${cached_tgz}" ] && cp -f "${cached_tgz}" "${DEPS_TGZ_OUT}"; then
+    echo "[build] 复用构建机缓存的 cline bridge 依赖：${cached_tgz}"
   else
-    echo "[build][警告] 没有 ${CLINE_BRIDGE}/node_modules：发版包不带 cline bridge 依赖，" >&2
-    echo "[build][警告] 部署上的 cline 后端要自己指一个装好 @cline/sdk 的桥。" >&2
+    NPM_BIN="${AUTONOMY_NPM_BIN:-npm}"
+    echo "[build] 安装 cline bridge 依赖（${NPM_BIN} ci --omit=dev；装好后进构建机缓存）"
+    if (cd "${CLINE_BRIDGE}" && "${NPM_BIN}" ci --omit=dev --no-audit --no-fund) &&
+      tar czf "${DEPS_TGZ_OUT}" -C "${CLINE_BRIDGE}" node_modules; then
+      mkdir -p "${DEPS_CACHE}"
+      cp -f "${DEPS_TGZ_OUT}" "${cached_tgz}" 2>/dev/null || true
+    fi
+  fi
+  if [ -f "${DEPS_TGZ_OUT}" ]; then
+    echo "[build] cline bridge 随包发出：$(du -h "${DEPS_TGZ_OUT}" | cut -f1) 依赖包 + $(ls "${OUT}/src/clinesdk/bridge"/*.mjs | wc -l | tr -d ' ') 个脚本"
+  elif [ "${AUTONOMY_ALLOW_MISSING_CLINE_BRIDGE:-0}" = "1" ]; then
+    echo "[build][警告] 发版包不带 cline bridge 依赖（AUTONOMY_ALLOW_MISSING_CLINE_BRIDGE=1 显式接受）；" >&2
+    echo "[build][警告] 部署上的 cline 后端要自己指一个装好 @cline/sdk 的桥（AUTONOMY_CLINE_BRIDGE_SCRIPT）。" >&2
+  else
+    echo "[build][错误] 拿不到 cline bridge 依赖（${CLINE_BRIDGE}/node_modules、${cached_tgz}、${NPM_BIN} ci 都不成）：" >&2
+    echo "[build][错误] 发版包会缺桥，部署时 scripts/start.sh 的自检会判这次部署失败。" >&2
+    echo "[build][错误] 解决：在构建机上跑一次 scripts/install-cline-bridge.sh（或用 AUTONOMY_NPM_BIN 指定 npm 路径）；" >&2
+    echo "[build][错误] 或者显式接受缺桥：AUTONOMY_ALLOW_MISSING_CLINE_BRIDGE=1。" >&2
+    exit 1
   fi
 fi
 

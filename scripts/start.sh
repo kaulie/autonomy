@@ -187,6 +187,57 @@ if [ -f "${CLINE_BRIDGE_DIR}/bridge.mjs" ]; then
   fi
 fi
 
+# —— 启动前自检：所选后端的桥必须真的能用 ——
+# 这一层是刻意「宁可这次部署失败，也不要起一个跑不了任务的服务」：桥是 llm 后端唯一的
+# 执行通道，缺了它 /health 照样 ok，但每一个任务都会失败在「ping the bridge」那一步 ——
+# 静默降级最难查。自检不过 = 本脚本非 0 退出 = 平台把本次部署判为失败，线上留在上一个
+# 可用版本（.cache 里还留着上一版的依赖，回滚不用重新解包）。
+#   * reasoner=local（离线推理）不经过任何 LLM 后端，跳过；
+#   * 需要临时放行（比如排查问题）时设 AUTONOMY_SKIP_BRIDGE_CHECK=1。
+if [ "${AUTONOMY_SKIP_BRIDGE_CHECK:-0}" = "1" ]; then
+  log "跳过桥自检（AUTONOMY_SKIP_BRIDGE_CHECK=1）"
+elif [ "${AUTONOMY_REASONER:-llm}" = "local" ]; then
+  log "跳过桥自检（AUTONOMY_REASONER=local：不经过 LLM 后端）"
+elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "cline" ]; then
+  cline_script="${AUTONOMY_CLINE_BRIDGE_SCRIPT:-}"
+  [ -n "${cline_script}" ] ||
+    die "cline 后端，但没有桥脚本：包里缺 src/clinesdk/bridge/bridge.mjs，且 .env 没设 AUTONOMY_CLINE_BRIDGE_SCRIPT"
+  [ -f "${cline_script}" ] || die "cline 桥脚本不存在：${cline_script}"
+  # 依赖必须能被 Node 从脚本目录往上解析到（bridge-deps.tgz 解出的缓存 + symlink）。
+  cline_deps=""
+  probe="$(cd "$(dirname "${cline_script}")" && pwd)"
+  for _ in 1 2 3 4; do
+    if [ -d "${probe}/node_modules/@cline/sdk" ]; then
+      cline_deps="${probe}/node_modules"
+      break
+    fi
+    up="$(dirname "${probe}")"
+    [ "${up}" = "${probe}" ] && break
+    probe="${up}"
+  done
+  [ -n "${cline_deps}" ] ||
+    die "cline 桥的依赖解析不到：${cline_script} 及其上级都没有 node_modules/@cline/sdk（包缺 bridge-deps.tgz，或解包/链接失败）"
+  # 真加载一次（不联网、不用凭据）：桥 load 不起来，这次部署就不该上。
+  cline_node="${AUTONOMY_CLINE_NODE_BIN:-node}"
+  cline_reply="$(printf '{"id":"start-self-check","cmd":"ping"}\n' | "${cline_node}" "${cline_script}" 2>&1 | head -1 || true)"
+  case "${cline_reply}" in
+  *'"type":"ready"'*)
+    log "cline 桥自检通过：${cline_node} ${cline_script} → ready（依赖 ${cline_deps}）"
+    ;;
+  *)
+    die "cline 桥自检失败：${cline_node} ${cline_script} 没有回应 ready（输出：$(printf '%s' "${cline_reply}" | head -c 200)）"
+    ;;
+  esac
+else
+  if [ -n "${CURSOR_SDK_BRIDGE_URL:-}" ]; then
+    log "cursor 桥自检通过：使用外部桥 URL ${CURSOR_SDK_BRIDGE_URL}"
+  elif [ -n "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ -x "${CURSOR_SDK_BRIDGE_BIN}" ]; then
+    log "cursor 桥自检通过：${CURSOR_SDK_BRIDGE_BIN}"
+  else
+    die "cursor 后端，但没有可执行的 cursor bridge：包里缺 bin/cursor-sdk-bridge（构建机上先跑 scripts/fetch-bridge.sh），且 .env 没设 CURSOR_SDK_BRIDGE_BIN / CURSOR_SDK_BRIDGE_URL"
+  fi
+fi
+
 if [ -f "${PID_FILE}" ]; then
   old="$(tr -d '[:space:]' < "${PID_FILE}" || true)"
   if [ -n "${old}" ] && kill -0 "${old}" 2>/dev/null; then
