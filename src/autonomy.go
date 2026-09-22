@@ -201,7 +201,7 @@ type cycleDone struct {
 // Nothing here opens the agent's provider session, so nothing here can wait on a
 // bridge: that is the turn's job (LLMSession.Say), which is what keeps both doors —
 // and a broadcast, which is one accept per agent — answering promptly.
-func (r *Autonomy) instruction(task *Task, content string) (*Agent, AgentMessage, error) {
+func (r *Autonomy) instruction(task *Task, content string, kind AgentMessageKind) (*Agent, AgentMessage, error) {
 	if task == nil {
 		return nil, AgentMessage{}, fmt.Errorf("nil task")
 	}
@@ -234,11 +234,14 @@ func (r *Autonomy) instruction(task *Task, content string) (*Agent, AgentMessage
 		return nil, AgentMessage{}, err
 	}
 	persistTask(task)
+	if kind == "" {
+		kind = MessageKindInstruction
+	}
 	return agent, AgentMessage{
 		TaskID:   task.ID,
 		Sender:   MessageSenderUser,
 		SenderID: string(MessageSenderUser),
-		Kind:     MessageKindInstruction,
+		Kind:     kind,
 		Content:  text,
 	}, nil
 }
@@ -258,6 +261,8 @@ func (r *Autonomy) processMessage(ctx context.Context, cancel context.CancelFunc
 			return TurnResult{}, fmt.Errorf("delegated message for an agent with no session")
 		}
 		return agent.Session.Say(ctx, msg.Content, RoundAuto)
+	case MessageKindChat:
+		return r.processChat(ctx, cancel, agent, msg)
 	default:
 		return r.processInstruction(ctx, cancel, agent, msg)
 	}

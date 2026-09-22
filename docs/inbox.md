@@ -10,7 +10,7 @@
 
 | sender | 谁 | 今天从哪来 | kind |
 |---|---|---|---|
-| `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` / `POST /api/broadcast` 的广播（一句话投给多个 agent，每个目标各收到一条） | `instruction` |
+| `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` / `POST /api/broadcast` 的广播（一句话投给多个 agent，每个目标各收到一条） | `instruction`（`mode=command` 或省略）或 `chat`（`mode=chat`） |
 | `agent` | 别的 agent | capability 交给 worker 的那句 prompt（`LLMSession.Prompt`），`sender_id` 记委托方 agent | `delegation` |
 | `system` | runtime 自己 | `POST /api/tasks/{id}/stop` 的停止通知（`sender_id=runtime`） | `stop` |
 
@@ -40,6 +40,8 @@
 - **`instruction` = 一次决策运行**：runtime 把消息内容作为**这一轮回答的输入**（prompt 里
   `runtime_context.additional_input.text`，见 [execution-loop.md](execution-loop.md)），循环、计划、验证照旧。
   所以同一条 Task 的第二条指令不会被丢掉，也不顶掉任务原来的描述：任务是什么写在行里，**现在被要求什么**写在消息里。
+- **`chat` = 只和 planner 说话**：同一条入口、同一只 agent、同样排队，但这一轮**不写新 plan、不执行步骤、不改任务状态**。
+  已产生的 plan 原样保留；模型就算答了 `type:plan` 也会被丢掉（`src/chat_mode.go`）。用户原文记在消息的 `content` 里。
 - **`delegation` = worker 的一次 turn**：capability 的 `Prompt` 把 prompt 发进 worker 的 inbox，由 worker 自己的消费者跑这一轮，
   结果等回来交给 capability —— 对话仍记在同一个 session 上，顺序由队列保证（见 [session.md](session.md)、[delegation.md](delegation.md)）。
 - **`stop` 不是一次 turn**：停止是靠**取消正在处理的那条消息**做到的，这条消息是它的记录，排在它停下的那条指令之后。

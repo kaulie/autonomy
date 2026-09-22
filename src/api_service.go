@@ -20,6 +20,10 @@ type AcceptTaskRequest struct {
 	Domain      string            `json:"domain,omitempty"`
 	GoalType    string            `json:"goal_type,omitempty"`
 	ContextRef  map[string]string `json:"context_ref,omitempty"`
+	// Mode is how a follow-up message is handled: "command" (default) is a
+	// normal instruction that may replan; "chat" talks to the planner and
+	// must not change an already written plan.
+	Mode string `json:"mode,omitempty"`
 }
 
 // AcceptTaskResponse is returned as soon as the instruction is accepted: its task
@@ -359,7 +363,9 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	var storedTask *Task
 	if stored, err := writerReads(r.taskStore()).GetTask(taskID); err == nil && stored != nil {
+		storedTask = stored
 		task.CreatedAt = stored.CreatedAt
 		task.AgentID = stored.AgentID
 		if desc == "" {
@@ -375,7 +381,23 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 			task.ContextRef = stored.ContextRef
 		}
 	}
-	agent, msg, err := r.instruction(task, desc)
+	kind, err := parseUserMessageKind(req.Mode)
+	if err != nil {
+		return nil, nil, AgentMessage{}, err
+	}
+	// Chat is a conversation with the planner: the task row (description,
+	// status, the plan it already has) is not the thing being asked about.
+	if kind == MessageKindChat && storedTask != nil {
+		task.Description = storedTask.Description
+		task.Status = storedTask.Status
+		task.Error = storedTask.Error
+		task.Domain = storedTask.Domain
+		task.GoalType = storedTask.GoalType
+		if len(storedTask.ContextRef) > 0 {
+			task.ContextRef = storedTask.ContextRef
+		}
+	}
+	agent, msg, err := r.instruction(task, desc, kind)
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
 	}

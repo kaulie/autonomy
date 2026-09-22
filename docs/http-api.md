@@ -86,9 +86,18 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
   "domain": "software_development",
   "goal_type": "dev_feature",
   "task_id": "optional-client-id",
-  "context_ref": { "project": "project-2" }
+  "context_ref": { "project": "project-2" },
+  "mode": "command"
 }
 ```
+
+`mode` 只对**后续**消息有意义（带已有 `task_id`）：
+
+| 值 | 默认 | inbox kind | 对已有 plan 的影响 |
+|---|---|---|---|
+| `command`（省略也是它） | 是 | `instruction` | 跟今天一样：planner 可以重规划并执行 |
+| `chat` | 否 | `chat` | **只和 planner 对话**：不写新 plan、不执行步骤、不改任务状态；已有 plan 原样保留 |
+| 其他 | — | — | `400 {"error":"mode must be \"chat\" or \"command\""}` |
 
 响应 `202`:
 
