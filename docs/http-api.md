@@ -165,8 +165,10 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 ### `POST /api/tasks/{task_id}/stop`
 
 停掉这个 agent 正在处理的那条消息（planner 循环在当前 decide 或当前 cycle 的事件等待处退出），状态记为 `stopped`；
-停止本身也记成一条来自 `system` 的消息，排在它停下的那条之后。队列里还没处理的消息不会被丢掉 —— 那是 agent 接下来要做的
-（见 [inbox.md](inbox.md)）。
+停止本身也记成一条来自 `system` 的消息，排在它停下的那条之后，内容写明**是谁停的**：用户停的是 `the user stopped the task`，
+运行时为重启/退出收尾的那条会写 `the runtime stopped the task for a restart (requestId=…, deployment=…, version=…)`
+（`tasks.error` 同样带上这个原因，见 [graceful-restart.md](graceful-restart.md)）。队列里还没处理的消息不会被丢掉 ——
+那是 agent 接下来要做的（见 [inbox.md](inbox.md)）。
 
 - `200`：`{"task_id","status":"stopped"}`
 - `404`：没有这条 task

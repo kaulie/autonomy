@@ -63,6 +63,7 @@ func (r *Autonomy) processChat(ctx context.Context, cancel context.CancelFunc, a
 	if cancel != nil {
 		inFlightTasks.Store(task.ID, cancel)
 		defer inFlightTasks.Delete(task.ID)
+		defer clearStopReason(task.ID)
 	}
 	agent.Start()
 	persistAgent(agent)

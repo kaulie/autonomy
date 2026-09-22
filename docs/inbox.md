@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` / `POST /api/broadcast` 的广播（一句话投给多个 agent，每个目标各收到一条） | `instruction`（`mode=command` 或省略）或 `chat`（`mode=chat`） |
 | `agent` | 别的 agent | capability 交给 worker 的那句 prompt（`LLMSession.Prompt`），`sender_id` 记委托方 agent | `delegation` |
-| `system` | runtime 自己 | `POST /api/tasks/{id}/stop` 的停止通知（`sender_id=runtime`） | `stop` |
+| `system` | runtime 自己 | 停止通知（`sender_id=runtime`）：用户走 `POST /api/tasks/{id}/stop`，运行时走重启/退出时的在途 run 收尾（`src/stop_reason.go`，消息里写明是用户停的、还是运行时为重启停的并带 `requestId`） | `stop` |
 
 广播不是第四种消息：它是**同一个 `user` 指令**同时说给多个 agent（见 [broadcast.md](broadcast.md)）——
 每个目标收到的就是它自己那条 task 的指令，队列里看不出任何差别。

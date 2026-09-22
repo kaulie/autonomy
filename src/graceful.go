@@ -233,6 +233,7 @@ func (d *RestartDrain) stop() {
 
 // paused reports whether new runs are held back right now. It is what the inbox asks
 // before it starts an agent (src/inbox.go).
+// paused reports whether a drain is active.
 func (d *RestartDrain) paused() bool {
 	if d == nil {
 		return false
@@ -240,6 +241,17 @@ func (d *RestartDrain) paused() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.active
+}
+
+// current is the notice the drain is holding: what was announced (the platform's restart,
+// or our own shutdown). Blank when nothing was announced.
+func (d *RestartDrain) current() RestartNotice {
+	if d == nil {
+		return RestartNotice{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.notice
 }
 
 // fill writes the drain's own part of one status answer: whether we are draining, what
@@ -417,22 +429,53 @@ func (r *Autonomy) Shutdown(ctx context.Context) {
 	if r == nil {
 		return
 	}
-	r.restartDrain().begin(RestartNotice{RequestID: "shutdown", Message: "autonomy is shutting down"}, false)
+	// The platform's notice (POST /api/ops/restart-notify) names the deploy that is
+	// restarting us. Keep it: it is what makes the stops below attributable — "the
+	// runtime stopped this run for pipeline-…", not "someone stopped it".
+	announced := r.restartDrain().current()
+	r.restartDrain().begin(RestartNotice{
+		ServiceID:  announced.ServiceID,
+		RequestID:  firstNonEmpty(announced.RequestID, "shutdown"),
+		Deployment: announced.Deployment,
+		Version:    announced.Version,
+		Message:    "autonomy is shutting down",
+	}, false)
 	if waitForIdleRuns(ctx) {
 		fmt.Fprintf(os.Stderr, "[autonomy] graceful: 进程退出，没有在途 run\n")
 		return
 	}
+	// What is still running is stopped the way the user's door stops it — with one
+	// difference: the reason says the runtime did it, for the restart it is serving
+	// (src/stop_reason.go), so the message and the task row tell the truth.
+	reason := StopReason{
+		By:         stoppedByRuntime,
+		RequestID:  strings.TrimSpace(announced.RequestID),
+		Deployment: strings.TrimSpace(announced.Deployment),
+		Version:    strings.TrimSpace(announced.Version),
+	}
 	stopped := 0
 	for _, taskID := range runningTaskIDs() {
-		if _, err := r.StopTask(taskID); err == nil {
+		if _, err := r.stopTask(taskID, reason); err == nil {
 			stopped++
 		}
 	}
 	if stopped == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[autonomy] graceful: 进程退出，停掉 %d 个在途 run\n", stopped)
+	fmt.Fprintf(os.Stderr, "[autonomy] graceful: 进程退出，停掉 %d 个在途 run（重启 requestId=%s）\n",
+		stopped, noticeField(reason.RequestID))
 	waitForIdleRuns(ctx)
+}
+
+// firstNonEmpty returns the first value that is not blank (and the last one, blank, when
+// every value is).
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // waitForIdleRuns waits until nothing is in flight, or ctx is done (true when nothing

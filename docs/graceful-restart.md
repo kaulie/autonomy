@@ -52,7 +52,9 @@ autonomy 这一侧就是这两个端点（[http-api.md](http-api.md)）：
 1. 不再启动新 run；
 2. 在途 run 给 `AUTONOMY_SHUTDOWN_GRACE`（默认 10s，必须落在 stop.sh 的 15s 窗口里）自己回来；
 3. 还不回来的，用 `POST /api/tasks/{id}/stop` 的那条路停掉（任务的结局是 `stopped`，而不是一个
-   谁也不会再 finish 的 `running`），再给一点时间落库；
+   谁也不会再 finish 的 `running`）——**并在记录里写明是谁停的**：这条 stop 消息与 `tasks.error`
+   都带上是运行时为重启而停、以及平台给的 `requestId`（还有 `deployment` / `version`），所以「重启切断」
+   不会在库里、面板上冒充「用户停的」（`src/stop_reason.go`；用户自己停的记录不变），再给一点时间落库；
 4. `Server.Shutdown` 不再接新连接、等在途 HTTP 请求答完；
 5. `Autonomy.Close` 拆掉常驻会话、两个 bridge，关掉 Store —— 与正常退出走的是同一个口。
 
