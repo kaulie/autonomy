@@ -3,6 +3,7 @@ package autonomy
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,8 +68,13 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 	if agent.Backend != AgentBackendCline || agent.LLMProvider != LLMProviderCline {
 		t.Fatalf("backend=%q provider=%q", agent.Backend, agent.LLMProvider)
 	}
-	if agent.LLMAgentID == "" || agent.clineAgent == nil {
+	if agent.clineAgent == nil {
 		t.Fatal("no cline session handle was bound")
+	}
+	// The session id itself is only known once a run started: until then the row keeps
+	// nothing to continue from (see TestClineSessionIDIsKeptForTheNextProcess).
+	if agent.LLMAgentID != "" {
+		t.Fatalf("LLMAgentID=%q, want empty before the first run", agent.LLMAgentID)
 	}
 	// Attaching twice is a no-op (same handle).
 	handle := agent.clineAgent.ID
@@ -146,7 +152,9 @@ func TestPromptLLMStreamSwitchesSessionMode(t *testing.T) {
 	if agent.clineAgent.ID == yoloHandle {
 		t.Fatal("a mode switch must move to a fresh session")
 	}
-	if agent.LLMAgentID != agent.clineAgent.ID {
+	// The id the row keeps is the *plan* session's: that is the task's own conversation,
+	// and the one a later process continues (src/clinesdk/bridge/resume.mjs).
+	if agent.LLMAgentID != agent.clineAgent.SessionID {
 		t.Fatalf("agent id not updated: %q vs %q", agent.LLMAgentID, agent.clineAgent.ID)
 	}
 }
@@ -258,5 +266,101 @@ func TestClineModeForReasonMode(t *testing.T) {
 	}
 	if got := clineModeFor(ReasonModeAgent); got != clinesdk.DefaultMode {
 		t.Fatalf("agent → %q", got)
+	}
+}
+
+// A session lives inside the bridge process, so a bridge restart takes the conversation
+// with it. What the row keeps is the session id: the next process reads that session's
+// stored transcript and seeds its own session with it, so the task's conversation
+// continues instead of starting over (src/clinesdk/bridge/resume.mjs).
+func TestClineSessionIDIsKeptForTheNextProcess(t *testing.T) {
+	installFakeClineClient(t)
+	store, err := openStore(filepath.Join(t.TempDir(), "cline-session.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	t.Cleanup(func() { _store = prev })
+	_store = store
+
+	agent := &Agent{ID: 9002, Name: "agent-9002", Lifecycle: AgentLifecyclePersistent, Workspace: t.TempDir()}
+	if err := store.UpsertAgent(agent); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// The planner's session is the one whose id the row keeps.
+	if err := agent.attachClineMode(ctx, clineModeFor(ReasonModePlan)); err != nil {
+		t.Fatalf("attach plan: %v", err)
+	}
+	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModePlan, nil); err != nil {
+		t.Fatalf("plan prompt: %v", err)
+	}
+	sessionID := agent.clineAgent.SessionID
+	if sessionID == "" {
+		t.Fatal("the run reported no session id")
+	}
+	if agent.LLMAgentID != sessionID {
+		t.Fatalf("LLMAgentID=%q, want the plan session %q", agent.LLMAgentID, sessionID)
+	}
+	// The row is what the next process reads, so it has to be written.
+	stored, err := store.GetAgent(agent.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("GetAgent=%+v err=%v", stored, err)
+	}
+	if stored.LLMAgentID != sessionID {
+		t.Fatalf("stored LLMAgentID=%q, want %q", stored.LLMAgentID, sessionID)
+	}
+
+	// A worker turn (another mode) runs on its own session and must not replace it.
+	if _, _, err := agent.PromptLLMStream(ctx, "say pong", ReasonModeAgent, nil); err != nil {
+		t.Fatalf("agent prompt: %v", err)
+	}
+	if agent.LLMAgentID != sessionID {
+		t.Fatalf("LLMAgentID=%q after a worker turn, want the plan session %q", agent.LLMAgentID, sessionID)
+	}
+}
+
+// Continuing a conversation is asked for on attach: the planner's new session is handed
+// the recorded session id to continue from. A worker's session is not — it belongs to one
+// delegation and carries its own prompt — and neither is a value that is not a session id
+// at all (an older row holds the bridge's own handle, which dies with its bridge).
+func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
+	installFakeClineClient(t)
+	ctx := context.Background()
+
+	agent := &Agent{
+		ID: 9003, Name: "agent-9003", Lifecycle: AgentLifecyclePersistent,
+		Workspace: t.TempDir(), LLMAgentID: "cls-recorded-session",
+	}
+	if err := agent.attachClineSession(ctx, clineModeFor(ReasonModePlan), agent.Workspace); err != nil {
+		t.Fatalf("attach plan: %v", err)
+	}
+	if agent.clineAgent.ResumeSessionID != "cls-recorded-session" {
+		t.Fatalf("resume=%q, want the recorded session", agent.clineAgent.ResumeSessionID)
+	}
+
+	// A worker's session starts from nothing.
+	worker := &Agent{
+		ID: 9004, Name: "agent-9004", Lifecycle: AgentLifecycleEphemeral,
+		Workspace: t.TempDir(), LLMAgentID: "cls-recorded-session",
+	}
+	if err := worker.attachClineSession(ctx, clineModeFor(ReasonModeAgent), worker.Workspace); err != nil {
+		t.Fatalf("attach agent mode: %v", err)
+	}
+	if worker.clineAgent.ResumeSessionID != "" {
+		t.Fatalf("worker resume=%q, want none", worker.clineAgent.ResumeSessionID)
+	}
+
+	// A bridge handle from an older row is not a session to continue.
+	legacy := &Agent{
+		ID: 9005, Name: "agent-9005", Lifecycle: AgentLifecyclePersistent,
+		Workspace: t.TempDir(), LLMAgentID: "cls_7788aabb",
+	}
+	if err := legacy.attachClineSession(ctx, clineModeFor(ReasonModePlan), legacy.Workspace); err != nil {
+		t.Fatalf("attach legacy: %v", err)
+	}
+	if legacy.clineAgent.ResumeSessionID != "" {
+		t.Fatalf("legacy resume=%q, want none", legacy.clineAgent.ResumeSessionID)
 	}
 }

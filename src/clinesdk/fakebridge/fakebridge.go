@@ -155,9 +155,17 @@ func Main() {
 			agentID := fmt.Sprintf("cls_%d", len(modeForAgent)+1)
 			mode := fmt.Sprint(req.Params["mode"])
 			modeForAgent[agentID] = mode
+			// resumeSessionId is echoed back the way the real bridge answers it: the
+			// session this one was asked to continue, which is what the client records
+			// (src/clinesdk/bridge/bridge.mjs).
+			resume := strings.TrimSpace(fmt.Sprint(req.Params["resumeSessionId"]))
+			if resume == "<nil>" {
+				resume = ""
+			}
 			result(req.ID, map[string]any{
 				"agentId": agentID, "mode": mode, "providerId": req.Params["providerId"],
 				"modelId": req.Params["modelId"], "cwd": req.Params["cwd"],
+				"resumeSessionId": resume,
 			})
 		case "send":
 			agentID := fmt.Sprint(req.Params["agentId"])

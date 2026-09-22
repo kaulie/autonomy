@@ -21,10 +21,18 @@
  *
  *   runtime -> bridge
  *     {"id":"1","cmd":"ping"}
- *     {"id":"2","cmd":"createAgent","params":{"providerId":"...","modelId":"...","cwd":"..."}}
+ *     {"id":"2","cmd":"createAgent","params":{"providerId":"...","modelId":"...","cwd":"...",
+ *        "resumeSessionId":"cls-..."}}   // optional: continue that session's conversation
  *     {"id":"3","cmd":"send","params":{"agentId":"cls_...","prompt":"..."}}
  *
  * Commands: ping | models | createAgent | send | stop | close | usage | shutdown
+ *
+ * Continuing a session across bridge restarts (resumeSessionId): the first send reads
+ * that session's stored transcript and seeds the new session with it. The SDK does not
+ * reload a session from its id — `start({config:{sessionId}})` *starts* one, overwriting
+ * what that id had — so continuation is read-then-seed; see resume.mjs for the two
+ * measurements this rests on, and note the new session gets a new id (the caller records
+ * the id every run reports, not the one it asked to continue).
  *
  * Native events are forwarded verbatim (the bridge never interprets them) so the
  * Go layer stays the single place that maps provider payloads onto LLMEvent.
@@ -35,6 +43,7 @@ import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
 import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, errorReason, interactiveSession, messageOf, resolveClineDefaults, runResultErrorEvent, withErrorReason } from "./config.mjs";
+import { continuationSeed } from "./resume.mjs";
 import { eventLabel, signalLine, traceLevel, traceWidth } from "./trace.mjs";
 
 /** One ClineCore per bridge process; sessions multiplex on it. */
@@ -226,6 +235,10 @@ function summarize(agent, res, usageSource) {
 		agentId: agent.agentId,
 		sessionId: agent.sessionId,
 		mode: agent.mode,
+		// resumedFrom is the session this one continued, when this run was the first of a
+		// session seeded from an earlier one (resume.mjs): the run's own record of being a
+		// continuation rather than a fresh start.
+		...(agent.resumedFrom ? { resumedFrom: agent.resumedFrom } : {}),
 		status: statusOf(result),
 		text: coerceText(result.text || agent.text),
 		finishReason: coerceText(result.finishReason),
@@ -291,6 +304,11 @@ function createAgent(params) {
 		agentId,
 		mode: normalizeMode(params.mode),
 		sessionId: null,
+		// resumeSessionId is a session whose conversation this one continues (the
+		// caller's recorded handle from a previous bridge process): the first send
+		// reads its transcript and seeds the new session with it (see resume.mjs).
+		resumeSessionId: typeof params.resumeSessionId === "string" ? params.resumeSessionId.trim() : "",
+		resumedFrom: null,
 		started: false,
 		prompts: 0,
 		config: {
@@ -307,7 +325,7 @@ function createAgent(params) {
 		},
 	};
 	agents.set(agentId, handle);
-	return { agentId, mode: handle.mode, cwd, providerId, modelId };
+	return { agentId, mode: handle.mode, cwd, providerId, modelId, resumeSessionId: handle.resumeSessionId };
 }
 
 /**
@@ -332,6 +350,16 @@ async function send(params, requestId) {
 		if (!agent.started) {
 			const sessionId = agent.sessionId ?? newSessionId();
 			const config = { ...agent.config, mode, sessionId };
+			// A session the caller asked to continue is continued by *seeding* this new
+			// one with its transcript: the SDK does not load a stored session's history
+			// when it is handed its id, and handing back the same id overwrites that
+			// transcript (resume.mjs records the measurements). The old session is left
+			// alone — its manifest is the record of the process that ran it.
+			const seed = await continuationSeed(client, agent.resumeSessionId, log);
+			if (seed) {
+				agent.resumedFrom = seed.from;
+				log("info", `resume session=${seed.from} → ${sessionId} messages=${seed.messages.length}`);
+			}
 			// Register the owner *before* starting: the SDK streams the run's
 			// events while start() is still awaiting, and they can only be
 			// routed to this request if the session is already mapped.
@@ -349,7 +377,12 @@ async function send(params, requestId) {
 					log("warn", `no SDK events ${Date.now() - agent.runStartedAt}ms after start (session ${agent.sessionId}) — provider may be queueing/throttling`);
 				}
 			}, 30000);
-	res = await client.start({ prompt, interactive: INTERACTIVE, config });
+			res = await client.start({
+				prompt,
+				interactive: INTERACTIVE,
+				...(seed ? { initialMessages: seed.messages } : {}),
+				config,
+			});
 			agent.sessionId = res?.sessionId ?? sessionId;
 			agent.started = true;
 			sessionOwners.set(agent.sessionId, agent.agentId);

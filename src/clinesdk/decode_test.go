@@ -87,6 +87,28 @@ func TestDecodeResultToleratesNonStringTextAndNumbers(t *testing.T) {
 	}
 }
 
+func TestDecodeResultKeepsTheSessionItContinued(t *testing.T) {
+	// The bridge reports the session a run continued (its first run on a session seeded
+	// from an earlier one's transcript): the run's own record of being a continuation.
+	res, err := testRun().decodeResult(json.RawMessage(`{
+		"status":"finished","sessionId":"cls-new","resumedFrom":"cls-old","text":"pong"
+	}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if res.SessionID != "cls-new" || res.ResumedFrom != "cls-old" {
+		t.Fatalf("session=%q resumedFrom=%q, want cls-new from cls-old", res.SessionID, res.ResumedFrom)
+	}
+	// A run that started a session from nothing carries no resumedFrom at all.
+	plain, err := testRun().decodeResult(json.RawMessage(`{"status":"finished","sessionId":"cls-fresh"}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if plain.ResumedFrom != "" {
+		t.Fatalf("resumedFrom=%q, want empty", plain.ResumedFrom)
+	}
+}
+
 func TestDecodeResultUnknownStatusBecomesFinished(t *testing.T) {
 	res, err := testRun().decodeResult(json.RawMessage(`{}`))
 	if err != nil {

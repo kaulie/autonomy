@@ -62,14 +62,16 @@ func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error 
 		a.setClineSession(existing)
 		return nil
 	}
+	resume := a.clineResumeSession(mode)
 	agent, err := sharedClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
-		ProviderID:   resolveClineProvider(),
-		ModelID:      resolveClineModel(),
-		APIKey:       strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
-		BaseURL:      strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
-		CWD:          cwd,
-		SystemPrompt: defaultClineSystemPrompt(),
-		Mode:         mode,
+		ProviderID:      resolveClineProvider(),
+		ModelID:         resolveClineModel(),
+		APIKey:          strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
+		BaseURL:         strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
+		CWD:             cwd,
+		SystemPrompt:    defaultClineSystemPrompt(),
+		Mode:            mode,
+		ResumeSessionID: resume,
 	})
 	if err != nil {
 		return fmt.Errorf("create cline agent (mode %s): %w", mode, err)
@@ -79,22 +81,58 @@ func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error 
 	// A brand-new session starts with no instructions: the next decision cycle
 	// sends the AGENT_V2 frame again (see Agent.needsLLMFrame).
 	a.resetLLMFrame()
-	a.LLMAgentID = agent.ID
 	a.Backend = AgentBackendCline
 	a.LLMProvider = LLMProviderCline
 	a.Model = agent.ModelID
-	persistAgent(a)
-	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s mode=%s provider=%s model=%s cwd=%s\n",
-		agent.ID, mode, agent.ProviderID, agent.ModelID, agent.CWD)
+	a.recordClineSession()
+	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s mode=%s provider=%s model=%s cwd=%s resume=%s\n",
+		agent.ID, mode, agent.ProviderID, agent.ModelID, agent.CWD, firstNonEmptyString(resume, "-"))
 	return nil
 }
 
 func (a *Agent) setClineSession(agent *clinesdk.Agent) {
 	a.clineAgent = agent
-	a.LLMAgentID = agent.ID
 	a.Backend = AgentBackendCline
 	a.LLMProvider = LLMProviderCline
 	a.Model = agent.ModelID
+}
+
+// clineResumeSession is the session a new one of this mode should continue, as this
+// agent recorded it. Only the planner's session (Cline's plan mode) is continued: it is
+// where the task's own conversation lives, and a worker's session belongs to one
+// delegation — a fresh one costs that worker a prompt it already carries.
+//
+// The recorded value is a Cline session id (`cls-…`). An older row may hold the
+// bridge's own handle (`cls_…`, minted by createAgent): that handle dies with the
+// bridge process that made it, so it is not something to continue from. A value that is
+// not a session id is therefore ignored rather than handed to the bridge.
+func (a *Agent) clineResumeSession(mode string) string {
+	if a == nil || mode != clineModeFor(ReasonModePlan) {
+		return ""
+	}
+	recorded := strings.TrimSpace(a.LLMAgentID)
+	if !strings.HasPrefix(recorded, "cls-") {
+		return ""
+	}
+	return recorded
+}
+
+// recordClineSession keeps the session the task's own conversation is on, so the next
+// process can continue it (src/clinesdk/bridge/resume.mjs): a Cline session lives inside
+// the bridge process, so a bridge restart takes the conversation with it, and the id on
+// the agent row is what the next bridge reads the transcript back with.
+func (a *Agent) recordClineSession() {
+	if a == nil || a.clineAgent == nil || strings.TrimSpace(a.clineAgent.SessionID) == "" {
+		return
+	}
+	if a.clineAgent.Mode != clineModeFor(ReasonModePlan) {
+		return
+	}
+	if a.LLMAgentID == a.clineAgent.SessionID {
+		return
+	}
+	a.LLMAgentID = a.clineAgent.SessionID
+	persistAgent(a)
 }
 
 // clineModeFor maps an autonomy reasoning mode onto a Cline session mode. Plan
@@ -159,6 +197,10 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 		}, fmt.Errorf("cline send: %w", err)
 	}
 	result, err := run.WaitStream(ctx, sink)
+	// The session id exists from the first run on: keep it on the agent row, so the
+	// process that comes next continues this conversation instead of starting a new one
+	// (src/clinesdk/bridge/resume.mjs).
+	a.recordClineSession()
 	if err != nil {
 		meta := LLMRunResult{Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
 		if result != nil {

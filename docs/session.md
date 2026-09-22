@@ -53,7 +53,25 @@ capability 看到的只是 `broker.AgentSession` 那个窄视图（`ID` / `Works
 2. **差异来自身份，不是开关**：plan / agent、输入行的 role、round 的来源，全由 `Agent.Role` 与调用方给的 round 推出；接口上没有"我是不是被委托的"这种字段。
 3. **记录与重试只有一处**：`reason_turns` / `llm_events` / `llm_messages` 的写入、空闲看门狗、截断重试都在这一层，planner 与 worker 不会有谁少一份。
 4. **归属写在会话上**：`reason_turns.task_id` 与 worker 的 `agents.current_task_id` 都是 `SessionOpts.TaskID`（委托方那条 Task），见 [delegation.md](delegation.md)。
-5. **会话丢 ≠ 上下文丢**。provider 会话会随进程消失（Cline bridge 的会话活在 bridge 进程里，bridge 一重启就没了），但**这条 task 做过什么**写在 runtime 自己的记录里（`execution_plan` / `execution_step_plan` / `execution_step`）：一次 run 开始时读回来，作为 Runtime Context 的 `briefing` 交给它的每一轮（`src/task_record.go`）。重启之后的一次指令因此仍然是**同一条 task 的续做**，而不是一个「从头开始的新任务」—— 会话层能恢复的是对话与 prompt cache（跨重启恢复见 [graceful-restart.md](graceful-restart.md)），记录层保证的是「我做过什么、还差什么」不丢。
+5. **会话丢 ≠ 上下文丢**。provider 会话会随进程消失（Cline bridge 的会话活在 bridge 进程里，bridge 一重启就没了），但**这条 task 做过什么**写在 runtime 自己的记录里（`execution_plan` / `execution_step_plan` / `execution_step`）：一次 run 开始时读回来，作为 Runtime Context 的 `briefing` 交给它的每一轮（`src/task_record.go`）。重启之后的一次指令因此仍然是**同一条 task 的续做**，而不是一个「从头开始的新任务」——记录层保证的是「我做过什么、还差什么」不丢；对话本身另有一条路，见下。
+
+## 跨进程：会话怎么续（Cline）
+
+Cline SDK 把每个会话落在 **Cline 数据目录**里（默认 `~/.cline/data/sessions/<sessionId>/`：一份 manifest + 一份 `.messages.json`；可用 `CLINE_DIR` / `CLINE_DATA_DIR` / `AUTONOMY_CLINE_DATA_DIR` 换位置）。所以对话本身也能跨重启接着走，做法是**读回 transcript + 播种一个新会话**（`src/clinesdk/bridge/resume.mjs`）：
+
+```
+agent 行上的 llm_agent_id（= 上一个进程的 plan 会话 id）
+  → attach 时交给 bridge（createAgent.resumeSessionId）
+  → 首个 send：readMessages(旧 id) → start({ initialMessages: 读回的对话, config.sessionId: 新 id })
+  → 新 id 由这次 run 报回，记在 agent 行上（下一个进程再续）
+```
+
+两个**实测**出来的事实决定了这个形状（`resume.mjs` 里记着）：
+
+1. `start({config:{sessionId}})` **不会**加载那个会话的历史——它是「以这个 id 开一个新会话」，还会**覆盖**那个 id 原来的 transcript；
+2. 新会话带上 `initialMessages: readMessages(旧 id)` **确实**接上了对话（端到端验过：旧会话里说过的数字，在另一个进程里被答了出来）。
+
+读不到 transcript（第一次、被 retention 清掉、被删）不是错误：那是「没有对话可续」，新会话从零开始，run 不受影响。**记录层（briefing）仍然是兜底**：它保证即使对话丢了也不会把续做当成新任务。worker 的会话不续（它属于一次委托，prompt 自己带足了上下文）；`llm_agent_id` 里更老的值是 bridge 自己的 handle（`cls_…`，随 bridge 进程一起死），不是会话，会被忽略。
 
 ## 关系
 
