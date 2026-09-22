@@ -315,20 +315,21 @@ func (a *Agent) Decide() (Decision, error) {
 }
 
 func (a *Agent) DecideAtCycle(cycle int, history []Result) (Decision, error) {
-	return a.decide(context.Background(), cycle, history, "")
+	return a.decide(context.Background(), cycle, history, "", nil)
 }
 
 // decide is one cycle of this agent: which cycle it is, what already happened, and
 // the message it answers (the inbox message being processed — see DecisionContext.
 // Input).
-func (a *Agent) decide(ctx context.Context, cycle int, history []Result, input string) (Decision, error) {
+func (a *Agent) decide(ctx context.Context, cycle int, history []Result, input string, brief *TaskBriefing) (Decision, error) {
 	decisionContext := DecisionContext{
-		Context: ctx,
-		Task:    a.CurrentTask,
-		Agent:   a,
-		Cycle:   cycle,
-		Input:   input,
-		History: history,
+		Context:  ctx,
+		Task:     a.CurrentTask,
+		Agent:    a,
+		Cycle:    cycle,
+		Input:    input,
+		History:  history,
+		Briefing: brief,
 	}
 	// The world this cycle reasons about is resolved first: the task's context_ref,
 	// through the context builder (src/context_resolver.go) — the prompt is built from

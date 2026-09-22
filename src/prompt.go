@@ -177,15 +177,15 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, error) {
 	payload := struct {
 		Task          json.RawMessage `json:"task"`
+		RuntimeCtx    json.RawMessage `json:"runtime_context"`
 		ContextEntity json.RawMessage `json:"context_entity"`
 		World         json.RawMessage `json:"world"`
-		RuntimeCtx    json.RawMessage `json:"runtime_context"`
 		Constraints   json.RawMessage `json:"constraints"`
 	}{
 		Task:          formatTaskJSON(ctx.Task),
+		RuntimeCtx:    formatRuntimeContextJSON(ctx, input),
 		ContextEntity: formatContextEntitiesJSON(ctx),
 		World:         formatWorldJSON(ctx),
-		RuntimeCtx:    formatRuntimeContextJSON(ctx, input),
 		Constraints:   constraintsJSON(ctx),
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
@@ -196,6 +196,15 @@ func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, err
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Decision Cycle %d — current values\n", ctx.Cycle)
 	fmt.Fprintf(&b, "Current values for the placeholders marked \"%s\" above.\n\n", reasoningDeltaMarker)
+	// A run that starts after a restart is a continuation, and its briefing is the
+	// only place that says so: without this sentence the rounds below read as work the
+	// planner never did (src/task_record.go, src/graceful-restart.md).
+	if ctx.Briefing != nil {
+		b.WriteString("`briefing` is your own record on this task from *before this run* — your plans, " +
+			"the steps they ran and what those steps produced (a restart does not lose it). Continue " +
+			"from what it already delivered instead of doing it again, and see `state.open_criteria` " +
+			"for what is still missing.\n\n")
+	}
 	b.WriteString("```json\n")
 	b.Write(raw)
 	b.WriteString("\n```\n\n")
@@ -330,9 +339,17 @@ func runtimeContextMap(ctx DecisionContext, input ReasoningInput) map[string]any
 			m["completion_contract"] = contract
 		}
 	}
+	// briefing is what this run was handed about its own task before it started: the
+	// rounds a previous process ran, and where the task stands (src/task_record.go).
+	// It is the half a provider session cannot carry across a restart — which is why
+	// a continuation knows what it already delivered instead of re-doing it.
+	if ctx.Briefing != nil {
+		m["briefing"] = ctx.Briefing
+	}
 	// previous_actions is what this task already did: the planner's own plan from
 	// an earlier cycle and how it went, so re-planning is not blind (AGENT_V2
-	// names previous_action as an evidence source).
+	// names previous_action as an evidence source). These are *this run's* cycles;
+	// what earlier runs did is the briefing above.
 	if len(ctx.History) > 0 {
 		m["previous_actions"] = formatPreviousActionsJSON(ctx.History)
 	}
@@ -353,6 +370,10 @@ func workerRuntimeContextJSON(ctx DecisionContext) []byte {
 	workerCtx := ctx
 	workerCtx.Cycle = 0
 	m := runtimeContextMap(workerCtx, ReasoningInput{})
+	// A worker is handed one job by the delegating cycle, not the task's whole record:
+	// the briefing belongs to the task's own agent (the planner), and every delegation
+	// would pay for it.
+	delete(m, "briefing")
 	if ctx.Task != nil {
 		m["task"] = json.RawMessage(formatTaskJSON(ctx.Task))
 	}

@@ -169,7 +169,7 @@ select i.seq, i.kind, i.provider, i.reason_turn_id, r.status
 ## 还没做的（有意）
 
 - **非 LLM 交互的过程细节**（`gate` / `request` / `response` 事件）：`execution_step_interaction` 只有 kind/provider，请求与响应还没有落库通道 —— 那是下一步（provider trace），落库时挂到**交互行**（`step_id` + `seq`）上，不再挂到 step 上。
-- **prompt 里的 id**：`previous_actions` 仍只带 input/output/error（不塞 trace 内容，也不塞 id），避免每轮被自己的记录放大。
+- **prompt 里的 id**：`previous_actions` 仍只带 input/output/error（不塞 trace 内容，也不塞 id），避免每轮被自己的记录放大。`briefing` 同一条规则：带上 `plan_id` / `cycle` / decision / reason 与每个 step 的 input/output/error，不带对话正文（对话正文属于会话层，见 [session.md](session.md)）。
 
 ## 代码位置
 
@@ -181,3 +181,4 @@ select i.seq, i.kind, i.provider, i.reason_turn_id, r.status
 | 写序（先计划、后执行） | `src/runtime.go`（`Execute` / `recordPlan` / `recordStep`） |
 | 入参来源（值与绑定） | `src/plan_input.go`（`StepInput` / 绑定语法）、`src/plan_lineage.go`（校验与解析）、`src/action.go`（解析后调用能力） |
 | 追溯来源 | `src/llm_trace.go`（`Origin`）、`src/reasoner.go`、`src/decision.go`（`DecisionOrigin`） |
+| run 启动时的读回（briefing） | `src/task_record.go`（`taskBriefing` / `taskRound` / `taskVerdicts` / `openCriteria`） |

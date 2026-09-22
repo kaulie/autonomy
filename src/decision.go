@@ -23,6 +23,13 @@ type DecisionContext struct {
 	// planner sees it as previous_actions and can base its evidence on it (see
 	// AGENT_V2 evidence source previous_action).
 	History []Result
+	// Briefing is what this run was handed about its own task before it started: what
+	// the task did in earlier runs (its plans, the steps they ran and what those steps
+	// produced) and where it stands now — read back from the runtime's own record
+	// (src/task_record.go), because the conversation that used to carry it dies with
+	// the process. It is nil for a first instruction, and for a worker's turns: the
+	// briefing belongs to the task's own agent.
+	Briefing *TaskBriefing
 	// StepOutputs are the steps of the plan being executed that have already run,
 	// oldest first — what this step's input bindings resolve against
 	// ("step:<name>.output.<key>", src/plan_lineage.go). It is empty outside an

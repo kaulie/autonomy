@@ -76,6 +76,10 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 - 之前的每轮结果都作为 `DecisionContext.History` 传给下一次 decide，prompt 的 Runtime Context 里渲染成
   `previous_actions: [{cycle, message, status, error, actions:[{capability, input, output, error, expected_effect, evidence_refs}]}]`（正是 policy 里 `previous_action` 证据来源）。
   **每个 action 的原始 input/output 都原样保留、不合并**，planner 自己决定看哪条（例如 `code_edit` 的 `summary`/`workspace`）—— 这就是"观察结果再决定"的那一半。
+- **重启之后仍然是同一条 task**：`previous_actions` 只装**本次 run** 的 cycle；本次 run 之前那条 task 做过的事（包括上一个进程在被重启前跑过的轮次）由 run 开始时从 **runtime 自己的记录**里读回来（`execution_plan` / `execution_step_plan` / `execution_step`），作为 Runtime Context 的 `briefing` 交给每一轮（`src/task_record.go`）：
+  `briefing: {note, state: {last_round, verdicts, open_criteria}, earlier_rounds: [{plan_id, cycle, decision, reason, status, error, need, steps: [{idx, name, capability, status, input, output, error, expected_effect, duration_ms}]}]}`。
+  为什么必须有它：**provider 会话会随进程走**（Cline bridge 的会话活在 bridge 进程里），会话没了以后，`previous_actions` 是空的、`task.status` 只写着本次受理的 `pending` —— 没有 briefing，一次续做就是「从头开始」：重开 PR、重部署。`note` 明说这些轮次是**本次 run 之前**的记录，`state.open_criteria` 是契约里还没有 `pass` 的判据（还差什么）。
+  一个 step 计划了却没跑（`execution_step_plan` 有行、`execution_step` 没有）在这里是 `status: pending` + 计划原文的 input —— 「上一轮停在哪一步」因此是看得见的。worker 的 Runtime Context **不带** briefing：委托方那一轮已经说清，每次委托不该背上 task 全史。
 - **消息是增量的**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），所以 AGENT_V2 的
   **frame**（Agent / Role / Delegation / Output Schema / Goal Type / Completion Principles / Constructs）只在
   **一个会话的第一轮**发送；之后每轮只发 **delta**（当前 Task / Context Entity / World / Runtime Context /

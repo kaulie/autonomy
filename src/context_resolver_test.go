@@ -170,7 +170,7 @@ func TestADecisionCycleResolvesItsContextBeforeThePrompt(t *testing.T) {
 	}
 	reasoner := &captureContextReasoner{}
 	agent := &Agent{CurrentTask: task, DecideMaker: &DecisionMaker{reasoner: reasoner}}
-	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+	if _, err := agent.decide(context.Background(), 1, nil, "do it", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,7 +280,7 @@ func TestATaskRefResolvesIntoTheWorldTheTaskNames(t *testing.T) {
 		CurrentTask: &Task{ID: "task-a", ContextRef: map[ContextContainerType]string{context_builder.RefTypeTask: "task-b"}},
 		DecideMaker: &DecisionMaker{reasoner: reasoner},
 	}
-	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+	if _, err := agent.decide(context.Background(), 1, nil, "do it", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,7 +316,7 @@ func TestATaskRefThisProcessDoesNotHaveIsAnsweredByThePlatform(t *testing.T) {
 		}},
 		DecideMaker: &DecisionMaker{reasoner: reasoner},
 	}
-	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+	if _, err := agent.decide(context.Background(), 1, nil, "do it", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -376,7 +376,7 @@ func TestTheContextBuilderCanBeSwitchedOff(t *testing.T) {
 		CurrentTask: &Task{ID: "task-1", ContextRef: map[ContextContainerType]string{ContextContainerTypeProject: "project-1"}},
 		DecideMaker: &DecisionMaker{reasoner: reasoner},
 	}
-	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+	if _, err := agent.decide(context.Background(), 1, nil, "do it", nil); err != nil {
 		t.Fatal(err)
 	}
 	if reasoner.seen.ContextSections != nil {
@@ -399,7 +399,7 @@ func TestARegistryThatIsDownStillRendersTheRef(t *testing.T) {
 		CurrentTask: &Task{ID: "task-3", ContextRef: map[ContextContainerType]string{ContextContainerTypeProject: "project-9"}},
 		DecideMaker: &DecisionMaker{reasoner: reasoner},
 	}
-	if _, err := agent.decide(context.Background(), 1, nil, "do it"); err != nil {
+	if _, err := agent.decide(context.Background(), 1, nil, "do it", nil); err != nil {
 		t.Fatalf("decide: %v, want a registry that is down not to fail the cycle", err)
 	}
 	entries := contextEntityBlock(t, reasoner.seen)

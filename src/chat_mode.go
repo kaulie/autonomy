@@ -70,6 +70,12 @@ func (r *Autonomy) processChat(ctx context.Context, cancel context.CancelFunc, a
 	// One planner turn so the user can talk. Whatever it answers — including a
 	// type:plan the model should not have returned — is dropped: no Execute,
 	// no recordPlan, no status change.
-	_, err := agent.decide(ctx, 1, nil, chatPlannerInput(msg.Content))
+	//
+	// The planner's view of its task is the same here as in a decision cycle: it
+	// answers with the task's own record in front of it (src/task_record.go), so
+	// "what have you done so far?" is answered from the record rather than from a
+	// session that a restart may have taken away.
+	brief := r.taskBriefing(task.ID)
+	_, err := agent.decide(ctx, 1, nil, chatPlannerInput(msg.Content), brief)
 	return TurnResult{}, err
 }

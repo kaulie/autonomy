@@ -349,6 +349,14 @@ func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input 
 	var decision Decision
 	var result Result
 	var history []Result
+	// What this task did before this run — and where it stands now — read once, from
+	// the runtime's own record, and handed to every cycle: a round this run runs is
+	// appended to history and never doubled from the record, and a session lost to a
+	// restart cannot turn a continuation into a new task (src/task_record.go).
+	var brief *TaskBriefing
+	if task != nil {
+		brief = r.taskBriefing(task.ID)
+	}
 	needDecide := true
 	for {
 		if err := ctx.Err(); err != nil {
@@ -363,7 +371,7 @@ func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input 
 			if cycles > r.maxSteps() {
 				break
 			}
-			decision, err = agent.decide(ctx, cycles, history, input)
+			decision, err = agent.decide(ctx, cycles, history, input, brief)
 			if err != nil {
 				if ctx.Err() != nil {
 					markStopped(task)
