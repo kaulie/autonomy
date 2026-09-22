@@ -56,6 +56,10 @@ autonomy 这一侧就是这两个端点（[http-api.md](http-api.md)）：
 4. `Server.Shutdown` 不再接新连接、等在途 HTTP 请求答完；
 5. `Autonomy.Close` 拆掉常驻会话、两个 bridge，关掉 Store —— 与正常退出走的是同一个口。
 
+被停掉的那一轮不会因此「没发生过」：它的计划与已经跑过的步骤都在 runtime 的记录里，下一次 run 的 `briefing`
+会如实带出来（计划跑了一半的 step 是 `status: pending`、带的还是计划原文的 input）。所以接手的那一轮看得见
+**它停在哪一步、已经产出过什么**（PR url、pipeline id 都在 step 的 output 里），而不是从零再排一遍。
+
 没有这半边，SIGTERM 会把进程直接带走：deferred 的 `Close` 不跑，桥上的会话只会过期，
 而 stop.sh 在 15s 之后补的那一刀更是想写什么都写不进去。
 

@@ -53,6 +53,7 @@ capability 看到的只是 `broker.AgentSession` 那个窄视图（`ID` / `Works
 2. **差异来自身份，不是开关**：plan / agent、输入行的 role、round 的来源，全由 `Agent.Role` 与调用方给的 round 推出；接口上没有"我是不是被委托的"这种字段。
 3. **记录与重试只有一处**：`reason_turns` / `llm_events` / `llm_messages` 的写入、空闲看门狗、截断重试都在这一层，planner 与 worker 不会有谁少一份。
 4. **归属写在会话上**：`reason_turns.task_id` 与 worker 的 `agents.current_task_id` 都是 `SessionOpts.TaskID`（委托方那条 Task），见 [delegation.md](delegation.md)。
+5. **会话丢 ≠ 上下文丢**。provider 会话会随进程消失（Cline bridge 的会话活在 bridge 进程里，bridge 一重启就没了），但**这条 task 做过什么**写在 runtime 自己的记录里（`execution_plan` / `execution_step_plan` / `execution_step`）：一次 run 开始时读回来，作为 Runtime Context 的 `briefing` 交给它的每一轮（`src/task_record.go`）。重启之后的一次指令因此仍然是**同一条 task 的续做**，而不是一个「从头开始的新任务」—— 会话层能恢复的是对话与 prompt cache（跨重启恢复见 [graceful-restart.md](graceful-restart.md)），记录层保证的是「我做过什么、还差什么」不丢。
 
 ## 关系
 
