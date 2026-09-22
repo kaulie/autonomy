@@ -112,11 +112,13 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// cycle resolves its task's context_ref through it (fillContextSections).
 	_autonomy.ContextBuilder = newContextBuilder(_autonomy)
 
-	// Last, once every manager a decision cycle reads is wired: the instructions a
-	// previous process left queued (a restart in the middle of a drain holds them
-	// back) are started here, so accepting an instruction across a restart is not a
-	// way to lose it (src/graceful.go).
+	// Last, once every manager a decision cycle reads is wired: the runs a previous
+	// process left behind are picked up here — the instructions it accepted but never
+	// started, and the runs it died in the middle of (src/graceful.go). Restarting the
+	// service is therefore not something that loses work or waits for the user to
+	// remember it: each agent looks at its own state and continues.
 	_autonomy.resumeAcceptedInstructions()
+	_autonomy.resumeInterruptedRuns()
 
 	bootstrapFlag = true
 	return _autonomy, nil

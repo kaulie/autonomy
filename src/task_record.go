@@ -46,6 +46,28 @@ const taskBriefingNote = "This is your own record on this task from before this 
 	"It is the same conversation, not this cycle's work — continue from what these rounds already " +
 	"delivered instead of doing it again, and check state.open_criteria for what is still missing."
 
+// interruptedNote is added when the newest round was not finished but *cut*: the runtime
+// itself took the run out (a restart), and this run is the continuation of it. The work
+// the round already produced is done — the steps that never ran are the ones to do.
+const interruptedNote = " Your newest round was cut by a restart of the runtime instead of ending by " +
+	"itself: state.interrupted says where it stopped (and the restart it belonged to), and the steps of " +
+	"that round which never ran are the ones to continue with. What it already produced is done, not " +
+	"to be redone."
+
+// TaskInterruption says the task's newest round was cut by the runtime itself. It comes
+// from the task row's stop reason (src/stop_reason.go) — the runtime's own record of who
+// stopped it — so a run that resumes the task knows it is continuing a cut round, and
+// where the cut landed, instead of reading a half-finished plan as the whole story.
+type TaskInterruption struct {
+	// Reason is the runtime's own words for it (tasks.error), naming the restart
+	// (requestId=…) when the platform announced one.
+	Reason string `json:"reason,omitempty"`
+	// StoppedAtStep is the step of the newest round that had not run yet when the run
+	// was cut, and NextStep is that step's name: where a continuation picks up.
+	StoppedAtStep int    `json:"stopped_at_step,omitempty"`
+	NextStep      string `json:"next_step,omitempty"`
+}
+
 // TaskBriefing is the handover a run is given about its own task.
 type TaskBriefing struct {
 	// Note is the block's own words (taskBriefingNote), carried with the data so a
@@ -69,6 +91,9 @@ type TaskState struct {
 	// OpenCriteria are the contract's criteria no verdict has passed yet: what the
 	// task is still missing.
 	OpenCriteria []string `json:"open_criteria,omitempty"`
+	// Interrupted is set when the newest round was cut by the runtime (a restart) rather
+	// than ending on its own — the case this run was resumed for.
+	Interrupted *TaskInterruption `json:"interrupted,omitempty"`
 }
 
 // TaskRound is one round of a task as the runtime recorded it: the decision that was
@@ -145,15 +170,51 @@ func (r *Autonomy) taskBriefing(taskID string) *TaskBriefing {
 		rounds = append(rounds, r.taskRound(store, plan))
 	}
 	last := rounds[len(rounds)-1]
+	state := &TaskState{
+		LastRound:    &last,
+		Verdicts:     r.taskVerdicts(taskID),
+		OpenCriteria: r.openCriteria(taskID),
+	}
+	note := taskBriefingNote
+	if cut := r.taskInterruption(taskID, &last); cut != nil {
+		state.Interrupted = cut
+		note += interruptedNote
+	}
 	return &TaskBriefing{
-		Note: taskBriefingNote,
-		State: &TaskState{
-			LastRound:    &last,
-			Verdicts:     r.taskVerdicts(taskID),
-			OpenCriteria: r.openCriteria(taskID),
-		},
+		Note:          note,
+		State:         state,
 		EarlierRounds: rounds,
 	}
+}
+
+// taskInterruption says whether the newest round was cut by the runtime, and where. It
+// reads it from the task row's stop reason — what the runtime wrote when *it* was the one
+// that stopped the run (src/stop_reason.go) — so the answer is the runtime's own record
+// and not an inference from a half-finished plan. A task a person stopped, or one that
+// ended on its own, has no interruption.
+func (r *Autonomy) taskInterruption(taskID string, last *TaskRound) *TaskInterruption {
+	store := r.taskStore()
+	if store == nil {
+		return nil
+	}
+	// The stop reason is written by the writer; read it there so a replica that has not
+	// caught up cannot turn "cut by a restart" back into "ended on its own".
+	task, err := writerReads(store).GetTask(taskID)
+	if err != nil || !isRuntimeStopRecord(task) {
+		return nil
+	}
+	reason := strings.TrimSpace(task.Error)
+	cut := &TaskInterruption{Reason: reason}
+	if last != nil {
+		for _, step := range last.Steps {
+			if strings.EqualFold(strings.TrimSpace(step.Status), "pending") {
+				cut.StoppedAtStep = step.Idx
+				cut.NextStep = step.Name
+				break
+			}
+		}
+	}
+	return cut
 }
 
 // taskRound rebuilds one round: its plan row, its outcome (derived from the steps that

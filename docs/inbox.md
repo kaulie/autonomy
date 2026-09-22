@@ -45,7 +45,8 @@
 - **`delegation` = worker 的一次 turn**：capability 的 `Prompt` 把 prompt 发进 worker 的 inbox，由 worker 自己的消费者跑这一轮，
   结果等回来交给 capability —— 对话仍记在同一个 session 上，顺序由队列保证（见 [session.md](session.md)、[delegation.md](delegation.md)）。
 - **`stop` 不是一次 turn**：停止是靠**取消正在处理的那条消息**做到的，这条消息是它的记录，排在它停下的那条指令之后。
-  它后面的消息仍然在队里（已接受的不丢）。
+  它后面的消息仍然在队里（已接受的不丢）。**一条被进程带走的 `running` 消息也一样**：重启后它不是等指令，
+  而是由 runtime 在开机时把这条消息连同它的 agent 一起续起来（见 [graceful-restart.md](graceful-restart.md)「开机自愈」）。
 
 ## 与 agent 生命周期的关系
 
