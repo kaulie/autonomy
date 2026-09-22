@@ -71,6 +71,25 @@ Cline 桥**（`build.sh` 只打 cursor bridge，`@cline/sdk` 需要 npm install�
 里会出现 `[cline-bridge] …`。想真正把桥打进发版包（部署机上没有 checkout 可用时），改
 `build.sh` 让它随包发出 `src/clinesdk/bridge`——那是打包决定，不是运行期开关。
 
+### Cline 的会话落盘在哪（重启怎么续）
+
+Cline SDK 把每个会话写进 **Cline 数据目录**，默认 `~/.cline/data/sessions/<sessionId>/`：
+
+```
+cls-….json           会话 manifest（provider / model / cwd / interactive / status / messages_path …）
+cls-….messages.json  transcript（role + content blocks），turn 边界追平
+```
+
+`CLINE_DIR` / `CLINE_DATA_DIR` / `AUTONOMY_CLINE_DATA_DIR` 可以把它指到别处（`config.mjs` 找
+`cline auth` 的 `settings/providers.json` 用的是同一套变量）。**这个目录在部署的 runtime 之外**
+（不是 `backend/`），所以换版不会把它带走。
+
+会话说到底活在 bridge 进程里，重启就没了，所以续的是**对话**而不是会话对象：旧会话 id 记在
+agent 行上（`agents.llm_agent_id`，只记 planner 的 plan 会话），新进程 attach 时把它交给 bridge，
+bridge `readMessages` 读回 transcript 再开一个新会话播种给它（`src/clinesdk/bridge/resume.mjs`；
+为什么不是「用老 id 直接 start」那儿写着）。读不回来就从头开——记录层（`briefing`）仍然保证不会把
+续做当成新任务，见 [session.md](session.md)。
+
 ## 触发这一切的那条报错怎么读
 
 ```

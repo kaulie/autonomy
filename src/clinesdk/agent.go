@@ -25,6 +25,13 @@ type CreateOptions struct {
 	SystemPrompt string
 	// Mode is "yolo" (default) or "plan".
 	Mode string
+	// ResumeSessionID is a Cline session whose conversation this one continues: the
+	// bridge reads that session's stored transcript and seeds the new session with it
+	// (src/clinesdk/bridge/resume.mjs) — the SDK does not reload a session when it is
+	// handed its id, and handing back the same id overwrites the stored transcript.
+	// Empty starts a conversation from nothing, which is also what a session with no
+	// transcript left (retention, deletion) falls back to.
+	ResumeSessionID string
 }
 
 // Agent is one resident Cline session. The session is started lazily by the
@@ -37,6 +44,9 @@ type Agent struct {
 	ID string
 	// SessionID is the Cline session id, known once the first run started.
 	SessionID string
+	// ResumeSessionID is the session this one was asked to continue, empty for a
+	// conversation that started from nothing.
+	ResumeSessionID string
 
 	ProviderID string
 	ModelID    string
@@ -56,25 +66,28 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	cwd := firstNonEmpty(opts.CWD, f.client.Workspace)
 	mode := firstNonEmpty(opts.Mode, f.client.Mode, DefaultMode)
 	systemPrompt := firstNonEmpty(opts.SystemPrompt, f.client.SystemPrompt)
+	resumeID := strings.TrimSpace(opts.ResumeSessionID)
 
 	raw, err := tr.call(ctx, "createAgent", map[string]any{
-		"providerId":   provider,
-		"modelId":      model,
-		"apiKey":       firstNonEmpty(opts.APIKey, f.client.APIKey),
-		"baseUrl":      firstNonEmpty(opts.BaseURL, f.client.BaseURL),
-		"cwd":          cwd,
-		"mode":         mode,
-		"systemPrompt": systemPrompt,
+		"providerId":      provider,
+		"modelId":         model,
+		"apiKey":          firstNonEmpty(opts.APIKey, f.client.APIKey),
+		"baseUrl":         firstNonEmpty(opts.BaseURL, f.client.BaseURL),
+		"cwd":             cwd,
+		"mode":            mode,
+		"systemPrompt":    systemPrompt,
+		"resumeSessionId": resumeID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	var res struct {
-		AgentID    string `json:"agentId"`
-		Mode       string `json:"mode"`
-		CWD        string `json:"cwd"`
-		ProviderID string `json:"providerId"`
-		ModelID    string `json:"modelId"`
+		AgentID         string `json:"agentId"`
+		Mode            string `json:"mode"`
+		CWD             string `json:"cwd"`
+		ProviderID      string `json:"providerId"`
+		ModelID         string `json:"modelId"`
+		ResumeSessionID string `json:"resumeSessionId"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, bridgeErr("decode createAgent: %v", err)
@@ -83,12 +96,13 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	// config, so adopt what it actually used (this is also what gets recorded on
 	// the agent and in reason_turns.model).
 	return &Agent{
-		client:     f.client,
-		ID:         res.AgentID,
-		ProviderID: firstNonEmpty(res.ProviderID, provider),
-		ModelID:    firstNonEmpty(res.ModelID, model),
-		Mode:       mode,
-		CWD:        res.CWD,
+		client:          f.client,
+		ID:              res.AgentID,
+		ProviderID:      firstNonEmpty(res.ProviderID, provider),
+		ModelID:         firstNonEmpty(res.ModelID, model),
+		Mode:            mode,
+		CWD:             res.CWD,
+		ResumeSessionID: firstNonEmpty(res.ResumeSessionID, resumeID),
 	}, nil
 }
 
@@ -339,6 +353,7 @@ func (r *Run) decodeResult(raw json.RawMessage) (*RunResult, error) {
 	res := &RunResult{
 		AgentID:      firstNonEmpty(anyText(payload["agentId"]), r.agent.ID),
 		SessionID:    firstNonEmpty(anyText(payload["sessionId"]), r.agent.SessionID),
+		ResumedFrom:  anyText(payload["resumedFrom"]),
 		Mode:         anyText(payload["mode"]),
 		Status:       normalizeStatus(anyText(payload["status"])),
 		Text:         anyText(payload["text"]),
@@ -547,7 +562,10 @@ func anyFloat(vals ...any) (float64, bool) {
 type RunResult struct {
 	AgentID   string
 	SessionID string
-	Mode      string
+	// ResumedFrom is the session this run continued, when it was the first run of a
+	// session seeded with an earlier one's transcript (src/clinesdk/bridge/resume.mjs).
+	ResumedFrom string
+	Mode        string
 	// Status is finished | error | cancelled.
 	Status       string
 	Text         string

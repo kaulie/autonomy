@@ -40,7 +40,7 @@ func pairedTask(t *testing.T, store rawStore, taskID string) (*Task, *Agent) {
 		Lifecycle:   AgentLifecyclePersistent,
 		LLMProvider: LLMProviderCline,
 		Model:       "deepseek-v4-pro",
-		LLMAgentID:  "cls_from_before_the_restart",
+		LLMAgentID:  "cls-before-the-restart",
 		CurrentTask: task,
 	}
 	if err := store.UpsertAgent(agent); err != nil {
@@ -125,9 +125,10 @@ func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 }
 
 // TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone: what the accept path gave up is
-// the turn's to do — the first cycle attaches the agent's backend session (a fresh
-// one for Cline, which cannot re-attach) and records it, so the next restart has a
-// session to resume.
+// the turn's to do — the first cycle attaches the agent's backend session, asking it to
+// continue the recorded one (a Cline session lives inside the bridge process, so a
+// restart takes it and the conversation is continued by seeding the new session with the
+// recorded session's transcript), and records the session this process is now on.
 func TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone(t *testing.T) {
 	store := resumeTestStore(t)
 	installFakeClineClient(t)
@@ -147,20 +148,34 @@ func TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone(t *testing.T) {
 	if got.clineAgent == nil {
 		t.Fatal("the turn ran without attaching the agent's session")
 	}
-	if got.LLMAgentID == "" || got.LLMAgentID == agent.LLMAgentID {
-		t.Fatalf("LLMAgentID=%q, want the live session of this process, not the dead one (%q)",
+	// Opening the session asks the bridge to continue the recorded one, and records
+	// nothing yet: the live session id exists only once a run started.
+	if got.clineAgent.ResumeSessionID != agent.LLMAgentID {
+		t.Fatalf("resume=%q, want the recorded session %q", got.clineAgent.ResumeSessionID, agent.LLMAgentID)
+	}
+	if got.LLMAgentID != agent.LLMAgentID {
+		t.Fatalf("LLMAgentID=%q, want the recorded session %q until a run starts",
 			got.LLMAgentID, agent.LLMAgentID)
 	}
 	if !got.needsLLMFrame() {
 		t.Fatal("a session this process started has no frame yet: the next cycle must send it")
 	}
-	// The row now names the live session, which is what the next restart resumes.
+
+	// The run is what makes the live session known, and that is what is recorded for
+	// the next restart.
+	if _, _, err := got.PromptLLMStream(context.Background(), "plan something", ReasonModePlan, nil); err != nil {
+		t.Fatalf("the turn's prompt: %v", err)
+	}
+	if got.LLMAgentID == agent.LLMAgentID || got.LLMAgentID != got.clineAgent.SessionID {
+		t.Fatalf("LLMAgentID=%q, want this process's live session %q, not the recorded one (%q)",
+			got.LLMAgentID, got.clineAgent.SessionID, agent.LLMAgentID)
+	}
 	stored, err := store.GetAgent(agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.LLMAgentID != got.LLMAgentID {
-		t.Fatalf("agents.llm_agent_id=%q, want the attached session %q", stored.LLMAgentID, got.LLMAgentID)
+		t.Fatalf("agents.llm_agent_id=%q, want the live session %q", stored.LLMAgentID, got.LLMAgentID)
 	}
 }
 
