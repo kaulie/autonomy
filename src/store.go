@@ -50,6 +50,11 @@ type AgentStore interface {
 	// GetAgent reads one agent row by id (including soft-deleted). A missing row
 	// returns (nil, nil).
 	GetAgent(agentID int64) (*Agent, error)
+	// ListAgents reads every agent row, oldest first (created_at, then id). It is
+	// how the status dashboard enumerates the agents it shows: one row per agent,
+	// soft-deleted ones included so the page can say an agent was let go rather
+	// than silently drop it (src/agent_dashboard.go).
+	ListAgents() ([]*Agent, error)
 }
 
 // InboxStore is every agent's inbox: the messages addressed to it, in arrival

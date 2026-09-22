@@ -70,6 +70,7 @@ func (fakeStore) CountMessagesAhead(int64, int64) (int, error)               { r
 func (fakeStore) GetTask(string) (*Task, error)                              { return nil, nil }
 func (fakeStore) ListTasks() ([]*Task, error)                                { return nil, nil }
 func (fakeStore) GetAgent(int64) (*Agent, error)                             { return nil, nil }
+func (fakeStore) ListAgents() ([]*Agent, error)                              { return nil, nil }
 func (fakeStore) ActiveReasonTurn(string, int64) (*ReasonTurn, error) {
 	return nil, nil
 }

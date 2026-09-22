@@ -62,6 +62,11 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /api/reason-turns/facets", s.handleReasonTurnFacets},
 		{"GET /api/reason-turns/{turnID}", s.handleReasonTurn},
 		{"GET /api/meta", s.handleMeta},
+		// The agent-status dashboard: GET /api/agents is the feed, GET /dashboard is
+		// the page a human opens that polls it and renders a table with auto-refresh
+		// (src/agent_dashboard.go). Both are read-only.
+		{"GET /api/agents", s.handleAgentStatusList},
+		{"GET /dashboard", s.handleAgentDashboard},
 		// The graceful restart the deployment platform performs on this service: one
 		// notice before it stops us, then a poll while it waits for the runs in flight
 		// to come back (src/graceful.go). A service that answers both is deployed
@@ -667,6 +672,48 @@ func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
 		HasTasksTable: true,
 		Turns:         turns,
 	})
+}
+
+// handleAgentStatusList is the dashboard's feed: every agent this runtime knows
+// about, with the identity, role, lifecycle, current task and liveness the page
+// shows. Soft-deleted agents are left out unless ?include_deleted=1 asks for them
+// — the fleet a human watches is the live one (src/agent_dashboard.go).
+//
+// @Summary  所有 agent 的实时状态（dashboard 数据源）
+// @Tags     agents
+// @Produce  json
+// @Param    include_deleted  query     boolean false "带上已删除的 agent（默认不带）"
+// @Success  200              {object}  autonomy.AgentStatusListResponse  "agents（id / name / role / lifecycle / current_task / health / working）+ count + generated_at"
+// @Failure  500              {object}  errResponse                       "store 读不了 agent 列表"
+// @Router   /api/agents [get]
+func (s *HTTPServer) handleAgentStatusList(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	includeDeleted := queryBool(req.URL.Query().Get("include_deleted"))
+	list, err := s.Autonomy.AgentStatusList(includeDeleted)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// handleAgentDashboard serves the page a human opens to watch the fleet: one HTML
+// file that polls GET /api/agents on a timer and renders the agents as a table
+// with auto-refresh (src/agent_dashboard_page.go). It is self-contained — no build
+// step, no external asset — because the page's whole job is to render one JSON feed.
+//
+// @Summary  agent 状态监控页（轮询 /api/agents 自动刷新）
+// @Tags     agents
+// @Produce  html
+// @Success  200  {string}  string  "HTML 页面"
+// @Router   /dashboard [get]
+func (s *HTTPServer) handleAgentDashboard(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, agentDashboardHTML)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

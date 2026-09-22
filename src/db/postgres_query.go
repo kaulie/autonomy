@@ -96,11 +96,21 @@ func pgScanTask(row pgTaskRow) (*Task, error) {
 	return &task, nil
 }
 
-// GetAgent reads one agent by id. A missing row returns (nil, nil).
-func (s *PostgresStore) GetAgent(agentID int64) (*Agent, error) {
-	if agentID == 0 {
-		return nil, fmt.Errorf("empty agent id")
-	}
+// pgAgentColumns is the agent columns every agent read selects, in the order
+// pgScanAgent expects. Both readers take the same columns so an agent is the same
+// value whichever way it was read (GetAgent, ListAgents).
+const pgAgentColumns = `id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
+       created_at, updated_at, deleted_at`
+
+// pgAgentRow is one row of the agent columns above.
+type pgAgentRow interface {
+	Scan(dest ...any) error
+}
+
+// pgScanAgent reads one agent row: the columns pgAgentColumns selects, in order.
+// It reports sql.ErrNoRows unchanged, so a caller that asks for one agent can tell
+// "no such agent" from "the read failed".
+func pgScanAgent(row pgAgentRow) (*Agent, error) {
 	var (
 		a                    Agent
 		lifecycle            string
@@ -109,18 +119,11 @@ func (s *PostgresStore) GetAgent(agentID int64) (*Agent, error) {
 		createdAt, updatedAt time.Time
 		deletedAt            sql.NullTime
 	)
-	err := s.readPool().QueryRow(`
-SELECT id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
-       created_at, updated_at, deleted_at
-FROM agents WHERE id = $1`, agentID).Scan(
+	if err := row.Scan(
 		&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model,
 		&createdAt, &updatedAt, &deletedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get agent: %w", err)
+	); err != nil {
+		return nil, err
 	}
 	a.Lifecycle = AgentLifecycle(lifecycle)
 	a.LLMProvider = LLMProvider(provider)
@@ -129,6 +132,43 @@ FROM agents WHERE id = $1`, agentID).Scan(
 		a.CurrentTask = &Task{ID: taskID}
 	}
 	return &a, nil
+}
+
+// GetAgent reads one agent by id. A missing row returns (nil, nil).
+func (s *PostgresStore) GetAgent(agentID int64) (*Agent, error) {
+	if agentID == 0 {
+		return nil, fmt.Errorf("empty agent id")
+	}
+	a, err := pgScanAgent(s.readPool().QueryRow(`SELECT `+pgAgentColumns+` FROM agents WHERE id = $1`, agentID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+	return a, nil
+}
+
+// ListAgents reads every agent row, oldest first (created_at, then id): the walk
+// the status dashboard takes to enumerate the agents it shows (src/agent_dashboard.go).
+func (s *PostgresStore) ListAgents() ([]*Agent, error) {
+	rows, err := s.readPool().Query(`SELECT ` + pgAgentColumns + ` FROM agents ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	defer rows.Close()
+	var agents []*Agent
+	for rows.Next() {
+		a, err := pgScanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list agents: %w", err)
+		}
+		agents = append(agents, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	return agents, nil
 }
 
 // ActiveReasonTurn returns the newest in-flight reason turn for the agent on the task
