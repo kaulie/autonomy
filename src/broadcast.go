@@ -247,7 +247,7 @@ func (r *Autonomy) deliverBroadcast(target broadcastTarget, content string) Broa
 		delivery.Reason = target.Skip
 		return delivery
 	}
-	agent, msg, err := r.instruction(target.Task, content)
+	agent, msg, err := r.instruction(target.Task, content, MessageKindInstruction)
 	if err != nil {
 		delivery.Status = BroadcastFailed
 		delivery.Reason = err.Error()

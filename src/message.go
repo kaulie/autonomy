@@ -30,8 +30,13 @@ type AgentMessageKind string
 
 const (
 	// MessageKindInstruction is a user instruction: the description a task was
-	// accepted with, or a later instruction for the same task.
+	// accepted with, or a later command for the same task. The planner may
+	// create or replace a plan and execute it.
 	MessageKindInstruction AgentMessageKind = "instruction"
+	// MessageKindChat is a user message for the planner only: it is answered as
+	// a conversation turn and must not create, replace, or execute a plan
+	// (AcceptTaskRequest.Mode = "chat").
+	MessageKindChat AgentMessageKind = "chat"
 	// MessageKindDelegation is another agent handing this one a job — what a
 	// capability prompts a worker it acquired with.
 	MessageKindDelegation AgentMessageKind = "delegation"
