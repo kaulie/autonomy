@@ -213,6 +213,18 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 **没被判定过的 task 不带这个字段**（不是空对象）：没有判定就是没有判定，不假装「看过但没找到」。同一次判定
 一行、只追加，所以同一条判据会有多行（每轮 `done` 各一行）。
 
+`state`：**这条 task 现在走到哪**（和续做的 run 拿到的是同一个对象，`src/task_record.go`）——
+所以面板与下一轮 cycle 不会对同一件事给出两种说法：
+
+| 字段 | 含义 |
+|------|------|
+| `last_round` | 最新一轮：`{plan_id, cycle, decision, reason, status, error, at, steps[]}`。`reason` 是 planner 自己写的理由，`status` 是这一轮的结局（`ok`/`failed`），`steps[]` 是计划与实跑的合并（计划了没跑的是 `pending`） |
+| `verdicts[]` | 最近若干条判定（同 `verification.verdicts` 的精简形态：`criterion`/`result`/`method`/`expected`/`observed`） |
+| `open_criteria[]` | 契约里**还没有 `pass`** 的判据：一句话回答「还差什么」 |
+| `interrupted` | **只在运行时自己停掉了这一轮时出现**：`{reason, stopped_at_step, next_step}`。`reason` 是运行时写的停止原因（重启的 `requestId` 就在里面），`next_step` 是那一轮计划里**还没跑**的那一步。带这个字段 = 「被重启切断，等待/已经自动续做」；**用户自己停的、或自然结束的任务不带它** |
+
+没有执行记录的 task（还没跑过）不带 `state`。
+
 ### `GET /api/tasks/{task_id}/agents/{agent_id}`
 
 查询该 agent 的工作状态。若正在工作（有 `reason_turns.status=running`，或 `agents.state=running`）：

@@ -69,6 +69,12 @@ type TaskProgress struct {
 	// the honest shape there; `{"contract":[],"verdicts":[]}` would claim the engine
 	// looked and found nothing.
 	Verification *TaskVerificationProgress `json:"verification,omitempty"`
+	// State is where the task stands: its newest round, what the contract still misses,
+	// and — when the runtime is what stopped the run — that it was cut and where
+	// (src/task_record.go, the same object a continuing run gets as its briefing's
+	// state). It answers "was this stopped by a person or by a restart, and what is
+	// left?" without the reader having to reconstruct it from the plans below.
+	State *TaskState `json:"state,omitempty"`
 }
 
 // TaskVerificationProgress is a task's completion contract and its verdict log.
@@ -469,6 +475,11 @@ func (r *Autonomy) TaskProgress(taskID string) (*TaskProgress, error) {
 		progress.Plans = append(progress.Plans, item)
 	}
 	progress.Verification = r.taskVerificationProgress(taskID)
+	// The same state a continuing run is handed: one reader for "where does this task
+	// stand", so the panel and the next cycle cannot disagree about it.
+	if brief := r.taskBriefing(taskID); brief != nil {
+		progress.State = brief.State
+	}
 	return progress, nil
 }
 

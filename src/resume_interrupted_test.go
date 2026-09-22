@@ -1,6 +1,9 @@
 package autonomy
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +272,58 @@ func TestTheInterruptedFlagIsNotGuessed(t *testing.T) {
 	}
 	if cut := (&Autonomy{Store: store}).taskBriefing(task.ID).State.Interrupted; cut != nil {
 		t.Fatalf("interrupted=%+v, want none for a person's stop", cut)
+	}
+}
+
+// TestTaskDetailCarriesTheState: the panel reads the same state a continuing run is
+// handed — the newest round, what the contract still misses, and that the runtime cut the
+// run (and where) — instead of reconstructing it from the plans.
+func TestTaskDetailCarriesTheState(t *testing.T) {
+	store, task, _ := briefingStore(t)
+	planID, planned, err := saveExecutionPlan(ExecutionPlan{
+		TaskID: "task-brief", AgentID: 10001, Cycle: 1, DecisionType: "plan",
+		Reason: "deliver the dashboard, then deploy it", StepCount: 1, CreatedAt: time.Now(),
+	}, []ExecutionStepPlan{
+		{Idx: 1, Name: "implement", Capability: "code_edit", Input: `{"instruction":"dashboard"}`},
+		{Idx: 2, Name: "deploy", Capability: "service.deploy", Input: `{"branch":"main"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendExecutionStep(ExecutionStep{
+		PlanID: planID, PlanStepID: planned[0].ID, TaskID: "task-brief", AgentID: 10001, Cycle: 1,
+		Idx: 1, Name: "implement", Capability: "code_edit", Status: "ok",
+		Input: `{"instruction":"dashboard"}`, Output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/144"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task.Status = TaskStatusStopped
+	task.Error = StopReason{By: stoppedByRuntime, RequestID: "pipeline-detail"}.errorText()
+	if err := store.UpsertTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewHTTPServer(&Autonomy{Store: store})
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/task-brief", nil)
+	req.SetPathValue("taskID", "task-brief")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var detail struct {
+		State *TaskState `json:"state"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.State == nil || detail.State.LastRound == nil {
+		t.Fatalf("state=%+v, want the newest round", detail.State)
+	}
+	if detail.State.Interrupted == nil || !strings.Contains(detail.State.Interrupted.Reason, "pipeline-detail") {
+		t.Fatalf("state.interrupted=%+v, want the restart that cut it", detail.State.Interrupted)
+	}
+	if detail.State.Interrupted.NextStep != "deploy" || detail.State.Interrupted.StoppedAtStep != 2 {
+		t.Fatalf("state.interrupted=%+v, want the step that never ran", detail.State.Interrupted)
 	}
 }
