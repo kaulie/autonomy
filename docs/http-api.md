@@ -273,6 +273,41 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 ```
 
 
+### `GET /api/agents` — 所有 agent 的实时状态（监控页数据源）
+
+一次读回这只 runtime 知道的所有 agent，一条一行 —— 这是「agent 状态监控页」（见 [dashboard.md](dashboard.md)）拉的数据。
+每行是 store 里的 agent 行（谁存在）和进程内活的 agent 句柄（`role` / `purpose`，行里不持久化）合并出来的：
+
+- 身份与角色：`agent_id` / `name` / `role`（`planner` / `worker`）/ `purpose` / `backend`
+- 生命周期：`lifecycle`（`persistent` / `ephemeral`）
+- 现在在做什么：`state`（`idle` / `running` / `deleted`）/ `working`（有在途 run 为 `true`）/ `agent_run_id`（该 run id）/ `current_task`
+- 存活：`health`（`ok` / `deleted`）/ `llm_provider` / `model`
+
+响应外层是 `agents[]` + `count` + `generated_at`（取这份快照的时刻，供轮询方判断新鲜度）。
+默认**不带**已软删除的 agent；`?include_deleted=1` 才带上（此时它们 `health=deleted`）。
+store 读不了是 `500`，不是空列表 —— 空页只能表示「没有 agent」，绝不表示「读失败」。
+
+```json
+{
+  "agents": [
+    {
+      "agent_id": 10001, "name": "agent-10001", "role": "planner",
+      "lifecycle": "persistent", "backend": "cline", "state": "running",
+      "health": "ok", "working": true, "agent_run_id": "…",
+      "current_task": "task-…", "llm_provider": "cline", "model": "deepseek-v4-flash"
+    }
+  ],
+  "count": 1,
+  "generated_at": "…"
+}
+```
+
+### `GET /dashboard` — agent 状态监控页
+
+返回一个自包含的 HTML 页面：它按固定间隔轮询 `GET /api/agents`，把 agent 渲染成一张表（id / name /
+role / lifecycle / state / health / current task / working / provider·model / run id），带自动刷新。
+无构建步骤、无外部资源 —— 页面就干这一件事。打开方式见 [dashboard.md](dashboard.md)。
+
 ## 数据 API（评测侧读日志，不再读库）
 
 `agent-benchmark-tool` 原先以 `mode=ro` 直接挂 autonomy 的 SQLite 文件取数，于是库路径与 schema 成了两边的
