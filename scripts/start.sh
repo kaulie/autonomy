@@ -122,35 +122,65 @@ if [ -z "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-br
 fi
 
 # cline bridge: the release package carries it (build.sh) — its sources, plus a tarball
-# of their production install (@cline/sdk and its tree: 251MB unpacked, ~27MB packed).
-# The dependencies are extracted next to the sources when the tarball is new, and
-# AUTONOMY_CLINE_BRIDGE_SCRIPT is pointed at them — so the deployed cline backend runs
-# the bridge *this release* shipped, refreshed by every deploy.
+# of their production install (@cline/sdk and its tree: 251MB unpacked, ~37MB packed).
+# The tarball is extracted into a cache *outside* the packaged tree and the sources get
+# a node_modules symlink into it (node resolves a bare import from the script's own
+# directory upward, and ESM ignores NODE_PATH — so the packages must sit next to
+# bridge.mjs, but they do not have to *be* there). AUTONOMY_CLINE_BRIDGE_SCRIPT is then
+# pointed at the packaged bridge, so a deploy runs the bridge *this release* shipped.
+#
+# Why a cache: a deploy rsyncs the package into this directory with --delete, so
+# anything the package does not contain is replaced (the platform keeps only
+# data/ logs/ backend/data/ backend/server.log Library/ packages/ upgrade-requests/,
+# and excludes .cache/). The dependencies are a build product, not package content:
+# keyed by the tarball's sha256 they are extracted once per release per machine and
+# reused across deploys, while the tarball still rides in the package so a cold
+# machine can start offline (no npm, no network).
 #
 # backend/.env is overridden on purpose, the same rule as the port above: it survives
 # every deploy, so a path into some checkout would pin the bridge to code nobody
 # updates. Set AUTONOMY_CLINE_BRIDGE_SCRIPT in .env only for a deployment whose package
 # carries no bridge (or to run an external one).
 CLINE_BRIDGE_DIR="${RUNTIME_DIR}/src/clinesdk/bridge"
+CLINE_BRIDGE_CACHE="${AUTONOMY_CACHE_DIR:-${RUNTIME_DIR}/.cache}/cline-bridge"
 if [ -f "${CLINE_BRIDGE_DIR}/bridge.mjs" ]; then
   DEPS_TGZ="${CLINE_BRIDGE_DIR}/bridge-deps.tgz"
   if [ -f "${DEPS_TGZ}" ]; then
     if command -v shasum >/dev/null 2>&1; then
-      wanted="$(shasum -a 256 "${DEPS_TGZ}" | cut -d' ' -f1)"
+      sha="$(shasum -a 256 "${DEPS_TGZ}" | cut -d' ' -f1)"
     else
-      wanted="$(sha256sum "${DEPS_TGZ}" | cut -d' ' -f1)"
+      sha="$(sha256sum "${DEPS_TGZ}" | cut -d' ' -f1)"
     fi
-    current="$(cat "${CLINE_BRIDGE_DIR}/.deps-sha256" 2>/dev/null || true)"
-    if [ -n "${wanted}" ] && [ "${wanted}" != "${current}" ]; then
-      log "解包 cline bridge 依赖（$(du -h "${DEPS_TGZ}" | cut -f1)）"
-      if tar xzf "${DEPS_TGZ}" -C "${CLINE_BRIDGE_DIR}"; then
-        printf '%s' "${wanted}" > "${CLINE_BRIDGE_DIR}/.deps-sha256"
-      else
-        log "警告：cline bridge 依赖解包失败（沿用已有 node_modules，如果有）"
+    if [ -n "${sha}" ]; then
+      deps_dir="${CLINE_BRIDGE_CACHE}/${sha}"
+      if [ ! -d "${deps_dir}/node_modules" ]; then
+        mkdir -p "${CLINE_BRIDGE_CACHE}"
+        log "解包 cline bridge 依赖（$(du -h "${DEPS_TGZ}" | cut -f1) → ${deps_dir}）"
+        staging="${deps_dir}.tmp.$$"
+        rm -rf "${staging}"
+        if mkdir -p "${staging}" && tar xzf "${DEPS_TGZ}" -C "${staging}"; then
+          rm -rf "${deps_dir}"
+          mv "${staging}" "${deps_dir}"
+          # 只留最近两个版本，别让缓存无限长（每个 251MB）。
+          ls -1dt "${CLINE_BRIDGE_CACHE}"/*/ 2>/dev/null | sed -e '1,2d' |
+            while read -r old; do rm -rf "${old}"; done
+        else
+          rm -rf "${staging}"
+          log "警告：cline bridge 依赖解包失败（沿用已有 node_modules，如果有）"
+        fi
+      fi
+      # The symlink itself is package content (a deploy replaces it) — recreate it; the
+      # 251MB behind it are not. rm without a trailing slash removes the link, not its
+      # target.
+      if [ -d "${deps_dir}/node_modules" ] && [ ! -e "${CLINE_BRIDGE_DIR}/node_modules" ]; then
+        rm -rf "${CLINE_BRIDGE_DIR}/node_modules"
+        ln -s "${deps_dir}/node_modules" "${CLINE_BRIDGE_DIR}/node_modules" 2>/dev/null ||
+          cp -R "${deps_dir}/node_modules" "${CLINE_BRIDGE_DIR}/node_modules" 2>/dev/null ||
+          log "警告：cline bridge 依赖链接失败（symlink 与拷贝都不成）"
       fi
     fi
   fi
-  if [ -d "${CLINE_BRIDGE_DIR}/node_modules" ]; then
+  if [ -e "${CLINE_BRIDGE_DIR}/node_modules" ]; then
     export AUTONOMY_CLINE_BRIDGE_SCRIPT="${CLINE_BRIDGE_DIR}/bridge.mjs"
   else
     log "警告：包里有 cline bridge 却没有依赖（bridge-deps.tgz 不在/解包失败）；沿用 AUTONOMY_CLINE_BRIDGE_SCRIPT=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"

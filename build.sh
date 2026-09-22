@@ -60,11 +60,14 @@ fi
 
 # cline bridge: same idea, but it is a Node script with a dependency tree
 # (@cline/sdk), so the package carries the sources plus a tarball of a production
-# install — scripts/start.sh extracts it next to them and points
-# AUTONOMY_CLINE_BRIDGE_SCRIPT there, which is what makes a deployed runtime's
-# cline backend come from *this release* instead of some checkout on the machine
-# (node_modules is 251MB unpacked / ~27MB packed; a deploy re-extracts only when
-# the tarball changes).
+# install — scripts/start.sh extracts it into a cache *outside* the packaged tree
+# (${RUNTIME_DIR}/.cache/cline-bridge/<sha256>, which the deploy rsync does not
+# touch), symlinks the sources' node_modules into it and points
+# AUTONOMY_CLINE_BRIDGE_SCRIPT at the packaged bridge, which is what makes a
+# deployed runtime's cline backend come from *this release* instead of some
+# checkout on the machine. The tarball still rides in the package (node_modules is
+# 251MB unpacked / ~37MB packed) so a cold machine starts offline, with neither
+# npm nor the network.
 CLINE_BRIDGE="${ROOT}/src/clinesdk/bridge"
 if [ -f "${CLINE_BRIDGE}/bridge.mjs" ]; then
   mkdir -p "${OUT}/src/clinesdk/bridge"
