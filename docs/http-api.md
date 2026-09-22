@@ -272,6 +272,19 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 }
 ```
 
+## Agent 监控面板（只读聚合 + SSE + 单页）
+
+一句话：把 runtime 已经知道的 agent 事实（`agents` 行 + 进程内 factory + `tasks` + inbox 积压 + 在途 reason turn）投影成一张实时面板。全部只读，不写任何数据；详见 [agent-monitor.md](agent-monitor.md)。
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/agents` | 聚合快照：`summary`（running/idle/blocked/done 计数）+ `agents[]`，每个 agent 带身份、`backend`/`model`、`lifecycle`、`status`、当前 task、`last_heartbeat`、`workspace` |
+| `GET /api/agents/stream` | 同一快照的 **SSE** 推送（`text/event-stream`）：每帧 `event: agents` + `data: <AgentMonitorResponse JSON>`；`?interval=N` 秒，默认 2，范围 1–300 |
+| `GET /monitor` | 单页监控面板（`text/html`，`go:embed` 进二进制；卡片 + 计数汇总 + 点击看详情与对话历史） |
+
+`status` ∈ `running | idle | blocked | done`（投影规则见 [agent-monitor.md](agent-monitor.md)）。前端优先用 `EventSource`，连不上时退化为轮询 `GET /api/agents`。
+
+## 数据 API（评测侧读日志，不再读库）
 
 ## 数据 API（评测侧读日志，不再读库）
 

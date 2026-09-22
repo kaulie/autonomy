@@ -50,6 +50,11 @@ type AgentStore interface {
 	// GetAgent reads one agent row by id (including soft-deleted). A missing row
 	// returns (nil, nil).
 	GetAgent(agentID int64) (*Agent, error)
+	// ListAgents reads every agent row, newest id first (including the ones that
+	// were let go). It is the aggregation the monitoring panel reads: the agents
+	// this runtime knows about, each row carrying its own state / lifecycle /
+	// model / current task / updated_at (the last heartbeat).
+	ListAgents() ([]*Agent, error)
 }
 
 // InboxStore is every agent's inbox: the messages addressed to it, in arrival

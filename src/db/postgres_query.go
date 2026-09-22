@@ -124,11 +124,55 @@ FROM agents WHERE id = $1`, agentID).Scan(
 	}
 	a.Lifecycle = AgentLifecycle(lifecycle)
 	a.LLMProvider = LLMProvider(provider)
+	a.CreatedAt = createdAt.UTC()
+	a.UpdatedAt = updatedAt.UTC()
 	a.DeletedAt = pgScanTime(deletedAt)
 	if taskID != "" {
 		a.CurrentTask = &Task{ID: taskID}
 	}
 	return &a, nil
+}
+
+// ListAgents reads every agent row, newest id first, soft-deleted ones included:
+// the aggregation the monitoring panel reads (Autonomy.AgentsOverview). It is
+// GetAgent's scan widened to the whole table.
+func (s *PostgresStore) ListAgents() ([]*Agent, error) {
+	rows, err := s.readPool().Query(`
+SELECT id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
+       created_at, updated_at, deleted_at
+FROM agents ORDER BY id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	defer rows.Close()
+	var out []*Agent
+	for rows.Next() {
+		var (
+			a                    Agent
+			lifecycle            string
+			taskID               string
+			provider             string
+			createdAt, updatedAt time.Time
+			deletedAt            sql.NullTime
+		)
+		if err := rows.Scan(&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model,
+			&createdAt, &updatedAt, &deletedAt); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		a.Lifecycle = AgentLifecycle(lifecycle)
+		a.LLMProvider = LLMProvider(provider)
+		a.CreatedAt = createdAt.UTC()
+		a.UpdatedAt = updatedAt.UTC()
+		a.DeletedAt = pgScanTime(deletedAt)
+		if taskID != "" {
+			a.CurrentTask = &Task{ID: taskID}
+		}
+		out = append(out, &a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agents: %w", err)
+	}
+	return out, nil
 }
 
 // ActiveReasonTurn returns the newest in-flight reason turn for the agent on the task

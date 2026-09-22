@@ -217,6 +217,13 @@ type Agent struct {
 	// says whether the agent a task names can still be resumed (see
 	// resumeAgentForTask).
 	DeletedAt time.Time
+	// CreatedAt / UpdatedAt are the row's own timestamps (agents.created_at /
+	// agents.updated_at). UpdatedAt is the last time the runtime wrote this
+	// agent's row — what the monitoring panel shows as the agent's last
+	// heartbeat (Autonomy.AgentsOverview). Zero on an agent that was never
+	// persisted (a hand-built test agent).
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// Role and Purpose are what this agent is here to do: role is planner or
 	// worker, purpose is the label the acquiring capability gave it
 	// (broker.AcquireAgentOpts.Purpose). They are runtime state — what the

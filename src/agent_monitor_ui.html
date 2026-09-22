@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Autonomy · Agent Monitor</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171d2b;
+    --panel-2: #1e2638;
+    --border: #2a3348;
+    --text: #e6ebf5;
+    --muted: #8b97ad;
+    --running: #35c46b;
+    --idle: #6b7a99;
+    --blocked: #f0a132;
+    --done: #55617a;
+    --accent: #5aa9ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 18px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+  .pill.live .dot { background: var(--running); box-shadow: 0 0 0 3px rgba(53,196,107,.18); }
+  .pill.poll .dot { background: var(--blocked); }
+  .pill.off .dot { background: #d95454; }
+  button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  main { padding: 20px 24px 64px; max-width: 1440px; margin: 0 auto; }
+  .summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .tally {
+    flex: 1 1 130px; min-width: 130px; padding: 14px 16px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  .tally .n { font-size: 26px; font-weight: 700; }
+  .tally .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .tally.running .n { color: var(--running); }
+  .tally.idle .n { color: #a9b6cf; }
+  .tally.blocked .n { color: var(--blocked); }
+  .tally.done .n { color: var(--done); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-left-width: 4px;
+    border-radius: 12px; padding: 14px 16px; cursor: pointer; transition: transform .08s ease, border-color .1s;
+  }
+  .card:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .card.running { border-left-color: var(--running); }
+  .card.idle { border-left-color: var(--idle); }
+  .card.blocked { border-left-color: var(--blocked); }
+  .card.done { border-left-color: var(--done); opacity: .78; }
+  .card .top { display: flex; align-items: center; gap: 8px; }
+  .card .name { font-weight: 650; font-size: 15px; }
+  .card .id { color: var(--muted); font-size: 12px; }
+  .card .spacer { flex: 1; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase;
+    letter-spacing: .4px; border: 1px solid currentColor;
+  }
+  .badge.running { color: var(--running); }
+  .badge.idle { color: #a9b6cf; }
+  .badge.blocked { color: var(--blocked); }
+  .badge.done { color: var(--done); }
+  .card dl { margin: 10px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12.5px; }
+  .card dt { color: var(--muted); }
+  .card dd { margin: 0; word-break: break-all; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; border: 1px dashed var(--border); border-radius: 12px; }
+</style>
+</head>
+<body>
+<style>
+  .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 20; }
+  .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100%; width: min(560px, 94vw);
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 21;
+    transform: translateX(100%); transition: transform .18s ease; overflow-y: auto;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer .head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); }
+  .drawer .head h2 { margin: 0; font-size: 16px; }
+  .drawer .body { padding: 16px 20px 48px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; margin-bottom: 18px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 18px 0 8px; }
+  .msg { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: var(--panel-2); }
+  .msg .role { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); }
+  .msg pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #cdd6e6; max-height: 240px; overflow: auto; }
+  .placeholder { color: var(--muted); font-size: 12.5px; }
+</style>
+<header>
+  <h1>Agent Monitor</h1>
+  <span class="sub">autonomy · 实时状态监控</span>
+  <span class="spacer"></span>
+  <span class="pill" id="conn"><span class="dot"></span><span id="conn-text">连接中…</span></span>
+  <span class="pill" id="stamp">—</span>
+  <button id="refresh">刷新</button>
+  <button id="sse-toggle" class="active">实时(SSE)</button>
+</header>
+<main>
+  <div class="summary" id="summary"></div>
+  <div class="grid" id="grid"><div class="empty">加载中…</div></div>
+</main>
+<div class="drawer-backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer">
+  <div class="head">
+    <h2 id="d-name">Agent</h2>
+    <span style="flex:1"></span>
+    <button id="d-close">关闭</button>
+  </div>
+  <div class="body" id="d-body"></div>
+</aside>
+<script>
+(function () {
+  "use strict";
+  var STATUSES = ["running", "idle", "blocked", "done"];
+  var grid = document.getElementById("grid");
+  var summaryEl = document.getElementById("summary");
+  var stampEl = document.getElementById("stamp");
+  var connEl = document.getElementById("conn");
+  var connText = document.getElementById("conn-text");
+  var sseToggle = document.getElementById("sse-toggle");
+
+  var state = { agents: [], summary: {}, generatedAt: null, live: false, activeId: null };
+  var es = null;
+  var pollTimer = null;
+
+  function setConn(kind, text) {
+    connEl.className = "pill " + kind;
+    connText.textContent = text;
+  }
+
+  function relTime(iso) {
+    if (!iso) return "—";
+    var t = Date.parse(iso);
+    if (isNaN(t)) return "—";
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return s + "s 前";
+    if (s < 3600) return Math.round(s / 60) + "m 前";
+    if (s < 86400) return Math.round(s / 3600) + "h 前";
+    return Math.round(s / 86400) + "d 前";
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function tally(cls, label, n) {
+    return '<div class="tally ' + cls + '"><div class="n">' + n + '</div><div class="l">' + label + "</div></div>";
+  }
+  function renderSummary(counts, total) {
+    var labels = { running: "运行中", idle: "空闲", blocked: "阻塞", done: "已结束" };
+    var html = tally("total", "总计", total == null ? 0 : total);
+    STATUSES.forEach(function (s) { html += tally(s, labels[s], counts[s] || 0); });
+    summaryEl.innerHTML = html;
+  }
+
+  function row(k, v) {
+    if (!v) v = "—";
+    return "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
+  }
+  function renderCards() {
+    if (!state.agents.length) { grid.innerHTML = '<div class="empty">没有 agent</div>'; return; }
+    grid.innerHTML = state.agents.map(function (a) {
+      var status = STATUSES.indexOf(a.status) >= 0 ? a.status : "idle";
+      return (
+        '<div class="card ' + status + '" data-id="' + a.id + '">' +
+          '<div class="top">' +
+            '<span class="name">' + esc(a.name || ("agent-" + a.id)) + "</span>" +
+            '<span class="id">#' + a.id + "</span>" +
+            '<span class="spacer"></span>' +
+            '<span class="badge ' + status + '">' + esc(a.status) + "</span>" +
+          "</div>" +
+          "<dl>" +
+            row("角色", a.role) +
+            row("后端/模型", [a.backend, a.model].filter(Boolean).join(" · ")) +
+            row("生命周期", a.lifecycle) +
+            row("当前 task", a.current_task ? a.current_task + (a.task_status ? " (" + a.task_status + ")" : "") : "—") +
+            row("最后心跳", relTime(a.last_heartbeat)) +
+            row("workspace", a.workspace) +
+          "</dl>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function render() {
+    renderSummary(state.summary || {}, state.summary ? state.summary.total : null);
+    renderCards();
+    stampEl.textContent = state.generatedAt ? "更新于 " + new Date(state.generatedAt).toLocaleTimeString() : "—";
+    if (state.activeId != null) refreshDrawer(state.activeId);
+  }
+
+  function apply(payload) {
+    if (!payload) return;
+    state.agents = payload.agents || [];
+    state.summary = payload.summary || {};
+    state.generatedAt = payload.generated_at || new Date().toISOString();
+    render();
+  }
+
+  function fetchSnapshot() {
+    return fetch("/api/agents", { headers: { Accept: "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(apply)
+      .catch(function (e) { setConn("off", "读取失败: " + e.message); });
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    setConn("poll", "轮询 (3s)");
+    fetchSnapshot();
+    pollTimer = setInterval(fetchSnapshot, 3000);
+  }
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function startSSE() {
+    stopPolling();
+    if (!window.EventSource) { startPolling(); return; }
+    try { es = new EventSource("/api/agents/stream"); } catch (e) { startPolling(); return; }
+    es.addEventListener("open", function () { setConn("live", "实时 (SSE)"); });
+    es.addEventListener("agents", function (ev) {
+      try { apply(JSON.parse(ev.data)); } catch (e) { /* ignore a bad frame */ }
+    });
+    es.addEventListener("error", function () {
+      setConn("poll", "重连中…");
+      if (!pollTimer) startPolling();
+    });
+  }
+  function startLive() {
+    if (es) { es.close(); es = null; }
+    stopPolling();
+    startSSE();
+  }
+  function goFallback() {
+    if (es) { es.close(); es = null; }
+    stopPolling();
+    startPolling();
+  }
+
+
+
+  // ---- detail drawer ----
+  var backdrop = document.getElementById("backdrop");
+  var drawer = document.getElementById("drawer");
+  var dName = document.getElementById("d-name");
+  var dBody = document.getElementById("d-body");
+
+  function closeDrawer() {
+    drawer.classList.remove("open");
+    backdrop.classList.remove("open");
+    state.activeId = null;
+  }
+  function openDrawer(id) {
+    state.activeId = id;
+    drawer.classList.add("open");
+    backdrop.classList.add("open");
+    refreshDrawer(id);
+  }
+  function findAgent(id) {
+    for (var i = 0; i < state.agents.length; i++) if (state.agents[i].id === id) return state.agents[i];
+    return null;
+  }
+  function kv(k, v) {
+    if (v === undefined || v === null || v === "") v = "—";
+    return "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
+  }
+  function refreshDrawer(id) {
+    var a = findAgent(id);
+    if (!a) { closeDrawer(); return; }
+    dName.textContent = a.name || ("agent-" + a.id);
+    var html = '<dl class="kv">' +
+      kv("id", a.id) +
+      kv("角色", a.role) +
+      kv("状态", a.status + (a.state ? " (" + a.state + ")" : "")) +
+      kv("后端", a.backend) +
+      kv("模型", a.model) +
+      kv("provider", a.llm_provider) +
+      kv("生命周期", a.lifecycle) +
+      kv("当前 task", a.current_task) +
+      kv("task 状态", a.task_status) +
+      kv("排队消息", a.queued_messages) +
+      kv("活动 run", a.active_run_id) +
+      kv("最后心跳", a.last_heartbeat ? new Date(a.last_heartbeat).toLocaleString() + " (" + relTime(a.last_heartbeat) + ")" : "") +
+      kv("workspace", a.workspace) +
+      kv("来源", a.source) +
+      (a.deleted_at ? kv("结束于", a.deleted_at) : "") +
+      "</dl>";
+    html += '<div class="section-title">对话历史</div><div id="d-history"><div class="placeholder">' +
+      (a.current_task ? "读取中…" : "该 agent 没有当前 task，无对话历史") + "</div></div>";
+    dBody.innerHTML = html;
+    if (a.current_task) loadHistory(a.current_task, a.id);
+  }
+
+  function loadHistory(taskId, agentId) {
+    var url = "/api/tasks/" + encodeURIComponent(taskId) + "/agents/" + agentId + "/events?last_synced_message_seq=0";
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (data) {
+        var host = document.getElementById("d-history");
+        if (!host || state.activeId !== agentId) return;
+        var events = (data && data.events) || [];
+        if (!events.length) { host.innerHTML = '<div class="placeholder">暂无消息</div>'; return; }
+        host.innerHTML = events.slice(-40).reverse().map(function (m) {
+          var body = m.content || "";
+          if (m.normalized_content) body += "\n\n" + m.normalized_content;
+          return '<div class="msg"><div class="role">' + esc(m.role) + (m.model ? " · " + esc(m.model) : "") +
+            '</div><pre>' + esc(body.slice(0, 4000)) + "</pre></div>";
+        }).join("");
+      })
+      .catch(function (e) {
+        var host = document.getElementById("d-history");
+        if (host && state.activeId === agentId) host.innerHTML = '<div class="placeholder">历史读取失败: ' + esc(e.message) + "</div>";
+      });
+  }
+
+  // ---- wiring ----
+  grid.addEventListener("click", function (e) {
+    var card = e.target.closest(".card");
+    if (card) openDrawer(parseInt(card.getAttribute("data-id"), 10));
+  });
+  document.getElementById("d-close").addEventListener("click", closeDrawer);
+  backdrop.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeDrawer(); });
+  document.getElementById("refresh").addEventListener("click", function () {
+    if (!state.live) fetchSnapshot();
+  });
+  sseToggle.addEventListener("click", function () {
+    if (state.live) {
+      state.live = false;
+      sseToggle.classList.remove("active");
+      goFallback();
+    } else {
+      state.live = true;
+      sseToggle.classList.add("active");
+      startLive();
+    }
+  });
+
+  state.live = true;
+  startLive();
+})();
+</script>
+</body>
+</html>
+

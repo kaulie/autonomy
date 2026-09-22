@@ -62,6 +62,13 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /api/reason-turns/facets", s.handleReasonTurnFacets},
 		{"GET /api/reason-turns/{turnID}", s.handleReasonTurn},
 		{"GET /api/meta", s.handleMeta},
+		// The agent monitoring panel: a read-only aggregation of every agent this
+		// runtime knows about (GET /api/agents), the same snapshot pushed live over
+		// Server-Sent Events (GET /api/agents/stream), and the single-page dashboard
+		// that renders them (GET /monitor). None of it writes anything.
+		{"GET /api/agents", s.handleAgentMonitor},
+		{"GET /api/agents/stream", s.handleAgentMonitorStream},
+		{"GET /monitor", s.handleAgentMonitorUI},
 		// The graceful restart the deployment platform performs on this service: one
 		// notice before it stops us, then a poll while it waits for the runs in flight
 		// to come back (src/graceful.go). A service that answers both is deployed
@@ -667,6 +674,116 @@ func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
 		HasTasksTable: true,
 		Turns:         turns,
 	})
+}
+
+// handleAgentMonitor is the monitoring panel's read: every agent this runtime
+// knows about, aggregated read-only into one shape (Autonomy.AgentsOverview) —
+// id / name / role / backend / model / lifecycle / status (running | idle |
+// blocked | done) / current task / last heartbeat / workspace, with the tally
+// the panel renders as its header. It never writes, and it is the same snapshot
+// the SSE stream pushes.
+//
+// @Summary  agent 实时状态聚合（只读）
+// @Tags     agents
+// @Produce  json
+// @Success  200  {object}  autonomy.AgentMonitorResponse  "summary（running/idle/blocked/done 计数）+ agents（每个 agent 的身份、状态、当前 task、最后心跳、workspace）"
+// @Failure  500  {object}  errResponse                     "store 读不了 agent 表"
+// @Router   /api/agents [get]
+func (s *HTTPServer) handleAgentMonitor(w http.ResponseWriter, _ *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	overview, err := s.Autonomy.AgentsOverview()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
+// handleAgentMonitorStream pushes the same aggregation the GET returns as a live
+// Server-Sent Events feed: one `event: agents` frame per interval (default 2s,
+// ?interval=N seconds), so the panel updates without polling. It is the same
+// read-only snapshot, re-taken each tick — a client that cannot keep an SSE
+// connection open falls back to polling GET /api/agents (the panel does exactly
+// that). The connection ends when the client goes away.
+//
+// @Summary  agent 实时状态流（SSE）
+// @Tags     agents
+// @Produce  text/event-stream
+// @Param    interval  query     integer false "推送间隔（秒，默认 2，最小 1，最大 300）"
+// @Success  200       {string}  string  "text/event-stream：每帧 `event: agents` + data 为 AgentMonitorResponse JSON"
+// @Failure  500       {object}  errResponse  "autonomy 未初始化"
+// @Router   /api/agents/stream [get]
+func (s *HTTPServer) handleAgentMonitorStream(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Ask common reverse proxies not to buffer the stream (nginx).
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	interval := queryInt(req.URL.Query().Get("interval"), DefaultAgentMonitorInterval, 1, MaxAgentMonitorInterval)
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+
+	send := func() bool {
+		overview, err := s.Autonomy.AgentsOverview()
+		if err != nil {
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+			flusher.Flush()
+			return false
+		}
+		payload, err := json.Marshal(overview)
+		if err != nil {
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+			flusher.Flush()
+			return false
+		}
+		fmt.Fprintf(w, "event: agents\ndata: %s\n\n", payload)
+		flusher.Flush()
+		return true
+	}
+	if !send() {
+		return
+	}
+	for {
+		select {
+		case <-req.Context().Done():
+			return
+		case <-ticker.C:
+			if !send() {
+				return
+			}
+		}
+	}
+}
+
+// handleAgentMonitorUI serves the single-page monitoring dashboard: the HTML/JS
+// page that reads GET /api/agents, keeps itself current over the SSE stream
+// (falling back to polling), and renders the agent cards, the status tally and
+// the per-agent detail. It is embedded in the binary (agent_monitor_ui.go), so
+// the service serves it with no static directory to deploy.
+//
+// @Summary  agent 状态监控面板（单页）
+// @Tags     agents
+// @Produce  text/html
+// @Success  200  {string}  string  "监控面板 HTML"
+// @Router   /monitor [get]
+func (s *HTTPServer) handleAgentMonitorUI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, agentMonitorHTML)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
