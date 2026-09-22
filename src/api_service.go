@@ -613,10 +613,18 @@ func rawJSON(text string) json.RawMessage {
 // place in the queue — what was accepted before it is not lost, it is still the
 // agent's to process next (src/inbox.go).
 //
-// A task whose agent is not processing a message is not running (a queued
-// instruction has not started): errTaskNotRunning. A missing task returns
-// errTaskNotFound.
+// This is the user's door (POST /api/tasks/{id}/stop). A task whose agent is not
+// processing a message is not running (a queued instruction has not started):
+// errTaskNotRunning. A missing task returns errTaskNotFound.
 func (r *Autonomy) StopTask(taskID string) (*Task, error) {
+	return r.stopTask(taskID, StopReason{By: stoppedByUser})
+}
+
+// stopTask is the one stop: the door above, and the runtime's own shutdown, differ only
+// in the reason they carry. The reason is recorded *before* the run is cancelled, because
+// the run loop is what marks the task stopped (markStopped) and writes with it what the
+// task row says it was stopped for.
+func (r *Autonomy) stopTask(taskID string, reason StopReason) (*Task, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("store not ready")
 	}
@@ -634,6 +642,7 @@ func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 	if !ok {
 		return nil, errTaskNotRunning
 	}
+	setStopReason(taskID, reason)
 	if cancel, ok := v.(context.CancelFunc); ok {
 		cancel()
 	}
@@ -645,7 +654,7 @@ func (r *Autonomy) StopTask(taskID string) (*Task, error) {
 				Sender:   MessageSenderSystem,
 				SenderID: "runtime",
 				Kind:     MessageKindStop,
-				Content:  "the user stopped the task",
+				Content:  reason.message(),
 			}); err != nil {
 				fmt.Fprintf(os.Stderr, "[autonomy] stop message for %s: %v\n", taskID, err)
 			}

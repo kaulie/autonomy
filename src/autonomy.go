@@ -296,6 +296,9 @@ func (r *Autonomy) processInstruction(ctx context.Context, cancel context.Cancel
 	if cancel != nil {
 		inFlightTasks.Store(task.ID, cancel)
 		defer inFlightTasks.Delete(task.ID)
+		// A reason belongs to the run it was said about: clear it where the run leaves
+		// in-flight, so a later, unrelated cancellation is not blamed on it.
+		defer clearStopReason(task.ID)
 	}
 	agent.Start()
 	persistAgent(agent)
@@ -498,6 +501,13 @@ func markStopped(task *Task) {
 	}
 	task.Status = TaskStatusStopped
 	task.Error = "stopped"
+	// Who stopped it: the caller that cancelled the run said so before it cancelled
+	// (src/stop_reason.go), and this is the one place the record is written — so a
+	// restart cutting a run is not recorded as the user's stop. No reason recorded
+	// keeps "stopped", which is what every other cancellation has always written.
+	if reason, ok := stopReasonOf(task.ID); ok {
+		task.Error = reason.errorText()
+	}
 	persistTask(task)
 }
 
