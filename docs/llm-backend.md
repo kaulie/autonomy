@@ -52,8 +52,11 @@ go run ./cmd/autonomyd                        # runtime 起在这里；另开一
 
 部署包只有 `bin/autonomyd`、`scripts/`、`src/agent_policy/`、`src/clinesdk/bridge/` 和
 `backend/`：**cline 桥随包发出**（源码 + 依赖包 `bridge-deps.tgz`，`build.sh` 在打包时
-`npm ci --omit=dev` 装好再压；`scripts/start.sh` 在启动时按 sha256 判断要不要解包，
-然后**强制**把 `AUTONOMY_CLINE_BRIDGE_SCRIPT` 指到包里的桥）。所以部署运行时切 Cline 是两步：
+`npm ci --omit=dev` 装好再压）。`scripts/start.sh` 启动时把依赖解到**服务目录之外的缓存**
+（`${AUTONOMY_CACHE_DIR:-$RUNTIME_DIR/.cache}/cline-bridge/<tarball 的 sha256>`，部署平台的
+rsync 不碰 `.cache/`，所以每次部署不用重解；按 sha 去重、只留最近两份），再在源码目录建一个
+`node_modules` 符号链接（Node 的裸包解析要从脚本所在目录往上找，ESM 又不认 `NODE_PATH`），
+最后**强制**把 `AUTONOMY_CLINE_BRIDGE_SCRIPT` 指到包里的桥。所以部署运行时切 Cline 是两步：
 
 1. 在 `~/runtime/<service>/backend/.env` 里加（`scripts/start.sh` 生成的模板里这几行已有注释版）：
 
