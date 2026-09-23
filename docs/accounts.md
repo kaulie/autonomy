@@ -44,12 +44,25 @@
 | `PATCH /api/accounts/{accountId}` | 改（只传要改的字段；`apiKey` 不传就保持原样） |
 | `DELETE /api/accounts/{accountId}` | 删除 |
 | `POST /api/accounts/{accountId}/verify` | 探活：默认只**加载桥**（免费）；`?live=1` 用该账号的凭据**真跑一轮** |
+| `GET /api/accounts/vendors?harness=` | 该 harness 可选的 **vendor 列表**（UI 的下拉数据） |
+| `GET /api/accounts/models?harness=&vendor=` | 该 vendor 的 **model 列表**（可为空 = 由 harness 自己解析） |
 
 掩码不是「小心返回」：领域类型 `autonomy.Account` 的 key 是 `json:"-"`，**从类型上就渲染不出来**。
 
 页面：**`GET /accounts`** —— 与 dashboard 同款自包含页（0 构建），列表/新增/编辑/启停/设默认/
 verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。agent 状态页（`/dashboard`）多一列
 `Account`，写明每只 agent 花的是谁的额度。
+
+## vendor 与 model 是**选**出来的，不是打出来的
+
+- 页面上的 vendor 是**下拉**，数据来自 `GET /api/accounts/vendors`：cline 会去问桥，桥问 Cline SDK
+  （本机实测 **216** 个 provider）；拿不到桥时回落到一份静态清单（与 web-cursor 的
+  `FALLBACK_CLINE_VENDORS` 同一份：deepseek / minimax / anthropic / openai / openai-compatible）；
+- model 是**带建议的输入框**（datalist），数据来自 `GET /api/accounts/models`：有些 harness 能列出
+  自己的模型，有些（codex/cursor）由 CLI/SDK 自己解析 —— 那种情况下列表为空、字段仍可手填；
+- 两个接口都可以带 `accountId`：目录是**用那个账号的凭据**去读的（有些 provider 不给 key 不回答）；
+- 这与 web-cursor 完全同构：它的 `GET /api/providers` + `GET /api/models` 就是这两个问题；
+- 目录只是**建议**：池子仍然接受手填的 vendor（provider 的清单会变，不该由我们替它把关）。
 
 ## 怎么被选中（`src/agent_account.go`）
 

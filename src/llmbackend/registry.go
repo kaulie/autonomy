@@ -50,6 +50,13 @@ type Harness struct {
 	// CloseClient shuts down this harness's process-wide bridge client (optional: a
 	// harness without one leaves it nil).
 	CloseClient func() error
+	// Vendors lists the vendors this harness can be configured with, for a UI that offers them
+	// as a list rather than asking a human to type one (web-cursor's /api/providers). Empty means
+	// the harness has no catalogue of its own; nil means it cannot answer at all.
+	Vendors func(ctx context.Context, creds Creds) ([]string, error)
+	// Models lists the models a vendor exposes for this harness (web-cursor's /api/models).
+	// Empty is a real answer: the harness resolves the model itself.
+	Models func(ctx context.Context, creds Creds) ([]string, error)
 	// Probe checks one set of credentials without an agent behind them: the bridge handshake
 	// every time, plus — when live is asked for — one short turn the account itself answers.
 	// It is what lets a UI say "this pool entry is usable" before a task is handed to it
@@ -75,6 +82,32 @@ type ProbeResult struct {
 	Model  string
 	Text   string
 	Detail string
+}
+
+// VendorsFor lists the vendors one backend can be configured with, and ModelsFor the models of
+// one of its vendors: the two catalogues a pool UI needs so a human picks from a list instead of
+// typing an identifier (web-cursor answers both from its provider registry).
+func VendorsFor(ctx context.Context, backend Backend, creds Creds) ([]string, error) {
+	harness, ok := harnessFor(backend)
+	if !ok {
+		return nil, harnessMissingErr(backend)
+	}
+	if harness.Vendors == nil {
+		return nil, nil
+	}
+	return harness.Vendors(ctx, creds)
+}
+
+// ModelsFor is VendorsFor's other half: what a vendor offers this harness.
+func ModelsFor(ctx context.Context, backend Backend, creds Creds) ([]string, error) {
+	harness, ok := harnessFor(backend)
+	if !ok {
+		return nil, harnessMissingErr(backend)
+	}
+	if harness.Models == nil {
+		return nil, nil
+	}
+	return harness.Models(ctx, creds)
 }
 
 // ProbeHarness probes a set of credentials on one backend, reporting a missing harness by
