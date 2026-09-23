@@ -24,6 +24,10 @@ const uiHomeHTML = `<!DOCTYPE html>
   h1 { font-size: 16px; margin: 0; }
   .status { color: #667085; font-size: 12px; }
   .status code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .refresh { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: #475467; }
+  .refresh .seg { font: inherit; padding: 2px 8px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; }
+  .refresh .seg.active { background: #1c4ed8; border-color: #1c4ed8; color: #fff; }
+  .refresh .check { display: flex; gap: 5px; align-items: center; margin-right: 4px; }
   .main { flex: 1; display: flex; min-height: 0; }
   nav { width: 200px; flex: none; background: #fff; border-right: 1px solid #eaecf0; padding: 10px; }
   nav button { display: block; width: 100%; text-align: left; font: inherit; padding: 8px 10px; margin-bottom: 4px; border: 0; border-radius: 6px; background: transparent; color: #344054; cursor: pointer; }
@@ -40,6 +44,12 @@ const uiHomeHTML = `<!DOCTYPE html>
 <header>
   <h1>Autonomy</h1>
   <div class="status" id="status">…</div>
+  <div class="refresh" id="refreshbar">
+    <label class="check"><input type="checkbox" id="auto" checked> auto-refresh</label>
+    <button class="seg" data-every="5">5s</button>
+    <button class="seg" data-every="10">10s</button>
+    <button class="seg" data-every="15">15s</button>
+  </div>
 </header>
 <div class="main">
   <nav id="nav">
@@ -60,19 +70,43 @@ const uiHomeHTML = `<!DOCTYPE html>
 // and a line here (and a button above).
 const MODULES = { dashboard: "/dashboard", accounts: "/accounts" };
 
+// Views that poll, and so are the ones the refresh control applies to. A detail view
+// (#/agents/12/events) is a path rather than a module, which is how a row in agent status opens
+// one without the shell having to know every view by name.
+function polls(path) { return path.indexOf("/dashboard") === 0 || path.indexOf("/agents/") === 0; }
+
+let every = 10;
+let lastEvery = 10;
+
 const $ = (id) => document.getElementById(id);
 
-function show(name) {
-  if (!MODULES[name]) name = "dashboard";
-  const path = MODULES[name];
+function currentPath() {
+  const raw = location.hash.replace(/^#/, "");
+  if (MODULES[raw]) return MODULES[raw];
+  if (raw.indexOf("/") === 0) return raw;      // a detail view: #/agents/12/events?task=t1
+  return MODULES.dashboard;
+}
+
+function show() {
+  const path = currentPath();
+  const poll = polls(path);
   document.querySelectorAll("#nav button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.module === name);
+    const modulePath = MODULES[b.dataset.module];
+    const active = b.dataset.module === "dashboard" ? poll : path.indexOf(modulePath) === 0;
+    b.classList.toggle("active", active);
   });
-  // ?embed=1 tells the module to drop its own title: this shell owns the page.
-  $("frame").src = path + "?embed=1";
+  $("refreshbar").style.display = poll ? "" : "none";
+  document.querySelectorAll(".refresh .seg").forEach((b) => {
+    b.classList.toggle("active", Number(b.dataset.every) === lastEvery && every > 0);
+  });
+  $("auto").checked = every > 0;
+  // ?embed=1 tells the module to drop its own title (this shell owns the page); every=<seconds>
+  // tells the ones that poll how often, and 0 means they do not.
+  const separator = path.indexOf("?") >= 0 ? "&" : "?";
+  $("frame").src = path + separator + "embed=1" + (poll ? "&every=" + every : "");
   $("path").textContent = path;
   $("open").href = path;
-  document.title = "Autonomy · " + name;
+  document.title = "Autonomy · " + path;
 }
 
 $("nav").addEventListener("click", (event) => {
@@ -81,7 +115,21 @@ $("nav").addEventListener("click", (event) => {
   location.hash = button.dataset.module;
 });
 
-window.addEventListener("hashchange", () => show(location.hash.replace(/^#/, "")));
+window.addEventListener("hashchange", show);
+
+$("refreshbar").addEventListener("click", (event) => {
+  const button = event.target.closest(".seg");
+  if (!button) return;
+  lastEvery = Number(button.dataset.every) || 10;
+  every = lastEvery;
+  show();
+});
+
+$("auto").addEventListener("change", () => {
+  // Off remembers what the interval was, so turning it back on does not silently reset it.
+  every = $("auto").checked ? lastEvery : 0;
+  show();
+});
 
 // /health answers what someone wants before picking a module: which backend, on whose account,
 // and how much has happened.
@@ -104,7 +152,7 @@ async function refreshStatus() {
   }
 }
 
-show(location.hash.replace(/^#/, "") || "dashboard");
+show();
 refreshStatus();
 setInterval(refreshStatus, 5000);
 </script>

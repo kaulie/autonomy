@@ -33,6 +33,10 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 
 ## 端点
 
+> 一只 agent 的消息（收到的 inbox + 自己的回复）见 `GET /api/agents/{agentID}/messages`，
+> 它背后是 UI 的两个视图：`GET /agents/{agentID}/events`（实时事件流）与
+> `GET /agents/{agentID}/messages`（消息流），见 [ui.md](ui.md)。
+
 > 账号池（`/api/accounts` 与页面 `GET /accounts`）见 [accounts.md](accounts.md)：一个账号 =
 > harness + vendor + 一把凭据，运行时的凭据只从这里来（不再有 `AUTONOMY_*_API_KEY` 注入）。
 
