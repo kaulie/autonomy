@@ -6,6 +6,7 @@
 | `stop.sh` | TERM → 等待 → KILL |
 | `restart.sh` | 控制面默认 `restartCmd`（`stop` 然后 `start`） |
 | `fetch-bridge.sh` | Download the pinned `cursor-sdk-bridge` standalone binary (Cursor backend)。`--print-version` 打印 pin 的版本（**版本只 pin 在它这一处**，`build.sh` 问它而不是自己知道），`--dest DIR` 下到别处（build.sh 用它填构建机缓存） |
+| `install-codex-bridge.sh` | `npm install` the Codex bridge's dependencies (`@openai/codex-sdk`) under `src/codexsdk/bridge/` (Codex backend) — 开发机上跑一次；打包时 `build.sh` 自己会装并把依赖压进发版包 |
 | `install-cline-bridge.sh` | `npm install` the Cline bridge's dependencies (`@cline/sdk`) under `src/clinesdk/bridge/` (Cline backend) — 开发机上跑一次；打包时 `build.sh` 自己会取（优先 checkout 的 `node_modules`，其次构建机缓存 `~/.cache/autonomy/cline-bridge-deps/<lock 的 sha256>.tgz`，最后 `npm ci --omit=dev`），取不到就**构建失败** |
 
 ## 构建缓存（`build.sh`）

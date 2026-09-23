@@ -10,7 +10,9 @@
 package all
 
 import (
-	// The Cursor and Cline harnesses: the two providers this build can run agents on.
+	// The harnesses this build can run agents on: one folder each, registered by importing
+	// them (see the package comment).
 	_ "github.com/kaulie/autonomy/src/llmbackend/cline"
+	_ "github.com/kaulie/autonomy/src/llmbackend/codex"
 	_ "github.com/kaulie/autonomy/src/llmbackend/cursor"
 )

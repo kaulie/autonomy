@@ -37,6 +37,7 @@ const (
 	Local  Backend = "local"
 	Cursor Backend = "cursor"
 	Cline  Backend = "cline"
+	Codex  Backend = "codex"
 )
 
 // Provider identifies which LLM provider backs an agent.
@@ -45,6 +46,7 @@ type Provider string
 const (
 	ProviderCursor          Provider = "cursor"
 	ProviderCline           Provider = "cline"
+	ProviderCodex           Provider = "codex"
 	ProviderDeepseekHarness Provider = "deepseek_harness"
 )
 

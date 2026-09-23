@@ -67,8 +67,11 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 			return nil, bridgeErr("%s script not found at %s (set %s; %s)", cfg.label(), abs, cfg.ScriptEnv, cfg.InstallHint)
 		}
 	}
+	// The child's working directory is the script's own directory — unless the caller
+	// brought its own command (a fake bridge, or an externally managed one), in which case
+	// the script path says nothing about where it should run.
 	dir := m.Dir
-	if dir == "" {
+	if dir == "" && len(m.Command) == 0 {
 		dir = filepath.Dir(abs)
 	}
 	args := m.Command

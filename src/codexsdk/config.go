@@ -44,3 +44,41 @@ func NewClient(opts ...bridgesdk.ClientOption) *bridgesdk.Client {
 
 // NewBridgeManager builds the process manager for the Codex bridge.
 func NewBridgeManager() *bridgesdk.BridgeManager { return &bridgesdk.BridgeManager{Config: Config()} }
+
+// The shared protocol client, under the names a harness's callers expect.
+type (
+	Client             = bridgesdk.Client
+	ClientOption       = bridgesdk.ClientOption
+	Agent              = bridgesdk.Agent
+	AgentFactory       = bridgesdk.AgentFactory
+	CreateOptions      = bridgesdk.CreateOptions
+	Run                = bridgesdk.Run
+	RunEvent           = bridgesdk.RunEvent
+	RunResult          = bridgesdk.RunResult
+	RunUsage           = bridgesdk.RunUsage
+	BridgeManager      = bridgesdk.BridgeManager
+	BridgeInfo         = bridgesdk.BridgeInfo
+	BridgeProcessError = bridgesdk.BridgeProcessError
+	RPCError           = bridgesdk.RPCError
+	RunError           = bridgesdk.RunError
+	Model              = bridgesdk.Model
+)
+
+// Run/LLM statuses, re-exported so callers do not import two packages for one concept.
+const (
+	LLMStatusFinished  = bridgesdk.LLMStatusFinished
+	LLMStatusError     = bridgesdk.LLMStatusError
+	LLMStatusCancelled = bridgesdk.LLMStatusCancelled
+)
+
+// Client options.
+var (
+	WithProvider     = bridgesdk.WithProvider
+	WithModel        = bridgesdk.WithModel
+	WithAPIKey       = bridgesdk.WithAPIKey
+	WithBaseURL      = bridgesdk.WithBaseURL
+	WithMode         = bridgesdk.WithMode
+	WithWorkspace    = bridgesdk.WithWorkspace
+	WithSystemPrompt = bridgesdk.WithSystemPrompt
+	WithManager      = bridgesdk.WithManager
+)

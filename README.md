@@ -152,8 +152,8 @@ Live smoke (optional): `CURSOR_LIVE=1 go test ./src -run TestLLMReasonerLive -ti
 
 ### Cline backend (resident agent sessions)
 
-`AUTONOMY_LLM_BACKEND=cline` runs acquired coding agents on the Cline SDK instead
-of the Cursor SDK bridge. Cline's agent core is TypeScript-only, so Go drives it
+`AUTONOMY_LLM_BACKEND=cline` (or `=codex`) runs acquired coding agents on the Cline SDK
+(or the OpenAI Codex SDK) instead of the Cursor SDK bridge. Cline's agent core is TypeScript-only, so Go drives it
 through a small Node bridge (`src/clinesdk/bridge/bridge.mjs`, NDJSON over stdio)
 that owns the resident Cline session; the Go side owns process lifecycle, request
 correlation, event fan-out and the mapping onto neutral `LLMEvent`s. Design,
