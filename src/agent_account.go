@@ -96,9 +96,15 @@ func (a *Agent) accountSummary() string {
 	if a == nil || a.AccountID == "" {
 		return ""
 	}
+	// A row read back from the store knows the account id but not its label (the label lives in
+	// the pool, and the backend is runtime state that is not persisted): what a status can
+	// always say is the id, and everything else it happens to hold.
 	label := a.accountLabel
 	if label == "" {
-		label = a.AccountID
+		return a.AccountID
+	}
+	if a.Backend == "" || a.Backend == llmbackend.Local {
+		return fmt.Sprintf("%s (%s)", a.AccountID, label)
 	}
 	return fmt.Sprintf("%s (%s/%s)", a.AccountID, a.Backend, label)
 }
