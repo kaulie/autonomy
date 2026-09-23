@@ -4,6 +4,7 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
 	"context"
+	"github.com/kaulie/autonomy/src/llmbackend/cline"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +28,9 @@ func TestFakeBridgeProcess(t *testing.T) {
 // and resets it afterwards.
 func installFakeClineClient(t *testing.T) {
 	t.Helper()
-	previousClient := llmbackend.SwapClineClient(nil)
-	previousFactory := llmbackend.ClineClientFactory
-	llmbackend.ClineClientFactory = func(string) *clinesdk.Client {
+	previousClient := cline.SwapClineClient(nil)
+	previousFactory := cline.ClineClientFactory
+	cline.ClineClientFactory = func(string) *clinesdk.Client {
 		return clinesdk.NewClient(
 			clinesdk.WithManager(fakebridge.Manager(os.Args[0])),
 			clinesdk.WithProvider("deepseek"),
@@ -37,8 +38,8 @@ func installFakeClineClient(t *testing.T) {
 		)
 	}
 	t.Cleanup(func() {
-		client := llmbackend.SwapClineClient(previousClient)
-		llmbackend.ClineClientFactory = previousFactory
+		client := cline.SwapClineClient(previousClient)
+		cline.ClineClientFactory = previousFactory
 		if client != nil {
 			_ = client.Close()
 		}

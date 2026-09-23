@@ -1,5 +1,9 @@
 package autonomy
 
+import (
+	"github.com/kaulie/autonomy/src/llmbackend/cursor"
+)
+
 import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
@@ -251,7 +255,7 @@ func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
 func TestNewCursorClientIsSingleEntry(t *testing.T) {
 	t.Parallel()
 	// Smoke: constructor returns a client; real bridge not required.
-	c := llmbackend.NewCursorClient(t.TempDir())
+	c := cursor.NewCursorClient(t.TempDir())
 	if c == nil {
 		t.Fatal("nil client")
 	}

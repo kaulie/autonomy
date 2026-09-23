@@ -1,5 +1,9 @@
 package autonomy
 
+import (
+	"github.com/kaulie/autonomy/src/llmbackend/cline"
+)
+
 import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
@@ -19,7 +23,7 @@ func clineAgentEvent(inner map[string]any) clinesdk.RunEvent {
 }
 
 func TestClineAdapterMapsChannels(t *testing.T) {
-	adapter := llmbackend.ClineStreamAdapter{}
+	adapter := cline.ClineStreamAdapter{}
 	if adapter.Provider() != llmbackend.ProviderCline {
 		t.Fatalf("provider=%q", adapter.Provider())
 	}
@@ -144,7 +148,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 }
 
 func TestClineAdapterAnnotatesToolPayloads(t *testing.T) {
-	adapter := llmbackend.ClineStreamAdapter{}
+	adapter := cline.ClineStreamAdapter{}
 	mapped, ok := adapter.MapEvent(clineAgentEvent(map[string]any{
 		"type": "content_end", "contentType": "tool", "toolName": "run_commands",
 		"toolCallId": "call-9", "input": map[string]any{"commands": []string{"ls"}},
@@ -172,7 +176,7 @@ func TestClineAdapterAnnotatesToolPayloads(t *testing.T) {
 }
 
 func TestClineAdapterDropsAgentEchoChunks(t *testing.T) {
-	adapter := llmbackend.ClineStreamAdapter{}
+	adapter := cline.ClineStreamAdapter{}
 	if _, ok := adapter.MapEvent(clineEvent("chunk", map[string]any{"stream": "agent", "chunk": `{"type":"done"}`}), time.Now()); ok {
 		t.Fatal("agent echo chunk should be dropped (it duplicates agent_event)")
 	}
@@ -188,7 +192,7 @@ func TestClineRunResultToLLMRun(t *testing.T) {
 		TotalTokens: 1640, CostUSD: 0.000052113, HasCost: true, ReasoningTokens: &reasoning,
 	}
 	started := time.Now().Add(-2 * time.Second)
-	meta := llmbackend.ClineRunResultToLLMRun(clinesdk.RunResult{
+	meta := cline.ClineRunResultToLLMRun(clinesdk.RunResult{
 		AgentID: "cls_1", SessionID: "cls-session-1", Status: "finished",
 		Text: "pong", Usage: usage, StartedAt: started,
 	}, started)
@@ -210,7 +214,7 @@ func TestClineRunResultToLLMRun(t *testing.T) {
 }
 
 func TestClineRunResultWithoutCostStaysUnknown(t *testing.T) {
-	meta := llmbackend.ClineRunResultToLLMRun(clinesdk.RunResult{Status: "finished", Text: "ok"}, time.Now())
+	meta := cline.ClineRunResultToLLMRun(clinesdk.RunResult{Status: "finished", Text: "ok"}, time.Now())
 	if meta.Usage.CostKnown {
 		t.Fatal("cost must stay unknown when the provider reports none")
 	}
@@ -225,7 +229,7 @@ func TestClineRunResultWithoutCostStaysUnknown(t *testing.T) {
 // thinking_duration_ms) or only streams deltas (Cline).
 func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
 	start := time.Now()
-	adapter := llmbackend.ClineStreamAdapter{}
+	adapter := cline.ClineStreamAdapter{}
 
 	// Cline: reasoning deltas plus a block-end event repeating the whole text.
 	var clineEvents []llmbackend.Event
