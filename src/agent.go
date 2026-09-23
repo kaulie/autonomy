@@ -152,6 +152,29 @@ func (f *AgentFactory) ForTask(taskID string) *Agent {
 	return nil
 }
 
+// forInitialization returns an agent that was initialized (AgentInitializer) and
+// is not yet bound to a task — the agent a task accepted *after* initialization is
+// paired with. Initialization happens first and the task arrives second, so the
+// agent the caller built is the one the task gets (resumeAgentForTask).
+//
+// It only ever returns a planner: a delegated worker (Role worker) is one a
+// capability acquired for a job, never an agent waiting for its task.
+func (f *AgentFactory) forInitialization() *Agent {
+	if f == nil {
+		return nil
+	}
+	for _, agent := range f.agents {
+		if agent == nil || agent.CurrentTask != nil {
+			continue
+		}
+		if agent.Role != AgentRolePlanner {
+			continue
+		}
+		return agent
+	}
+	return nil
+}
+
 // Adopt registers an agent that was rebuilt from its stored row (see
 // restoredAgent), under the name that row already has, so the handle the runtime
 // is about to use is the one later instructions find. Unlike NewAgent it
@@ -203,11 +226,27 @@ type Agent struct {
 	// worker, purpose is the label the acquiring capability gave it
 	// (broker.AcquireAgentOpts.Purpose). They are runtime state — what the
 	// agent's own prompt is rendered from — and are not persisted.
-	Role        AgentRole
-	Purpose     string
-	CurrentTask *Task
-	Context     string
-	DecideMaker *DecisionMaker
+	Role    AgentRole
+	Purpose string
+	// SystemPrompt is what this agent was initialized with (AgentInitializer), given
+	// before any task exists for it. It is carried in the reasoning frame, so it
+	// reaches the agent's session ahead of the task's own words (buildReasoningFrame).
+	SystemPrompt string
+	// RequirePlanApproval makes the agent plan first and wait: the run pauses on the
+	// first plan it makes (status awaiting_approval) and only a confirmation
+	// (MessageKindApproval) lets that plan execute, so implementation starts after
+	// the plan is approved, never before (see AgentInitializer).
+	RequirePlanApproval bool
+	// pendingPlan is the plan a paused run is waiting on, together with the record it
+	// wrote when it paused; planApproved is set while a confirmation is being
+	// processed, so the run executes that plan instead of planning it again.
+	pendingPlan      *Decision
+	pendingPlanID    int64
+	pendingPlanSteps []ExecutionStepPlan
+	planApproved     bool
+	CurrentTask      *Task
+	Context          string
+	DecideMaker      *DecisionMaker
 	// Session is this agent's conversation with its LLM — where its turns are taken
 	// and recorded. Every agent has one: the runtime gives the task's own agent a
 	// session when it starts the task (Autonomy.Run), and Runtime.AcquireAgent gives

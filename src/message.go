@@ -37,6 +37,11 @@ const (
 	// a conversation turn and must not create, replace, or execute a plan
 	// (AcceptTaskRequest.Mode = "chat").
 	MessageKindChat AgentMessageKind = "chat"
+	// MessageKindApproval is the user confirming a plan the agent produced and is
+	// waiting on: the run releases the plan it paused on (status awaiting_approval)
+	// and executes it, so implementation starts after the plan is approved
+	// (AcceptTaskRequest.Approve, Agent.RequirePlanApproval).
+	MessageKindApproval AgentMessageKind = "approval"
 	// MessageKindDelegation is another agent handing this one a job — what a
 	// capability prompts a worker it acquired with.
 	MessageKindDelegation AgentMessageKind = "delegation"

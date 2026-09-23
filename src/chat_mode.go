@@ -13,19 +13,25 @@ const (
 	// UserMessageModeChat talks to the planner only and must not change
 	// an already written plan (inbox kind = chat).
 	UserMessageModeChat = "chat"
+	// UserMessageModeApprove confirms a plan the agent is waiting on; it is the
+	// mode spelling of AcceptTaskRequest.Approve (inbox kind = approval).
+	UserMessageModeApprove = "approve"
 )
 
 // parseUserMessageKind maps AcceptTaskRequest.Mode onto an inbox kind.
 // Empty / "command" stay the old instruction; "chat" is planner conversation;
-// anything else is a caller error (HTTP 400).
+// "approve" is a confirmation of a pending plan; anything else is a caller error
+// (HTTP 400).
 func parseUserMessageKind(mode string) (AgentMessageKind, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", UserMessageModeCommand:
 		return MessageKindInstruction, nil
 	case UserMessageModeChat:
 		return MessageKindChat, nil
+	case UserMessageModeApprove:
+		return MessageKindApproval, nil
 	default:
-		return "", fmt.Errorf(`mode must be "chat" or "command"`)
+		return "", fmt.Errorf(`mode must be "chat", "command" or "approve"`)
 	}
 }
 

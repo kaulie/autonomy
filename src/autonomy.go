@@ -292,6 +292,12 @@ func (r *Autonomy) processInstruction(ctx context.Context, cancel context.Cancel
 	if agent.Session == nil || agent.Session.agent == nil || agent.Session.taskID != task.ID {
 		agent.Session = NewLLMSession(r.Runtime, agent, SessionOpts{TaskID: task.ID})
 	}
+	// A confirmation releases the plan the run paused on (Agent.RequirePlanApproval):
+	// the loop executes that plan instead of planning again (runLoop). It only means
+	// something while a plan is actually pending — otherwise it is just an instruction.
+	if msg.Kind == MessageKindApproval && agent.pendingPlan != nil {
+		agent.planApproved = true
+	}
 	// Processing a message is running a task: that is what a stop cancels
 	// (POST /api/tasks/{id}/stop) and what says a task is running at all.
 	if cancel != nil {
@@ -371,6 +377,22 @@ func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input 
 			if !r.ShouldContinue(agent) {
 				break
 			}
+			// A confirmation executes the plan the run paused on, instead of planning
+			// again: the user approved *that* plan, so it is the one that runs
+			// (Agent.RequirePlanApproval, MessageKindApproval).
+			if agent != nil && agent.planApproved && agent.pendingPlan != nil {
+				decision = *agent.pendingPlan
+				planID, planned := agent.pendingPlanID, agent.pendingPlanSteps
+				agent.pendingPlan, agent.pendingPlanID, agent.pendingPlanSteps = nil, 0, nil
+				agent.planApproved = false
+				cycles++
+				if cycles > r.maxSteps() {
+					break
+				}
+				r.dispatchExecuteApproved(events, decision, planID, planned)
+				needDecide = false
+				continue
+			}
 			cycles++
 			if cycles > r.maxSteps() {
 				break
@@ -395,6 +417,28 @@ func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input 
 			// and where its plan row is written. A concluding decision carries no steps,
 			// so running it *is* that check and that row — still on the worker, so the
 			// planner loop is free while it happens.
+			//
+			// The confirmation gate: an agent that must plan first does not implement
+			// here. The plan is written and the run pauses on it
+			// (TaskStatusAwaitingApproval) until the user confirms, so implementation
+			// starts after the plan is approved, never before (Agent.RequirePlanApproval).
+			if needsPlanApproval(agent, decision) {
+				planID, planned, perr := r.Runtime.RecordPlanOnly(decision)
+				if perr != nil {
+					perr = fmt.Errorf("record plan for approval: %w", perr)
+					failTask(task, perr)
+					return perr
+				}
+				agent.pendingPlan = &decision
+				agent.pendingPlanID = planID
+				agent.pendingPlanSteps = planned
+				if task != nil {
+					task.Status = TaskStatusAwaitingApproval
+					task.Error = ""
+					persistTask(task)
+				}
+				return nil
+			}
 			r.dispatchExecute(events, decision)
 			needDecide = false
 			continue
@@ -484,6 +528,31 @@ func (r *Autonomy) dispatchExecute(events chan<- cycleDone, decision Decision) {
 			}
 		}()
 		result, execErr := r.Runtime.Execute(decision)
+		if execErr != nil {
+			result.Err = execErr
+		}
+		events <- cycleDone{decision: decision, result: result}
+	}()
+}
+
+// dispatchExecuteApproved is dispatchExecute for a plan the run paused on and the
+// user has since confirmed: the plan is already on record, so the worker runs its
+// steps (Runtime.ExecuteApproved) instead of writing the plan again. Everything else
+// — the worker goroutine, the panic guard, the cycleDone event — is the same.
+func (r *Autonomy) dispatchExecuteApproved(events chan<- cycleDone, decision Decision, planID int64, planned []ExecutionStepPlan) {
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				events <- cycleDone{
+					decision: decision,
+					result: Result{
+						Err:     fmt.Errorf("execute panic: %v", rec),
+						Message: fmt.Sprintf("execute panic: %v", rec),
+					},
+				}
+			}
+		}()
+		result, execErr := r.Runtime.ExecuteApproved(decision, planID, planned)
 		if execErr != nil {
 			result.Err = execErr
 		}

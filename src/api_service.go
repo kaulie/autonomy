@@ -22,8 +22,14 @@ type AcceptTaskRequest struct {
 	ContextRef  map[string]string `json:"context_ref,omitempty"`
 	// Mode is how a follow-up message is handled: "command" (default) is a
 	// normal instruction that may replan; "chat" talks to the planner and
-	// must not change an already written plan.
+	// must not change an already written plan; "approve" confirms a plan the
+	// agent is waiting on (same as Approve).
 	Mode string `json:"mode,omitempty"`
+	// Approve confirms a plan the agent is waiting on (Agent.RequirePlanApproval):
+	// it makes this message a confirmation (inbox kind = approval), so the run
+	// releases the plan it paused on (status awaiting_approval) and implements it —
+	// implementation starts only after the plan is approved.
+	Approve bool `json:"approve,omitempty"`
 }
 
 // AcceptTaskResponse is returned as soon as the instruction is accepted: its task
@@ -390,6 +396,11 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	kind, err := parseUserMessageKind(req.Mode)
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
+	}
+	// Approve (either way of saying it) makes this message a confirmation, not an
+	// instruction that replans (see AcceptTaskRequest.Approve).
+	if req.Approve {
+		kind = MessageKindApproval
 	}
 	// Chat is a conversation with the planner: the task row (description,
 	// status, the plan it already has) is not the thing being asked about.

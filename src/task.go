@@ -19,6 +19,11 @@ const (
 	TaskStatusBlocked    = "blocked"
 	TaskStatusNeedInput  = "need_input"
 	TaskStatusError      = "error"
+	// TaskStatusAwaitingApproval is a run paused on a plan the agent must get the
+	// user to confirm before implementing (Agent.RequirePlanApproval): the plan is
+	// on record, nothing has run, and a confirmation (AcceptTaskRequest.Approve)
+	// releases it. It is a run waiting, not a task that ended.
+	TaskStatusAwaitingApproval = "awaiting_approval"
 	// TaskStatusStopped is a run cancelled by POST /api/tasks/{id}/stop. It is not
 	// a planner answer (done / blocked / need_input) and not a failed action.
 	TaskStatusStopped = "stopped"
