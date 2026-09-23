@@ -115,9 +115,15 @@ export APP_VERSION
 
 # 发版包自带的 cursor bridge（build.sh 放进 bin/）：runtime 的 defaultBridgeBinary
 # 只按【进程 cwd】找 third_party/bin/cursor-sdk-bridge，而部署的 cwd 是 runtimeDir
-# —— 所以这里明说它在哪。backend/.env 里显式设了 CURSOR_SDK_BRIDGE_BIN 就听它的；
-# 也可以自己指向别处的桥（或干脆用 CURSOR_SDK_BRIDGE_URL 附到外部桥）。
-if [ -z "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-bridge" ]; then
+# —— 所以这里明说它在哪。包里有它就**用它**（连 `.env` 里的值也覆盖）：backend/.env
+# 每次部署都保留，一条指向某个 checkout 的路径会把桥钉死在那份没人更新的代码上（和上面
+# 端口、以及下面的 cline 桥同一条规矩）。要跑外部的桥就设 CURSOR_SDK_BRIDGE_URL
+# （附到外部桥，那是一种模式而不是一条路径，这里不动它）；包里的缺席时，才听 .env 的
+# CURSOR_SDK_BRIDGE_BIN。
+if [ -z "${CURSOR_SDK_BRIDGE_URL:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-bridge" ]; then
+  if [ -n "${CURSOR_SDK_BRIDGE_BIN:-}" ] && [ "${CURSOR_SDK_BRIDGE_BIN}" != "${RUNTIME_DIR}/bin/cursor-sdk-bridge" ]; then
+    log "cursor 桥：用发版包里的 ${RUNTIME_DIR}/bin/cursor-sdk-bridge（.env 里的 ${CURSOR_SDK_BRIDGE_BIN} 不参与）"
+  fi
   export CURSOR_SDK_BRIDGE_BIN="${RUNTIME_DIR}/bin/cursor-sdk-bridge"
 fi
 

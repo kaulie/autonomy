@@ -87,8 +87,15 @@ rsync 不碰 `.cache/`，所以每次部署不用重解；按 sha 去重、只�
 
 - `cline`：桥脚本存在、依赖能被 Node 从脚本目录向上解析到（`node_modules/@cline/sdk`），并且**真加载一次**
   （`printf '{"id":"…","cmd":"ping"}' | node bridge.mjs` 要回 `"type":"ready"`；不联网、不用凭据）；
-- `cursor`：`CURSOR_SDK_BRIDGE_URL` 有值，或 `CURSOR_SDK_BRIDGE_BIN` 指向可执行文件（包里的
-  `bin/cursor-sdk-bridge` 会被自动指上）。
+- `cursor`：`CURSOR_SDK_BRIDGE_URL` 有值（附到外部桥），或 `CURSOR_SDK_BRIDGE_BIN` 指向可执行文件——
+  **包里的 `bin/cursor-sdk-bridge` 会被自动指上、并覆盖 `.env` 里的值**（与端口、cline 桥同一条规矩：
+  `.env` 每次部署都保留，一条指向某个 checkout 的路径会把桥钉死在那份没人更新的代码上）。
+  `CURSOR_SDK_BRIDGE_URL` 是一种**模式**而不是一条路径，设了它就不动。
+
+两份桥都随发版包发出：cline 的依赖由 `build.sh` 装/压，cursor 的二进制在 checkout 里没有时
+**自动按 pin 的版本取**（先看构建机缓存 `~/.cache/autonomy/cursor-sdk-bridge/<版本>/`，再跑
+`scripts/fetch-bridge.sh`；`AUTONOMY_SKIP_FETCH_CURSOR_BRIDGE=1` 可关掉下载）。取不到只警告、不失败
+（用哪个桥由部署的**所选后端**决定，启动自检在那里把关）。
 
 **不过就 `die`（非 0 退出）**，于是部署平台把这次部署判为失败、线上留在上一个可用版本——桥是 LLM
 后端唯一的执行通道，缺了它 `/health` 照样 `ok`，但每个任务都会失败在「ping the bridge」那一步；
