@@ -17,6 +17,9 @@ const agentDashboardHTML = `<!DOCTYPE html>
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.4 -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 20px; background: #f6f7f9; color: #1c1e21; }
+  /* Embedded in the UI shell (GET /?embed=1): the shell owns the page title, so a module drops
+     its own instead of printing it twice. */
+  body.embedded h1, body.embedded .sub { display: none; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: #667085; margin-bottom: 14px; }
   .bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
@@ -60,6 +63,8 @@ const agentDashboardHTML = `<!DOCTYPE html>
   <tbody id="rows"><tr><td class="empty" colspan="10">loading…</td></tr></tbody>
 </table>
 <script>
+// A module embedded in the UI shell drops its own title (?embed=1).
+if (new URLSearchParams(location.search).has("embed")) document.body.classList.add("embedded");
 (function () {
   var rows = document.getElementById('rows');
   var status = document.getElementById('status');
