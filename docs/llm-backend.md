@@ -1,4 +1,4 @@
-# LLM 后端（cursor / cline）与怎么切换
+# LLM 后端（cursor / cline / codex）与怎么切换
 
 一次决策轮、一次委派，真正打给模型的那一步发生在 **runtime 进程**里（本地是
 `go run ./cmd/autonomyd`，部署时是 `bin/autonomyd`）。`cmd/autonomy` 只是 HTTP 客户端
@@ -13,8 +13,15 @@
 
 | 值 | 后端 | 说明 |
 |----|------|------|
-| 空 / `cursor` | Cursor SDK 桥 | 默认 |
+| 空 / `cursor` | Cursor SDK 桥 | 默认（standalone 二进制） |
 | `cline` / `cline_sdk` | Cline SDK 桥（[cline-reasoner.md](cline-reasoner.md)） | Node 桥 + `@cline/sdk` |
+| `codex` / `codex_sdk` | Codex SDK 桥（`src/codexsdk/bridge`） | Node 桥 + `@openai/codex-sdk`（它自己驱动 `codex` CLI） |
+
+The three harnesses live in `src/llmbackend/{cursor,cline,codex}`; a backend with no harness
+linked in is refused by name (import `src/llmbackend/all`). Codex is the newest: its thread is
+persisted by the CLI under `~/.codex/sessions`, so `codex.resumeThread(id)` continues the same
+conversation after a restart — the agent row's recorded thread id is what the next process
+resumes, the same contract the other two keep.
 
 它决定 `LLMReasoner`（planner 的决策轮）与 capability 拿到的 agent（`code_edit` →
 `Runtime.AcquireAgent`，`src/runtime.go`）跑在哪个 provider 上。`AUTONOMY_REASONER=local`
@@ -105,7 +112,7 @@ src/llmbackend/                    核心：词表 + Session 门面 + 事件词�
 
 **runtime 侧**只剩它自己知道的事：agent **是**哪个后端（行）、身份/生命周期/工作区、`llm_agent_id`、frame 记账；一轮 turn 走 `Agent.llmSession()` 一扇门，关桥走 `llmbackend.CloseClients()`（不点名任何 harness）。
 
-**接入一个新 harness（例如 deepseek / codex）**——四步，核心与 runtime 一行不用改：
+**接入一个新 harness（cursor / cline / codex 之外，例如 deepseek）**——四步，核心与 runtime 一行不用改（codex 就是照这四步加的）：
 
 1. 新建 `src/llmbackend/<name>/`：实现 `llmbackend.SessionImpl`（`Attach/Prompt/Dispose/SessionID/Mode/Resumed/ResumedFrom`）+ 一个 `llmbackend.StreamAdapter`（把它的原生事件映射成中性 `Event`）；
 2. 写 `register.go`：`func init() { llmbackend.Register(llmbackend.Harness{Backend: …, Provider: …, New: …, Adapter: …, DefaultModel: …, CloseClient: …}) }`；

@@ -127,71 +127,68 @@ if [ -z "${CURSOR_SDK_BRIDGE_URL:-}" ] && [ -x "${RUNTIME_DIR}/bin/cursor-sdk-br
   export CURSOR_SDK_BRIDGE_BIN="${RUNTIME_DIR}/bin/cursor-sdk-bridge"
 fi
 
-# cline bridge: the release package carries it (build.sh) — its sources, plus a tarball
-# of their production install (@cline/sdk and its tree: 251MB unpacked, ~37MB packed).
-# The tarball is extracted into a cache *outside* the packaged tree and the sources get
-# a node_modules symlink into it (node resolves a bare import from the script's own
-# directory upward, and ESM ignores NODE_PATH — so the packages must sit next to
-# bridge.mjs, but they do not have to *be* there). AUTONOMY_CLINE_BRIDGE_SCRIPT is then
-# pointed at the packaged bridge, so a deploy runs the bridge *this release* shipped.
+# —— Node 桥（cline / codex）：发版包自带源码 + 依赖包 ——
+# 每个 harness 的桥都是「一个 Node 脚本 + 一棵依赖树」，处理方式完全一样，所以这里是一
+# 个函数而不是每加一个后端抄一遍：依赖解到包外的缓存
+# （${RUNTIME_DIR}/.cache/<name>-bridge/<sha256>，部署 rsync 的 --delete 不碰它），源码目录建
+# node_modules 符号链接（node 从脚本目录往上解析裸包名，ESM 又忽略 NODE_PATH，所以包必须
+# 挨着 bridge.mjs，但不必「是」它），然后把 AUTONOMY_<NAME>_BRIDGE_SCRIPT 指到包里的桥 ——
+# 部署跑的就是这个发版包带的桥。
 #
-# Why a cache: a deploy rsyncs the package into this directory with --delete, so
-# anything the package does not contain is replaced (the platform keeps only
-# data/ logs/ backend/data/ backend/server.log Library/ packages/ upgrade-requests/,
-# and excludes .cache/). The dependencies are a build product, not package content:
-# keyed by the tarball's sha256 they are extracted once per release per machine and
-# reused across deploys, while the tarball still rides in the package so a cold
-# machine can start offline (no npm, no network).
+# 为什么用缓存：部署会 rsync --delete 整个目录，包里没有的东西会被换掉（平台只保留
+# data/ logs/ backend/data/ backend/server.log Library/ packages/ upgrade-requests/，并排除
+# .cache/）。依赖是构建产物、不是包内容：按 tarball 的 sha256 做 key，每个版本每台机只解一
+# 次、跨部署复用；而 tarball 仍在包里，冷机器不需要 npm 也不需要网络就能启动。
 #
-# backend/.env is overridden on purpose, the same rule as the port above: it survives
-# every deploy, so a path into some checkout would pin the bridge to code nobody
-# updates. Set AUTONOMY_CLINE_BRIDGE_SCRIPT in .env only for a deployment whose package
-# carries no bridge (or to run an external one).
-CLINE_BRIDGE_DIR="${RUNTIME_DIR}/src/clinesdk/bridge"
-CLINE_BRIDGE_CACHE="${AUTONOMY_CACHE_DIR:-${RUNTIME_DIR}/.cache}/cline-bridge"
-if [ -f "${CLINE_BRIDGE_DIR}/bridge.mjs" ]; then
-  DEPS_TGZ="${CLINE_BRIDGE_DIR}/bridge-deps.tgz"
-  if [ -f "${DEPS_TGZ}" ]; then
+# backend/.env 里的路径被**刻意覆盖**（与端口同一条规矩）：它每次部署都保留，一条指向某个
+# checkout 的路径会把桥钉死在那份没人更新的代码上。要跑外部的桥，就让包里那份缺席。
+node_bridge_setup() { # <name> <package-relative dir> <script env var>
+  local name="$1" pkgdir="$2" scriptenv="$3"
+  local dir="${RUNTIME_DIR}/${pkgdir}"
+  local cache="${AUTONOMY_CACHE_DIR:-${RUNTIME_DIR}/.cache}/${name}-bridge"
+  [ -f "${dir}/bridge.mjs" ] || return 0
+  local tgz="${dir}/bridge-deps.tgz"
+  if [ -f "${tgz}" ]; then
+    local sha=""
     if command -v shasum >/dev/null 2>&1; then
-      sha="$(shasum -a 256 "${DEPS_TGZ}" | cut -d' ' -f1)"
+      sha="$(shasum -a 256 "${tgz}" | cut -d' ' -f1)"
     else
-      sha="$(sha256sum "${DEPS_TGZ}" | cut -d' ' -f1)"
+      sha="$(sha256sum "${tgz}" | cut -d' ' -f1)"
     fi
     if [ -n "${sha}" ]; then
-      deps_dir="${CLINE_BRIDGE_CACHE}/${sha}"
+      local deps_dir="${cache}/${sha}"
       if [ ! -d "${deps_dir}/node_modules" ]; then
-        mkdir -p "${CLINE_BRIDGE_CACHE}"
-        log "解包 cline bridge 依赖（$(du -h "${DEPS_TGZ}" | cut -f1) → ${deps_dir}）"
-        staging="${deps_dir}.tmp.$$"
+        mkdir -p "${cache}"
+        log "解包 ${name} bridge 依赖（$(du -h "${tgz}" | cut -f1) → ${deps_dir}）"
+        local staging="${deps_dir}.tmp.$$"
         rm -rf "${staging}"
-        if mkdir -p "${staging}" && tar xzf "${DEPS_TGZ}" -C "${staging}"; then
+        if mkdir -p "${staging}" && tar xzf "${tgz}" -C "${staging}"; then
           rm -rf "${deps_dir}"
           mv "${staging}" "${deps_dir}"
-          # 只留最近两个版本，别让缓存无限长（每个 251MB）。
-          ls -1dt "${CLINE_BRIDGE_CACHE}"/*/ 2>/dev/null | sed -e '1,2d' |
-            while read -r old; do rm -rf "${old}"; done
+          # 只留最近两个版本，别让缓存无限长。
+          ls -1dt "${cache}"/*/ 2>/dev/null | sed -e '1,2d' | while read -r old; do rm -rf "${old}"; done
         else
           rm -rf "${staging}"
-          log "警告：cline bridge 依赖解包失败（沿用已有 node_modules，如果有）"
+          log "警告：${name} bridge 依赖解包失败（沿用已有 node_modules，如果有）"
         fi
       fi
-      # The symlink itself is package content (a deploy replaces it) — recreate it; the
-      # 251MB behind it are not. rm without a trailing slash removes the link, not its
-      # target.
-      if [ -d "${deps_dir}/node_modules" ] && [ ! -e "${CLINE_BRIDGE_DIR}/node_modules" ]; then
-        rm -rf "${CLINE_BRIDGE_DIR}/node_modules"
-        ln -s "${deps_dir}/node_modules" "${CLINE_BRIDGE_DIR}/node_modules" 2>/dev/null ||
-          cp -R "${deps_dir}/node_modules" "${CLINE_BRIDGE_DIR}/node_modules" 2>/dev/null ||
-          log "警告：cline bridge 依赖链接失败（symlink 与拷贝都不成）"
+      if [ -d "${deps_dir}/node_modules" ] && [ ! -e "${dir}/node_modules" ]; then
+        rm -rf "${dir}/node_modules"
+        ln -s "${deps_dir}/node_modules" "${dir}/node_modules" 2>/dev/null ||
+          cp -R "${deps_dir}/node_modules" "${dir}/node_modules" 2>/dev/null ||
+          log "警告：${name} bridge 依赖链接失败（symlink 与拷贝都不成）"
       fi
     fi
   fi
-  if [ -e "${CLINE_BRIDGE_DIR}/node_modules" ]; then
-    export AUTONOMY_CLINE_BRIDGE_SCRIPT="${CLINE_BRIDGE_DIR}/bridge.mjs"
+  if [ -e "${dir}/node_modules" ]; then
+    export "${scriptenv}=${dir}/bridge.mjs"
   else
-    log "警告：包里有 cline bridge 却没有依赖（bridge-deps.tgz 不在/解包失败）；沿用 AUTONOMY_CLINE_BRIDGE_SCRIPT=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
+    log "警告：包里有 ${name} bridge 却没有依赖（bridge-deps.tgz 不在/解包失败）；沿用 ${scriptenv}=${!scriptenv:-未配置}"
   fi
-fi
+}
+
+node_bridge_setup cline src/clinesdk/bridge AUTONOMY_CLINE_BRIDGE_SCRIPT
+node_bridge_setup codex src/codexsdk/bridge AUTONOMY_CODEX_BRIDGE_SCRIPT
 
 # —— 启动前自检：所选后端的桥必须真的能用 ——
 # 这一层是刻意「宁可这次部署失败，也不要起一个跑不了任务的服务」：桥是 llm 后端唯一的
@@ -204,34 +201,52 @@ if [ "${AUTONOMY_SKIP_BRIDGE_CHECK:-0}" = "1" ]; then
   log "跳过桥自检（AUTONOMY_SKIP_BRIDGE_CHECK=1）"
 elif [ "${AUTONOMY_REASONER:-llm}" = "local" ]; then
   log "跳过桥自检（AUTONOMY_REASONER=local：不经过 LLM 后端）"
-elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "cline" ]; then
-  cline_script="${AUTONOMY_CLINE_BRIDGE_SCRIPT:-}"
-  [ -n "${cline_script}" ] ||
-    die "cline 后端，但没有桥脚本：包里缺 src/clinesdk/bridge/bridge.mjs，且 .env 没设 AUTONOMY_CLINE_BRIDGE_SCRIPT"
-  [ -f "${cline_script}" ] || die "cline 桥脚本不存在：${cline_script}"
+elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "cline" ] || [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "codex" ]; then
+  # 两个 Node 桥的后端检查一样，只有坐标不同。
+  node_backend="${AUTONOMY_LLM_BACKEND:-cursor}"
+  case "${node_backend}" in
+  cline)
+    node_script="${AUTONOMY_CLINE_BRIDGE_SCRIPT:-}"
+    node_pkgdir="src/clinesdk/bridge"
+    node_deps_pkg="@cline/sdk"
+    node_bin_var="AUTONOMY_CLINE_NODE_BIN"
+    node_script_var="AUTONOMY_CLINE_BRIDGE_SCRIPT"
+    ;;
+  codex)
+    node_script="${AUTONOMY_CODEX_BRIDGE_SCRIPT:-}"
+    node_pkgdir="src/codexsdk/bridge"
+    node_deps_pkg="@openai/codex-sdk"
+    node_bin_var="AUTONOMY_CODEX_NODE_BIN"
+    node_script_var="AUTONOMY_CODEX_BRIDGE_SCRIPT"
+    ;;
+  esac
+  [ -n "${node_script}" ] ||
+    die "${node_backend} 后端，但没有桥脚本：包里缺 ${node_pkgdir}/bridge.mjs，且 .env 没设 ${node_script_var}"
+  [ -f "${node_script}" ] || die "${node_backend} 桥脚本不存在：${node_script}"
   # 依赖必须能被 Node 从脚本目录往上解析到（bridge-deps.tgz 解出的缓存 + symlink）。
-  cline_deps=""
-  probe="$(cd "$(dirname "${cline_script}")" && pwd)"
+  node_deps=""
+  probe="$(cd "$(dirname "${node_script}")" && pwd)"
   for _ in 1 2 3 4; do
-    if [ -d "${probe}/node_modules/@cline/sdk" ]; then
-      cline_deps="${probe}/node_modules"
+    if [ -d "${probe}/node_modules/${node_deps_pkg}" ]; then
+      node_deps="${probe}/node_modules"
       break
     fi
     up="$(dirname "${probe}")"
     [ "${up}" = "${probe}" ] && break
     probe="${up}"
   done
-  [ -n "${cline_deps}" ] ||
-    die "cline 桥的依赖解析不到：${cline_script} 及其上级都没有 node_modules/@cline/sdk（包缺 bridge-deps.tgz，或解包/链接失败）"
+  [ -n "${node_deps}" ] ||
+    die "${node_backend} 桥的依赖解析不到：${node_script} 及其上级都没有 node_modules/${node_deps_pkg}（包缺 bridge-deps.tgz，或解包/链接失败）"
   # 真加载一次（不联网、不用凭据）：桥 load 不起来，这次部署就不该上。
-  cline_node="${AUTONOMY_CLINE_NODE_BIN:-node}"
-  cline_reply="$(printf '{"id":"start-self-check","cmd":"ping"}\n' | "${cline_node}" "${cline_script}" 2>&1 | head -1 || true)"
-  case "${cline_reply}" in
+  node_bin="${!node_bin_var:-node}"
+  node_reply="$(printf '{"id":"start-self-check","cmd":"ping"}
+' | "${node_bin}" "${node_script}" 2>&1 | head -1 || true)"
+  case "${node_reply}" in
   *'"type":"ready"'*)
-    log "cline 桥自检通过：${cline_node} ${cline_script} → ready（依赖 ${cline_deps}）"
+    log "${node_backend} 桥自检通过：${node_bin} ${node_script} → ready（依赖 ${node_deps}）"
     ;;
   *)
-    die "cline 桥自检失败：${cline_node} ${cline_script} 没有回应 ready（输出：$(printf '%s' "${cline_reply}" | head -c 200)）"
+    die "${node_backend} 桥自检失败：${node_bin} ${node_script} 没有回应 ready（输出：$(printf '%s' "${node_reply}" | head -c 200)）"
     ;;
   esac
 else
@@ -262,9 +277,9 @@ if command -v lsof >/dev/null 2>&1; then
 fi
 
 if [ "${STORE_ENGINE}" = "sqlite" ]; then
-  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=sqlite 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=sqlite 库=${AUTONOMY_STORE_DSN} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置} codex桥=${AUTONOMY_CODEX_BRIDGE_SCRIPT:-未配置}"
 else
-  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=${STORE_ENGINE} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置}"
+  log "启动 部署版本=${APP_VERSION} 监听=${AUTONOMY_HTTP_ADDR} 引擎=${STORE_ENGINE} 后端=${AUTONOMY_LLM_BACKEND:-cursor} 桥=${CURSOR_SDK_BRIDGE_BIN:-未配置} cline桥=${AUTONOMY_CLINE_BRIDGE_SCRIPT:-未配置} codex桥=${AUTONOMY_CODEX_BRIDGE_SCRIPT:-未配置}"
 fi
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"

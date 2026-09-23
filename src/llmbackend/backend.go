@@ -12,6 +12,8 @@ func DefaultBackend() Backend {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_BACKEND"))) {
 	case string(Cline), "cline_sdk":
 		return Cline
+	case string(Codex), "codex_sdk":
+		return Codex
 	default:
 		return Cursor
 	}

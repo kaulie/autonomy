@@ -162,7 +162,8 @@ async function send(params = {}, requestId) {
 	try {
 		const { events } = await agent.thread.runStreamed(prompt, { signal: controller.signal });
 		for await (const event of events) {
-			write({ type: "event", agentId: agent.id, sessionId: agent.thread.id || null, event });
+			// requestId is what the client routes this run's events by (one send = one run).
+			write({ type: "event", requestId, agentId: agent.id, sessionId: agent.thread.id || null, event });
 			switch (event?.type) {
 				case "item.completed": {
 					const itemText_ = itemText(event.item);
