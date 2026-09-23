@@ -1,22 +1,21 @@
-package llmbackend
+package cline
 
 import (
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"strings"
 	"time"
 
 	"github.com/kaulie/autonomy/src/clinesdk"
 )
 
-// ClineStreamAdapter maps the Cline SDK bridge run stream onto neutral LLMEvents.
-// It is the only place that knows Cline's payload shapes, so the trace and store
+// ClineStreamAdapter maps the llmbackend.Cline SDK bridge run stream onto neutral LLMEvents.
+// It is the only place that knows llmbackend.Cline's payload shapes, so the trace and store
 // layers stay backend-agnostic (see docs/cline-reasoner.md).
 type ClineStreamAdapter struct{}
 
-func (ClineStreamAdapter) Provider() Provider { return ProviderCline }
+func (ClineStreamAdapter) Provider() llmbackend.Provider { return llmbackend.ProviderCline }
 
-func init() { registerAdapter(ClineStreamAdapter{}) }
-
-// Cline core event types forwarded by the bridge (kept verbatim in EventType).
+// llmbackend.Cline core event types forwarded by the bridge (kept verbatim in EventType).
 const (
 	clineEventAgentEvent      = "agent_event"
 	clineEventChunk           = "chunk"
@@ -30,10 +29,10 @@ const (
 // events carry lifecycle/status metadata. Everything is kept for fidelity, and
 // tool payloads are annotated with the neutral keys the aggregation layer reads
 // (call_id/args/result).
-func (ClineStreamAdapter) MapEvent(native any, _ time.Time) (Event, bool) {
+func (ClineStreamAdapter) MapEvent(native any, _ time.Time) (llmbackend.Event, bool) {
 	ev, ok := native.(clinesdk.RunEvent)
 	if !ok {
-		return Event{}, false
+		return llmbackend.Event{}, false
 	}
 	switch ev.Type {
 	case clineEventAgentEvent:
@@ -41,28 +40,28 @@ func (ClineStreamAdapter) MapEvent(native any, _ time.Time) (Event, bool) {
 	case clineEventChunk:
 		return mapClineChunk(ev)
 	case clineEventStatus:
-		return mapClineLifecycle(ev, ChannelStatus, KindStatus, clineEventStatus)
+		return mapClineLifecycle(ev, llmbackend.ChannelStatus, llmbackend.KindStatus, clineEventStatus)
 	case clineEventSessionSnapshot:
-		return mapClineLifecycle(ev, ChannelMeta, KindMeta, clineEventSessionSnapshot)
+		return mapClineLifecycle(ev, llmbackend.ChannelMeta, llmbackend.KindMeta, clineEventSessionSnapshot)
 	case clineEventEnded:
-		return mapClineLifecycle(ev, ChannelResult, KindRunResult, clineEventEnded)
+		return mapClineLifecycle(ev, llmbackend.ChannelResult, llmbackend.KindRunResult, clineEventEnded)
 	default:
 		if strings.TrimSpace(ev.Type) == "" {
-			return Event{}, false
+			return llmbackend.Event{}, false
 		}
-		return mapClineLifecycle(ev, ChannelMeta, KindMeta, ev.Type)
+		return mapClineLifecycle(ev, llmbackend.ChannelMeta, llmbackend.KindMeta, ev.Type)
 	}
 }
 
 // mapClineAgentEvent handles the inner agent event (payload.event).
-func mapClineAgentEvent(ev clinesdk.RunEvent) (Event, bool) {
+func mapClineAgentEvent(ev clinesdk.RunEvent) (llmbackend.Event, bool) {
 	inner, ok := ev.Payload["event"].(map[string]any)
 	if !ok {
-		return mapClineLifecycle(ev, ChannelMeta, KindMeta, clineEventAgentEvent)
+		return mapClineLifecycle(ev, llmbackend.ChannelMeta, llmbackend.KindMeta, clineEventAgentEvent)
 	}
-	innerType := PayloadString(inner, "type")
-	contentType := PayloadString(inner, "contentType")
-	mapped := Event{
+	innerType := llmbackend.PayloadString(inner, "type")
+	contentType := llmbackend.PayloadString(inner, "contentType")
+	mapped := llmbackend.Event{
 		Channel:   clineAgentChannel(innerType, contentType),
 		Kind:      clineAgentKind(innerType, contentType),
 		EventType: clineAgentEventType(innerType, contentType),
@@ -71,26 +70,26 @@ func mapClineAgentEvent(ev clinesdk.RunEvent) (Event, bool) {
 	}
 	if innerType == "usage" {
 		mapped.Role = "system"
-		mapped.Payload = withUsageKeys(inner, PayloadMap(inner, "usage"))
-		if cost, ok := payloadNumber(inner, "totalCost", "cost", "total_cost"); ok {
-			mapped.Payload = withNeutralKV(mapped.Payload, KeyCostUSD, cost) // Cline reports USD
+		mapped.Payload = llmbackend.WithUsageKeys(inner, llmbackend.PayloadMap(inner, "usage"))
+		if cost, ok := llmbackend.PayloadNumber(inner, "totalCost", "cost", "total_cost"); ok {
+			mapped.Payload = llmbackend.WithNeutralKV(mapped.Payload, llmbackend.KeyCostUSD, cost) // llmbackend.Cline reports USD
 		}
 	}
 	if innerType == "notice" {
-		mapped.Payload = withNeutralKV(inner, KeyStatus, PayloadString(inner, "noticeType"), KeyMessage, PayloadString(inner, "message"))
+		mapped.Payload = llmbackend.WithNeutralKV(inner, llmbackend.KeyStatus, llmbackend.PayloadString(inner, "noticeType"), llmbackend.KeyMessage, llmbackend.PayloadString(inner, "message"))
 	}
-	if callID := PayloadString(inner, "toolCallId"); callID != "" {
+	if callID := llmbackend.PayloadString(inner, "toolCallId"); callID != "" {
 		// The aggregation layer groups tool events by call_id and reads
 		// args/result, so expose them under the neutral keys as well.
 		mapped.Payload = annotateClineTool(inner, callID)
 		mapped.Role = "tool"
-		mapped.Name = PayloadString(inner, "toolName")
+		mapped.Name = llmbackend.PayloadString(inner, "toolName")
 	}
 	switch contentType {
 	case "text":
-		text := FirstNonEmptyString(PayloadString(inner, "text"), PayloadString(inner, "accumulated"))
+		text := llmbackend.FirstNonEmptyString(llmbackend.PayloadString(inner, "text"), llmbackend.PayloadString(inner, "accumulated"))
 		mapped.TextDelta = text
-		mapped.Payload = withNeutralText(mapped.Payload, text)
+		mapped.Payload = llmbackend.WithNeutralText(mapped.Payload, text)
 	case "reasoning":
 		// Thinking text arrives as content_start deltas. content_end repeats the
 		// whole block (verified against a real stream: joining the deltas equals
@@ -99,84 +98,84 @@ func mapClineAgentEvent(ev clinesdk.RunEvent) (Event, bool) {
 		// The neutral text key always carries the event's own text (the whole
 		// block on content_end), while TextDelta stays empty there so the
 		// aggregation does not see the block twice.
-		reasoning := PayloadString(inner, "reasoning")
-		mapped.Payload = withNeutralText(mapped.Payload, reasoning)
+		reasoning := llmbackend.PayloadString(inner, "reasoning")
+		mapped.Payload = llmbackend.WithNeutralText(mapped.Payload, reasoning)
 		if innerType != "content_end" {
 			mapped.TextDelta = reasoning
 		}
 	}
 	if mapped.Name == "" {
-		mapped.Name = FirstNonEmptyString(PayloadString(inner, "name"), PayloadString(inner, "tool"))
+		mapped.Name = llmbackend.FirstNonEmptyString(llmbackend.PayloadString(inner, "name"), llmbackend.PayloadString(inner, "tool"))
 	}
 	return mapped, true
 }
 
-// clineAgentKind classifies one inner agent event. Cline streams text and
+// clineAgentKind classifies one inner agent event. llmbackend.Cline streams text and
 // thinking as deltas (with a block-end marker) and tool calls as
 // start / output-update / end events sharing a toolCallId.
-func clineAgentKind(innerType, contentType string) EventKind {
+func clineAgentKind(innerType, contentType string) llmbackend.EventKind {
 	switch contentType {
 	case "text":
 		if innerType == "content_end" {
-			return KindAssistant
+			return llmbackend.KindAssistant
 		}
-		return KindAssistantDelta
+		return llmbackend.KindAssistantDelta
 	case "reasoning", "thinking":
 		if innerType == "content_end" {
-			return KindThoughtEnd
+			return llmbackend.KindThoughtEnd
 		}
-		return KindThoughtDelta
+		return llmbackend.KindThoughtDelta
 	case "tool":
 		switch innerType {
 		case "content_start":
-			return KindToolCallStarted
+			return llmbackend.KindToolCallStarted
 		case "content_update":
-			return KindToolCallDelta
+			return llmbackend.KindToolCallDelta
 		case "content_end":
-			return KindToolCallCompleted
+			return llmbackend.KindToolCallCompleted
 		default:
-			return KindToolCallDelta
+			return llmbackend.KindToolCallDelta
 		}
 	}
 	switch innerType {
 	case "usage":
-		return KindUsage
+		return llmbackend.KindUsage
 	case "done":
-		return KindRunResult
+		return llmbackend.KindRunResult
 	case "error":
-		return KindError
+		return llmbackend.KindError
 	case "notice":
-		return KindStatus
+		return llmbackend.KindStatus
 	case "content_start", "content_update", "content_end":
-		return KindAssistantDelta
+		return llmbackend.KindAssistantDelta
 	default:
-		return KindMeta
+		return llmbackend.KindMeta
 	}
 }
 
 // clineAgentChannel classifies one inner agent event.
-func clineAgentChannel(innerType, contentType string) EventChannel {
+func clineAgentChannel(innerType, contentType string) llmbackend.EventChannel {
 	switch contentType {
 	case "text":
-		return ChannelAssistant
+		return llmbackend.ChannelAssistant
 	case "reasoning", "thinking":
-		return ChannelThought
+		return llmbackend.ChannelThought
 	case "tool":
-		return ChannelTool
+		return llmbackend.ChannelTool
 	}
 	switch innerType {
 	case "usage":
-		return ChannelMeta
+		return llmbackend.ChannelMeta
 	case "done":
-		return ChannelResult
+		return llmbackend.ChannelResult
 	case "error":
-		return ChannelError
+		return llmbackend.ChannelError
 	case "notice":
-		return ChannelStatus
+		return llmbackend.ChannelStatus
 	case "content_start", "content_update", "content_end":
-		return ChannelAssistant
+		return llmbackend.ChannelAssistant
 	default:
-		return ChannelMeta
+		return llmbackend.ChannelMeta
 	}
 }
 
@@ -195,19 +194,19 @@ func annotateClineTool(inner map[string]any, callID string) map[string]any {
 	for k, v := range inner {
 		out[k] = v
 	}
-	out[KeyCallID] = callID
-	if name := PayloadString(inner, "toolName"); name != "" {
-		out[KeyName] = name
+	out[llmbackend.KeyCallID] = callID
+	if name := llmbackend.PayloadString(inner, "toolName"); name != "" {
+		out[llmbackend.KeyName] = name
 	}
-	// Cline signals the tool lifecycle with the event type, so normalize it into
-	// the same status key Cursor uses (running while it runs, completed at end).
-	if PayloadString(inner, "type") == "content_end" {
-		out[KeyStatus] = "completed"
+	// llmbackend.Cline signals the tool lifecycle with the event type, so normalize it into
+	// the same status key llmbackend.Cursor uses (running while it runs, completed at end).
+	if llmbackend.PayloadString(inner, "type") == "content_end" {
+		out[llmbackend.KeyStatus] = "completed"
 	} else {
-		out[KeyStatus] = "running"
+		out[llmbackend.KeyStatus] = "running"
 	}
-	if ms, ok := payloadNumber(inner, "durationMs", "duration_ms"); ok {
-		out[KeyDurationMS] = int64(ms)
+	if ms, ok := llmbackend.PayloadNumber(inner, "durationMs", "duration_ms"); ok {
+		out[llmbackend.KeyDurationMS] = int64(ms)
 	}
 	if args, ok := inner["input"]; ok {
 		out["args"] = args
@@ -222,7 +221,7 @@ func annotateClineTool(inner map[string]any, callID string) map[string]any {
 		}
 	}
 	if output, ok := inner["output"]; ok {
-		out[KeyResult] = output
+		out[llmbackend.KeyResult] = output
 	}
 	return out
 }
@@ -231,22 +230,22 @@ func annotateClineTool(inner map[string]any, callID string) map[string]any {
 // process output (stdout/stderr) and are useful; the "agent" stream is a verbatim
 // JSON echo of events already recorded as agent_event, so it is dropped to keep
 // llm_events free of duplicates.
-func mapClineChunk(ev clinesdk.RunEvent) (Event, bool) {
-	if stream := PayloadString(ev.Payload, "stream"); stream == "" || stream == "agent" {
-		return Event{}, false
+func mapClineChunk(ev clinesdk.RunEvent) (llmbackend.Event, bool) {
+	if stream := llmbackend.PayloadString(ev.Payload, "stream"); stream == "" || stream == "agent" {
+		return llmbackend.Event{}, false
 	}
-	return Event{
-		Channel:   ChannelTool,
-		Kind:      KindToolCallDelta,
-		EventType: clineEventChunk + ":" + PayloadString(ev.Payload, "stream"),
+	return llmbackend.Event{
+		Channel:   llmbackend.ChannelTool,
+		Kind:      llmbackend.KindToolCallDelta,
+		EventType: clineEventChunk + ":" + llmbackend.PayloadString(ev.Payload, "stream"),
 		Role:      "tool",
 		Payload:   ev.Payload,
-		TextDelta: PayloadString(ev.Payload, "chunk"),
+		TextDelta: llmbackend.PayloadString(ev.Payload, "chunk"),
 	}, true
 }
 
-func mapClineLifecycle(ev clinesdk.RunEvent, channel EventChannel, kind EventKind, eventType string) (Event, bool) {
-	return Event{
+func mapClineLifecycle(ev clinesdk.RunEvent, channel llmbackend.EventChannel, kind llmbackend.EventKind, eventType string) (llmbackend.Event, bool) {
+	return llmbackend.Event{
 		Channel:   channel,
 		Kind:      kind,
 		EventType: eventType,
@@ -256,16 +255,16 @@ func mapClineLifecycle(ev clinesdk.RunEvent, channel EventChannel, kind EventKin
 }
 
 // clineRunResultToLLMRun captures run-level metadata (status, usage, timing)
-// from a finished Cline run. Cline reports cost in USD and folds cache reads into
+// from a finished llmbackend.Cline run. llmbackend.Cline reports cost in USD and folds cache reads into
 // the input tokens; both are preserved as reported.
-func ClineRunResultToLLMRun(res clinesdk.RunResult, startedAt time.Time) RunResult {
-	status := LLMStatus(strings.ToLower(strings.TrimSpace(res.Status)))
+func ClineRunResultToLLMRun(res clinesdk.RunResult, startedAt time.Time) llmbackend.RunResult {
+	status := llmbackend.LLMStatus(strings.ToLower(strings.TrimSpace(res.Status)))
 	switch status {
-	case StatusRunning, StatusFinished, StatusError, StatusCancelled, StatusExpired:
+	case llmbackend.StatusRunning, llmbackend.StatusFinished, llmbackend.StatusError, llmbackend.StatusCancelled, llmbackend.StatusExpired:
 	default:
-		status = StatusError
+		status = llmbackend.StatusError
 	}
-	usage := Usage{
+	usage := llmbackend.Usage{
 		InputTokens:      res.Usage.InputTokens,
 		OutputTokens:     res.Usage.OutputTokens,
 		CacheReadTokens:  res.Usage.CacheReadTokens,
@@ -287,8 +286,8 @@ func ClineRunResultToLLMRun(res clinesdk.RunResult, startedAt time.Time) RunResu
 	if !res.StartedAt.IsZero() {
 		start = res.StartedAt
 	}
-	return RunResult{
-		ProviderRunID: FirstNonEmptyString(res.SessionID, res.AgentID),
+	return llmbackend.RunResult{
+		ProviderRunID: llmbackend.FirstNonEmptyString(res.SessionID, res.AgentID),
 		LLMAgentID:    res.AgentID,
 		Status:        status,
 		ErrorMessage:  res.ErrorMessage,

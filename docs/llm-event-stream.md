@@ -178,26 +178,27 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 | 表结构 & 读写 | `src/sqlite_store.go` |
 | 落库调用点 | `src/reasoner.go`（plan 模式）、`src/runtime.go`（agent 模式） |
 
-## 扩展：接入新的 LLM
+## 扩展：接入新的 LLM（一个 harness）
 
-持久化层只认识 `LLMEvent`。接入新 provider 只需三步：
+一个 harness 就是 `src/llmbackend/` 下的**一个文件夹**（`cursor/`、`cline/` 就是这样），它向核心注册自己 —— 也就是把 [llm-backend.md「接入一个新 harness」](llm-backend.md#代码边界srcllmbackend-是唯一知道-provider-的地方) 那四步走完：
 
-1. 实现 `llmbackend.streamAdapter`（`src/llmbackend/events.go`）：把它自己的 native 事件映射成 `LLMEvent`。
+1. 新建 `src/llmbackend/<name>/`，其中：
+   - 实现 `llmbackend.SessionImpl`（`Attach/Prompt/Dispose/SessionID/Mode/Resumed/ResumedFrom`）—— 它这条会话怎么开、怎么续、怎么关；
+   - 实现 `llmbackend.StreamAdapter`：把它自己的 native 事件映射成中性的 `llmbackend.Event`。
 
    ```go
-   type LLMStreamAdapter interface {
-       Provider() LLMProvider
-       MapEvent(native any, startedAt time.Time) (LLMEvent, bool)
+   type StreamAdapter interface {
+       Provider() llmbackend.Provider
+       MapEvent(native any, startedAt time.Time) (llmbackend.Event, bool)
    }
    ```
+2. 写 `register.go`：`func init() { llmbackend.Register(llmbackend.Harness{…}) }` —— 注册表就是 `database/sql` 驱动那一套。
+3. `src/llmbackend/all/all.go` 里加一行 blank import（这个 build 要跑的 harness）。
+4. `AUTONOMY_LLM_BACKEND=<name>` 即可选中。
 
-2. 注册：
+核心、runtime、prompt **一行都不用改**；`agent_policy/AGENT_V2.md` 里的 `{{CONSTRUCTS}}` 说的是**能力**，与 provider 无关，也不动。
 
-   ```go
-   func init() { RegisterLLMStreamAdapter(myAdapter{}) }
-   ```
-
-3. 在拿到 native 流的地方，把事件喂给 trace 或 `MapNativeLLMEvent(provider, native, started)`：
+拿到 native 流的地方（也就是这个 harness 自己的 `Prompt`）把事件喂给 trace 或 `llmbackend.MapNativeLLMEvent(provider, native, started)` —— 后者按 provider 查到注册表里的适配器：
 
    ```go
    trace := BeginLLMTrace(agent, taskID, cycle, mode, prompt)

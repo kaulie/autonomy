@@ -3,6 +3,7 @@ package autonomy
 import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
+	"github.com/kaulie/autonomy/src/llmbackend/cline"
 	"testing"
 	"time"
 
@@ -143,7 +144,7 @@ func TestProviderEventContract(t *testing.T) {
 				})
 			}
 			t.Run("cline", func(t *testing.T) {
-				cline := llmbackend.ClineStreamAdapter{}
+				cline := cline.ClineStreamAdapter{}
 				var native any
 				if tc.clineCore != "" {
 					native = clineEvent(tc.clineCore, tc.clineInner)
@@ -228,7 +229,7 @@ func TestProviderEventContractKeepsNativePayload(t *testing.T) {
 		}
 	}
 
-	cline, ok := llmbackend.ClineStreamAdapter{}.MapEvent(clineAgentEvent(map[string]any{
+	cline, ok := cline.ClineStreamAdapter{}.MapEvent(clineAgentEvent(map[string]any{
 		"type": "content_end", "contentType": "tool", "toolName": "run_commands",
 		"toolCallId": "c9", "output": "hi\n", "durationMs": float64(7),
 	}), time.Now())

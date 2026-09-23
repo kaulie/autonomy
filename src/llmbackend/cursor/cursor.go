@@ -1,8 +1,9 @@
-package llmbackend
+package cursor
 
 import (
 	"context"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"time"
@@ -10,25 +11,25 @@ import (
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
-// cursorSession is the Cursor backend's session: one Cursor agent, attached through the
+// cursorSession is the llmbackend.Cursor backend's session: one llmbackend.Cursor agent, attached through the
 // process-wide bridge client, re-attached by the id the agent row recorded.
 type cursorSession struct {
-	session *Session
+	host    llmbackend.Host
 	agent   *cursorsdk.Agent
 	resumed bool
 }
 
-func newCursorSession(s *Session) *cursorSession { return &cursorSession{session: s} }
+func newCursorSession(host llmbackend.Host) *cursorSession { return &cursorSession{host: host} }
 
-// attach opens the Cursor agent: the recorded one when the provider still has it, a fresh
+// attach opens the llmbackend.Cursor agent: the recorded one when the provider still has it, a fresh
 // one when it does not (a session that expired while the runtime was down is a reason to
 // start talking again, not a reason to fail the turn). Idempotent: an attached session is
 // left alone.
-func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
+func (c *cursorSession) Attach(ctx context.Context, _ llmbackend.Mode) (bool, error) {
 	if c.agent != nil {
 		return c.resumed, nil
 	}
-	facts := c.session.host.Facts()
+	facts := c.host.Facts()
 	cwd := facts.Workspace
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -39,7 +40,7 @@ func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
 	}
 	client := cursorClient()
 	if err := client.Ping(ctx); err != nil {
-		return false, fmt.Errorf("cursor bridge ping: %w", bridgeCallErr(ctx, err))
+		return false, fmt.Errorf("cursor bridge ping: %w", llmbackend.BridgeCallErr(ctx, err))
 	}
 
 	resumed := strings.TrimSpace(facts.SessionID) != "" && !facts.Ephemeral
@@ -50,7 +51,7 @@ func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
 	create := func() error {
 		agent, err = client.Agents().Create(ctx, cursorsdk.CreateOptions{Model: model, CWD: cwd})
 		if err != nil {
-			return fmt.Errorf("create cursor agent: %w", bridgeCallErr(ctx, err))
+			return fmt.Errorf("create cursor agent: %w", llmbackend.BridgeCallErr(ctx, err))
 		}
 		return nil
 	}
@@ -61,7 +62,7 @@ func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
 			// next process does not try it again), then open a fresh one.
 			fmt.Fprintf(os.Stderr, "[autonomy] cursor session %s of agent %s is gone (%v); starting a new one\n",
 				facts.SessionID, facts.Name, err)
-			c.session.host.SetSessionID("")
+			c.host.SetSessionID("")
 			resumed = false
 			if err := create(); err != nil {
 				return false, err
@@ -72,46 +73,46 @@ func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
 	}
 
 	c.agent, c.resumed = agent, resumed
-	host := c.session.host
+	host := c.host
 	host.SetWorkspace(cwd)
 	host.SetModel(model)
 	host.SetSessionID(agent.ID)
 	// A resumed session already holds the reasoning frame from its earlier turns; a fresh
 	// one starts empty and needs it on its first decision cycle (Agent.needsLLMFrame).
 	host.SetFrameSent(resumed)
-	host.SetBackend(Cursor, ProviderCursor)
+	host.SetBackend(llmbackend.Cursor, llmbackend.ProviderCursor)
 	host.Persist()
 	return resumed, nil
 }
 
 // prompt sends one turn and streams the provider's run events as neutral Events.
-func (c *cursorSession) prompt(ctx context.Context, text string, _ Mode, onEvent func(Event)) (string, RunResult, error) {
+func (c *cursorSession) Prompt(ctx context.Context, text string, _ llmbackend.Mode, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	if c.agent == nil {
-		return "", RunResult{Status: StatusError, ErrorMessage: "cursor session not attached"}, errNoSession
+		return "", llmbackend.RunResult{Status: llmbackend.StatusError, ErrorMessage: "cursor session not attached"}, llmbackend.ErrNoSession
 	}
-	facts := c.session.host.Facts()
+	facts := c.host.Facts()
 	provider := facts.Provider
 	if provider == "" {
-		provider = ProviderCursor
+		provider = llmbackend.ProviderCursor
 	}
 	started := time.Now()
 	run, err := c.agent.Send(ctx, text)
 	if err != nil {
-		return "", RunResult{
-			Status: StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
+		return "", llmbackend.RunResult{
+			Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
 		}, fmt.Errorf("cursor send: %w", err)
 	}
 	sink := func(native cursorsdk.RunEvent) {
 		if onEvent == nil {
 			return
 		}
-		if ev, ok := MapNativeLLMEvent(provider, native, started); ok {
+		if ev, ok := llmbackend.MapNativeLLMEvent(provider, native, started); ok {
 			onEvent(ev)
 		}
 	}
 	result, err := run.WaitStream(ctx, sink)
 	if err != nil {
-		meta := RunResult{Status: StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
+		meta := llmbackend.RunResult{Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
 		if result != nil {
 			meta = cursorRunResultToLLMRun(*result, started)
 		}
@@ -124,21 +125,21 @@ func (c *cursorSession) prompt(ctx context.Context, text string, _ Mode, onEvent
 		// exhausted account ends a session as "finished" with a message and no text at
 		// all. Recording that as finished would leave the only account of the failure in
 		// the run's message.
-		meta.Status = StatusError
-		return "", meta, emptyModelResponseErr(result.Status, result.ErrorMessage)
+		meta.Status = llmbackend.StatusError
+		return "", meta, llmbackend.EmptyModelResponseErr(result.Status, result.ErrorMessage)
 	}
 	return out, meta, nil
 }
 
-// dispose puts the Cursor agent down: Delete for a one-shot worker (and the row stops
+// dispose puts the llmbackend.Cursor agent down: Delete for a one-shot worker (and the row stops
 // naming it), Close for a resident agent — durable state is kept on the provider's side,
 // which is what a later Resume re-attaches.
-func (c *cursorSession) dispose(ctx context.Context, ephemeral bool) {
+func (c *cursorSession) Dispose(ctx context.Context, ephemeral bool) {
 	if c.agent == nil {
 		return
 	}
 	id := c.agent.ID
-	host := c.session.host
+	host := c.host
 	if ephemeral {
 		if err := c.agent.Delete(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "[autonomy] DeleteAgent %s failed: %v\n", id, err)
@@ -153,19 +154,21 @@ func (c *cursorSession) dispose(ctx context.Context, ephemeral bool) {
 	// The shared bridge client is process-wide and must NOT be closed here.
 }
 
-func (c *cursorSession) sessionID() string {
+func (c *cursorSession) SessionID() string {
 	if c.agent == nil {
 		return ""
 	}
 	return c.agent.ID
 }
 
-func (c *cursorSession) mode() string { return "" }
+func (c *cursorSession) Mode() string { return "" }
+
+func (c *cursorSession) Resumed() bool { return c.resumed }
 
 // resumedFrom is the session this attach was asked to continue, when it did re-attach one.
-func (c *cursorSession) resumedFrom() string {
+func (c *cursorSession) ResumedFrom() string {
 	if !c.resumed {
 		return ""
 	}
-	return c.session.host.Facts().SessionID
+	return c.host.Facts().SessionID
 }

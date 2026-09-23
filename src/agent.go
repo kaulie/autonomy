@@ -5,6 +5,7 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 import (
 	"context"
 	"fmt"
+	_ "github.com/kaulie/autonomy/src/llmbackend/all" // the harnesses this build runs
 	"os"
 	"strings"
 	"time"

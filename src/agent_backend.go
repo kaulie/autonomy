@@ -66,10 +66,7 @@ func (a *Agent) PromptLLMText(ctx context.Context, prompt string, mode ReasonMod
 // next to the backend, so a caller can see what this runtime will run on without
 // reading its environment (docs/llm-backend.md).
 func defaultAgentModel(backend llmbackend.Backend) string {
-	if backend == llmbackend.Cline {
-		return llmbackend.ResolveClineModel()
-	}
-	return llmbackend.DefaultCursorModel()
+	return llmbackend.ModelDefault(backend)
 }
 
 // bridgeCallErr and emptyModelResponseErr live in llmbackend now; these two wrappers keep
