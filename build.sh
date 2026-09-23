@@ -29,7 +29,23 @@ echo "[build] autonomy version=${VERSION}"
 rm -rf "${OUT}"
 mkdir -p "${OUT}/bin" "${OUT}/scripts" "${OUT}/src/agent_policy"
 
-BUILD_CACHE="${AUTONOMY_BUILD_CACHE:-${TMPDIR:-/tmp}/autonomy-build-cache}"
+# Where Go's module and build caches live. Deliberately *not* $TMPDIR: macOS cleans temp
+# dirs, and a build killed mid-extraction leaves a half-unpacked toolchain or module cache
+# behind — after which every later build fails with a wall of "package X is not in std" /
+# "no required module provides package Y" that says nothing about the cache. A durable
+# directory survives both; if it ever does go bad, deleting it is the whole repair
+# (scripts/README.md says so; the cost is one full re-download and recompile).
+# AUTONOMY_BUILD_CACHE overrides the location.
+BUILD_CACHE="${AUTONOMY_BUILD_CACHE:-${HOME:-/tmp}/.cache/autonomy/build}"
+# Move a cache left in the old temp location over, once: a rename, so the first build
+# after this change does not re-download the toolchain and every module.
+LEGACY_BUILD_CACHE="${TMPDIR:-/tmp}/autonomy-build-cache"
+if [ ! -e "${BUILD_CACHE}" ] && [ -d "${LEGACY_BUILD_CACHE}" ] && [ "${LEGACY_BUILD_CACHE}" != "${BUILD_CACHE}" ]; then
+  mkdir -p "$(dirname "${BUILD_CACHE}")"
+  if mv "${LEGACY_BUILD_CACHE}" "${BUILD_CACHE}" 2>/dev/null; then
+    echo "[build] 构建缓存从 ${LEGACY_BUILD_CACHE} 搬到 ${BUILD_CACHE}（原位置在 TMPDIR，会被系统清理）"
+  fi
+fi
 export GOMODCACHE="${BUILD_CACHE}/gomodcache"
 export GOCACHE="${BUILD_CACHE}/gocache"
 export GOPATH="${BUILD_CACHE}/gopath"
