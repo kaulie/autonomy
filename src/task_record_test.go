@@ -14,7 +14,7 @@ import (
 // is what a task's record hangs off.
 func briefingStore(t *testing.T) (rawStore, *Task, *Agent) {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "briefing.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "briefing.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

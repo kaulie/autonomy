@@ -16,7 +16,7 @@ import (
 // newDetailRuntime is a runtime over a fresh store, the way TaskProgress is served.
 func newDetailRuntime(t *testing.T) (*Autonomy, rawStore) {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

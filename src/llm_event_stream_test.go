@@ -86,7 +86,7 @@ func TestLLMTraceRecordsRunStreamAndHeader(t *testing.T) {
 	// The raw stream is opt-in (see llmEventStreamEnabled): this test is the
 	// "turned on" half of the switch.
 	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ FROM reason_turns WHERE agent_id = ?`, 77).
 }
 
 func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestLLMEventStreamEnabledParsing(t *testing.T) {
 // table carries a column shaped like a pointer to one of its rows. That is what makes
 // the table droppable on its own: replay is the only thing that depends on it.
 func TestNoOtherTableReferencesLLMEvents(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ WHERE m.type = 'table' AND m.name <> 'llm_events'
 func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 	for _, value := range []string{"", "0"} {
 		t.Run("AUTONOMY_LLM_EVENTS="+value, func(t *testing.T) {
-			store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+			store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

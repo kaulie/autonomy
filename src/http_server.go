@@ -162,12 +162,20 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 // to. Every run failing the same way is a question about this pair first: an
 // account out of quota is a backend that can be switched (AUTONOMY_LLM_BACKEND,
 // docs/llm-backend.md). llm_model is omitted when the backend resolves the model
-// itself — a Cline bridge with no AUTONOMY_CLINE_MODEL uses the one saved by
+// itself — a Cline bridge with no account model uses the one saved by
 // `cline auth`, which this process does not hold.
+// healthResponse is what /health answers: liveness, the backend this runtime acquired agents
+// run on, and the pool account (and model) a run would actually use.
 type healthResponse struct {
 	Status     string `json:"status"`
 	LLMBackend string `json:"llm_backend,omitempty"`
 	LLMModel   string `json:"llm_model,omitempty"`
+	// LLMAccount / LLMAccountLabel / LLMVendor say which pool entry that model and the
+	// credentials come from (src/accounts.go). Empty account = the pool has nothing for this
+	// backend, so every task would be refused.
+	LLMAccount      string `json:"llm_account,omitempty"`
+	LLMAccountLabel string `json:"llm_account_label,omitempty"`
+	LLMVendor       string `json:"llm_vendor,omitempty"`
 	// Turns is how many reason turns the store holds: a cheap way to see over HTTP
 	// that the log a probe is talking to is the live one (the failure this API
 	// exists to end was a reader holding a stale database file, docs/http-api.md).
@@ -259,6 +267,19 @@ func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Status:     "ok",
 		LLMBackend: string(backend),
 		LLMModel:   defaultAgentModel(backend),
+	}
+	// Credentials and models come from the pool (src/accounts.go), so the account a run would
+	// use is part of what "which backend am I on" means: an empty pool is a runtime that
+	// cannot run anything, and that is worth saying here rather than at a task's first cycle.
+	if s.Autonomy != nil {
+		if account, err := s.Autonomy.DefaultAccount(backend); err == nil && account != nil {
+			resp.LLMAccount = account.ID
+			resp.LLMAccountLabel = account.Label
+			resp.LLMVendor = account.Vendor
+			if account.Model != "" {
+				resp.LLMModel = account.Model
+			}
+		}
 	}
 	if turns, err := s.Autonomy.TurnCount(); err == nil {
 		resp.Turns = &turns

@@ -64,10 +64,13 @@ func (c *codexSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	}
 	resume := c.resumeThread(mode)
 	c.nextResume = resume
+	// Credentials are the account's (src/accounts.go): the pool is the runtime's only source,
+	// and a Codex account without a key runs on whatever `codex auth` saved.
+	creds := c.host.Facts().Creds
 	agent, err := codexClient().Agents().Create(ctx, codexsdk.CreateOptions{
-		ModelID:         ResolveCodexModel(),
-		APIKey:          strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_API_KEY")),
-		BaseURL:         strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_BASE_URL")),
+		ModelID:         creds.Model,
+		APIKey:          creds.APIKey,
+		BaseURL:         creds.BaseURL,
 		CWD:             cwd,
 		SystemPrompt:    defaultCodexSystemPrompt(),
 		Mode:            mode,

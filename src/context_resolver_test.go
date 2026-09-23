@@ -27,7 +27,7 @@ func withRuntime(t *testing.T, containers *ContextContainerManager, tasks ...*Ta
 	previous := _autonomy
 	runtime := &Autonomy{ContextContainerManager: containers}
 	if len(tasks) > 0 {
-		store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+		store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

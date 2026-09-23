@@ -50,6 +50,9 @@ type AgentStatus struct {
 	Role    string `json:"role,omitempty"`
 	Purpose string `json:"purpose,omitempty"`
 	Backend string `json:"backend,omitempty"`
+	// Account is the pool entry this agent's credentials come from (src/accounts.go), as
+	// "acct-… (harness/label)": which account a run bills is part of an agent's status.
+	Account string `json:"account,omitempty"`
 	// Lifecycle is persistent / ephemeral: whether the agent survives past its task.
 	Lifecycle string `json:"lifecycle"`
 	// State is the runtime state: idle | running | deleted.
@@ -115,6 +118,7 @@ func (r *Autonomy) AgentStatusList(includeDeleted bool) (*AgentStatusListRespons
 			Backend:     string(a.Backend),
 			State:       a.State,
 			LLMProvider: string(a.LLMProvider),
+			Account:     a.accountSummary(),
 			Model:       a.Model,
 			Health:      AgentHealthOK,
 		}

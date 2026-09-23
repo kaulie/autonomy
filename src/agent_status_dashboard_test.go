@@ -15,7 +15,7 @@ import (
 // AgentStore.ListAgents, so that read has to give back every agent row — oldest
 // first, soft-deleted ones included — or the page silently loses agents.
 func TestListAgentsReadsEveryRowInOrder(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "agents.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "agents.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestListAgentsReadsEveryRowInOrder(t *testing.T) {
 // not persist), and it reports a run in flight as working. A soft-deleted agent is
 // left out by default and only shown when asked for.
 func TestAgentStatusListMergesStoreAndLiveHandle(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "status.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "status.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestAgentStatusListMergesStoreAndLiveHandle(t *testing.T) {
 // answers the JSON feed, and GET /dashboard answers the page that polls it — the page
 // must actually talk to /api/agents, or "auto-refresh" is a comment.
 func TestAgentDashboardEndpoints(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "http-dashboard.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "http-dashboard.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

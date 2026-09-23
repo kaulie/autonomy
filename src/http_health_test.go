@@ -16,15 +16,15 @@ import (
 // reading a log or a process's env (docs/llm-backend.md).
 func TestHealthReportsTheLLMBackend(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
-	t.Setenv("AUTONOMY_CLINE_PROVIDER", "deepseek")
-	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
 
 	got := healthBody(t, "/health")
 	if got.Status != "ok" {
 		t.Fatalf("status=%q want ok", got.Status)
 	}
-	if got.LLMBackend != string(llmbackend.Cline) || got.LLMModel != "deepseek-v4-pro" {
-		t.Fatalf("health=%+v want cline on deepseek-v4-pro", got)
+	// A server without an Autonomy has no pool behind it: the backend is still named, and the
+	// model is whatever the harness defaults to (empty for cline, which asks its bridge).
+	if got.LLMBackend != string(llmbackend.Cline) || got.LLMModel != "" {
+		t.Fatalf("health=%+v want cline with no pool", got)
 	}
 	if alias := healthBody(t, "/healthz"); alias != got {
 		t.Fatalf("healthz=%+v want the same answer as /health (%+v)", alias, got)
@@ -64,4 +64,30 @@ func healthBody(t *testing.T, path string) healthResponse {
 		t.Fatalf("%s body=%s: %v", path, rec.Body.String(), err)
 	}
 	return got
+}
+
+// With a pool behind it, /health names the account a run would use and the model that account
+// carries: "which backend am I on" is not fully answered without "and on whose credentials".
+func TestHealthReportsTheAccountItWouldRunOn(t *testing.T) {
+	store := resumeTestStore(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	account, err := store.CreateAccount(Account{
+		Harness: "cline", Vendor: "minimax", Label: "minimax prod", Model: "minimax-m2", Enabled: true, IsDefault: true,
+	})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	server := NewHTTPServer(&Autonomy{Store: store})
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var got healthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.LLMModel != "minimax-m2" {
+		t.Fatalf("model=%q want the account's model", got.LLMModel)
+	}
+	if got.LLMAccount != account.ID || got.LLMAccountLabel != "minimax prod" || got.LLMVendor != "minimax" {
+		t.Fatalf("health=%+v want the minimax account named", got)
+	}
 }

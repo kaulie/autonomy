@@ -14,18 +14,33 @@ import (
 var (
 	sharedCursorMu   sync.Mutex
 	sharedCursorClnt *cursorsdk.Client
+	// sharedCursorByKey holds one bridge per Cursor key an account names
+	// (src/accounts.go): the bridge runs with the key it was started with.
+	sharedCursorByKey = map[string]*cursorsdk.Client{}
 )
 
-// cursorClient returns the process-wide llmbackend.Cursor SDK client, creating it
-// (and thus the single bridge) on first use. The per-agent CWD is passed on
-// each CreateAgent call, so one bridge can serve agents in different workspaces.
-func cursorClient() *cursorsdk.Client {
+// cursorClientFor returns the SDK client for one credential. A runtime may serve accounts on
+// several Cursor keys, and each key needs its own bridge process — the bridge is started with
+// the key it will use — so clients are cached per key. The key-less case keeps a single
+// process-wide client (what a test swaps, and what a runtime with no pool entry used to be).
+// The per-agent CWD is still passed on each CreateAgent call, so one bridge serves agents in
+// different workspaces.
+func cursorClientFor(apiKey string) *cursorsdk.Client {
+	key := strings.TrimSpace(apiKey)
 	sharedCursorMu.Lock()
 	defer sharedCursorMu.Unlock()
-	if sharedCursorClnt == nil {
-		sharedCursorClnt = NewCursorClient(cursorWorkspace())
+	if key == "" {
+		if sharedCursorClnt == nil {
+			sharedCursorClnt = NewCursorClient(cursorWorkspace(), "")
+		}
+		return sharedCursorClnt
 	}
-	return sharedCursorClnt
+	if client, ok := sharedCursorByKey[key]; ok {
+		return client
+	}
+	client := NewCursorClient(cursorWorkspace(), key)
+	sharedCursorByKey[key] = client
+	return client
 }
 
 // CloseCursorClient shuts down the process-wide bridge. It should only
@@ -52,9 +67,13 @@ func cursorWorkspace() string {
 // NewCursorClient is the single entry for constructing a llmbackend.Cursor SDK client/bridge.
 // It attaches to an external bridge when CURSOR_SDK_BRIDGE_URL and
 // CURSOR_SDK_BRIDGE_TOKEN are both set; otherwise it spawns its own bridge.
-func NewCursorClient(workspace string) *cursorsdk.Client {
+//
+// apiKey is the account's credential (src/accounts.go) — the pool is the runtime's only
+// source, so nothing here reads CURSOR_API_KEY: an empty key means the account runs on the
+// bridge's own saved auth.
+func NewCursorClient(workspace, apiKey string) *cursorsdk.Client {
 	opts := []cursorsdk.ClientOption{
-		cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
+		cursorsdk.WithAPIKey(apiKey),
 		cursorsdk.WithWorkspace(workspace),
 		cursorsdk.WithBridgeBin(os.Getenv("CURSOR_SDK_BRIDGE_BIN")),
 	}
@@ -66,12 +85,8 @@ func NewCursorClient(workspace string) *cursorsdk.Client {
 	return cursorsdk.NewClient(opts...)
 }
 
-func DefaultCursorModel() string {
-	if m := strings.TrimSpace(os.Getenv("AUTONOMY_LLM_MODEL")); m != "" {
-		return m
-	}
-	return "composer-2"
-}
+// DefaultCursorModel is what a cursor agent runs on when its account names no model.
+func DefaultCursorModel() string { return "composer-2" }
 
 // SwapCursorClient replaces the process-wide llmbackend.Cursor client and returns the one that was
 // there, so a caller (a test pointing the client at an in-process bridge) can put it back.

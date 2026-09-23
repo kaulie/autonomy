@@ -20,7 +20,7 @@ import (
 // runtime wired the way bootstrap wires one.
 func detailOf(t *testing.T, task *Task, containers *ContextContainerManager) *TaskProgress {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

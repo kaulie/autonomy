@@ -33,6 +33,10 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 
 ## 端点
 
+> 账号池（`/api/accounts` 与页面 `GET /accounts`）见 [accounts.md](accounts.md)：一个账号 =
+> harness + vendor + 一把凭据，运行时的凭据只从这里来（不再有 `AUTONOMY_*_API_KEY` 注入）。
+
+
 ### `GET /health`
 
 部署平台对每个服务统一探的路径。`GET /healthz` 是同一处理函数的别名。

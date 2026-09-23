@@ -67,11 +67,15 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	}
 	resume := c.resumeSession(mode)
 	c.nextResume = resume
+	// Credentials are the account's (src/accounts.go): the pool is the runtime's only source,
+	// and a Cline account without a key runs on whatever `cline auth` saved — which is why the
+	// vendor still travels with it (a Cline key means nothing without its maker).
+	creds := c.host.Facts().Creds
 	agent, err := clineClient().Agents().Create(ctx, clinesdk.CreateOptions{
-		ProviderID:      ResolveClineProvider(),
-		ModelID:         ResolveClineModel(),
-		APIKey:          strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
-		BaseURL:         strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
+		ProviderID:      creds.Vendor,
+		ModelID:         creds.Model,
+		APIKey:          creds.APIKey,
+		BaseURL:         creds.BaseURL,
 		CWD:             cwd,
 		SystemPrompt:    defaultClineSystemPrompt(),
 		Mode:            mode,

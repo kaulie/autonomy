@@ -11,7 +11,7 @@ func init() {
 		Provider:     llmbackend.ProviderCline,
 		New:          func(host llmbackend.Host) llmbackend.SessionImpl { return newClineSession(host) },
 		Adapter:      ClineStreamAdapter{},
-		DefaultModel: ResolveClineModel,
+		DefaultModel: ClineDefaultModel,
 		CloseClient:  func() error { return CloseClineClient() },
 		Probe:        probeCline,
 	})

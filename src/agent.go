@@ -216,7 +216,15 @@ type Agent struct {
 	Backend     llmbackend.Backend
 	LLMProvider llmbackend.Provider
 	Model       string // LLM model in use (e.g. composer-2)
-	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
+	// AccountID is the pool account this agent runs on (agents.account_id,
+	// src/accounts.go). It is persisted because it is what keeps a restarted runtime on
+	// the same credentials instead of re-picking from the pool.
+	AccountID string
+	// accountLabel and credential are the resolved account, in memory: the label for
+	// logs and status, the credential for the session a harness builds.
+	accountLabel string
+	credential   llmbackend.Creds
+	Workspace    string // AGENT_WORKSPACE for this agent (code sandbox)
 	// DeletedAt is when this agent was let go (agents.deleted_at), zero while it
 	// is live. It is a row fact, not runtime state: it is read with the row and
 	// says whether the agent a task names can still be resumed (see
@@ -299,6 +307,7 @@ func (a *Agent) Facts() llmbackend.Facts {
 		SessionID: a.LLMAgentID,
 		FrameSent: a.llmFrameSent,
 		Ephemeral: a.IsEphemeral(),
+		Creds:     a.credential,
 	}
 }
 

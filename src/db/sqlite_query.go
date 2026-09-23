@@ -99,7 +99,7 @@ func scanTask(row taskRow) (*Task, error) {
 // agentColumns is the agent columns every agent read selects, in the order
 // scanAgent expects. Both readers take the same columns so an agent is the same
 // value whichever way it was read (GetAgent, ListAgents).
-const agentColumns = `id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
+const agentColumns = `id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id,
        created_at, updated_at, deleted_at`
 
 // agentRow is one row of the agent columns above.
@@ -121,7 +121,7 @@ func scanAgent(row agentRow) (*Agent, error) {
 		deletedAt sql.NullString
 	)
 	if err := row.Scan(
-		&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model,
+		&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model, &a.AccountID,
 		&createdAt, &updatedAt, &deletedAt,
 	); err != nil {
 		return nil, err

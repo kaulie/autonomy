@@ -71,7 +71,7 @@ func TestDispatchExecuteRunsOffThePlannerLoop(t *testing.T) {
 // TestRunObservesAfterCycleDone keeps the decide → execute → observe order for one
 // task: a failed cycle is observed and the planner decides again (budget 2).
 func TestRunObservesAfterCycleDone(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 // and tool call is persisted the moment the stream completes it, so a consumer
 // can follow a long run instead of waiting for Finish.
 func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func mustListMessages(t *testing.T, store rawStore, turnID int64) []LLMMessage {
 // not llm_messages.
 func TestLLMTraceWritesMessagesWithRawStreamDisabled(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_EVENTS", "0")
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
 	"context"
+	"fmt"
 	"github.com/kaulie/autonomy/src/llmbackend/cline"
 	"os"
 	"path/filepath"
@@ -47,11 +48,57 @@ func installFakeClineClient(t *testing.T) {
 			_ = client.Close()
 		}
 	})
+	// The pool entry these tests run on: an agent's harness, vendor and model come from its
+	// account now (src/accounts.go), so a fixture that drives cline turns provides one beside
+	// the fake bridge. A test that brought its own store keeps it — the pool is seeded into
+	// whatever store is active, so writes and reads stay in the same database.
+	if err := ensureTestPool(); err != nil {
+		store := resumeTestStore(t)
+		seedTestAccounts(t, store)
+	}
+	if _, err := clineTestAccount(activeStore()); err != nil {
+		t.Fatalf("seed cline account: %v", err)
+	}
+}
+
+// ensureTestPool seeds the pool into the active store, reporting why it could not: a store an
+// earlier test left closed is not a store this fixture should write to.
+func ensureTestPool() error {
+	store := activeStore()
+	if store == nil {
+		return fmt.Errorf("no active store")
+	}
+	return seedPool(store)
+}
+
+// clineTestAccount puts the cline account the fixtures expect in the pool: vendor deepseek and
+// the model the fake bridge is asked for. Idempotent, so every fixture call is safe.
+func clineTestAccount(store Store) (Account, error) {
+	if existing, err := store.GetAccount(testClineAccountID); err == nil && existing != nil {
+		return *existing, nil
+	}
+	return store.CreateAccount(Account{
+		ID: testClineAccountID, Harness: string(llmbackend.Cline), Vendor: "deepseek",
+		Label: "test cline", Model: "deepseek-v4-pro", Enabled: true, IsDefault: true,
+	})
+}
+
+// testClineAccountID is the pool entry the cline fixtures run on (see clineTestAccount).
+const testClineAccountID = "acct-test-cline"
+
+// testClineAccount is that entry as an in-memory value, for a test whose agent never reaches a
+// store (an agent that already carries its account does not need the pool to agree).
+func testClineAccount() *Account {
+	return &Account{
+		ID: testClineAccountID, Harness: string(llmbackend.Cline), Vendor: "deepseek",
+		Label: "test cline", Model: "deepseek-v4-pro", Enabled: true, IsDefault: true,
+	}
 }
 
 func newClineTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent := &Agent{ID: 9001, Name: "agent-9001", Lifecycle: AgentLifecycleEphemeral, Workspace: t.TempDir()}
+	agent.adoptAccount(testClineAccount())
 	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("attach cline: %v", err)
 	}
@@ -275,7 +322,7 @@ func TestClineModeForReasonMode(t *testing.T) {
 // continues instead of starting over (src/clinesdk/bridge/resume.mjs).
 func TestClineSessionIDIsKeptForTheNextProcess(t *testing.T) {
 	installFakeClineClient(t)
-	store, err := openStore(filepath.Join(t.TempDir(), "cline-session.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "cline-session.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

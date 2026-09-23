@@ -28,7 +28,7 @@ func stopRecords(t *testing.T, store Store, agentID int64) []AgentMessage {
 // names the user, and the task row stays "stopped" (no reason was claimed, so none is
 // invented).
 func TestStopByTheUserSaysSo(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "user-stop.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "user-stop.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestStopByTheUserSaysSo(t *testing.T) {
 // (pipeline id) instead of blaming the user. This is the record that used to lie, and it
 // is written on the run's own path (markStopped), so both paths are exercised here.
 func TestRestartStopIsRecordedAsTheRuntime(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "restart-stop.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "restart-stop.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestStopReasonDoesNotOutliveItsRun(t *testing.T) {
 	setStopReason(taskID, StopReason{By: stoppedByRuntime, RequestID: "pipeline-old"})
 	t.Cleanup(func() { clearStopReason(taskID) })
 
-	store, err := openStore(filepath.Join(t.TempDir(), "stale.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "stale.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

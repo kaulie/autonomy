@@ -29,16 +29,32 @@ func llmMode(mode ReasonMode) llmbackend.Mode { return llmbackend.Mode(mode) }
 // ensureLLMSession attaches the agent's backend session (idempotent) and returns a label
 // for logs: the provider-side session/agent id when known.
 //
-// model is the Cursor-oriented model default from the caller (AUTONOMY_LLM_MODEL or
-// LLMReasoner); the Cline backend ignores it and uses AUTONOMY_CLINE_MODEL or the
-// provider/model saved by `cline auth`, because Cursor model ids mean nothing to a Cline
-// provider.
+// This is also where the agent's **account** is resolved (src/agent_account.go): the pool
+// entry it runs on — its harness, its model, and the credential the session is built from.
+// Resolving in the one place a session is attached is what makes "credentials come from the
+// pool, never from the environment" true for every path: a task's first run, a resumed run,
+// and a delegated worker all come through here. No account to run on is a refusal with a
+// pointer at /accounts, not a quiet fallback.
+//
+// model is what the caller suggested (a Cursor-oriented default from LLMReasoner); the
+// account's own model wins, and an account without one leaves the model to its harness.
 func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode ReasonMode) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("nil agent")
 	}
-	a.SetModel(model)
+	account, err := resolveAccountFor(a)
+	if err != nil {
+		return "", err
+	}
+	a.adoptAccount(account)
+	if account.Model == "" {
+		a.SetModel(model)
+	}
 	a.SetWorkspace(cwd)
+	if a.AccountID != "" {
+		// The account is what the row keeps: the next process resumes the same entry.
+		a.Persist()
+	}
 	id, _, err := a.llmSession().Attach(ctx, llmMode(mode))
 	return id, err
 }
@@ -58,13 +74,10 @@ func (a *Agent) PromptLLMText(ctx context.Context, prompt string, mode ReasonMod
 	return text, err
 }
 
-// defaultAgentModel is the model a backend would run on when nothing else said
-// otherwise: the Cursor default (AUTONOMY_LLM_MODEL, else composer-2), or the
-// Cline model id. It is empty for Cline when AUTONOMY_CLINE_MODEL is unset,
-// because then the bridge resolves the model from the provider/model saved by
-// `cline auth` — a fact this process does not hold. It is what /health reports
-// next to the backend, so a caller can see what this runtime will run on without
-// reading its environment (docs/llm-backend.md).
+// defaultAgentModel is the model a backend falls back to when nothing else said: the
+// harness's own default (empty for cline and codex, which ask their bridge/CLI, and
+// "composer-2" for cursor). An account's model wins over it (src/account_service.go):
+// credentials and models come from the pool, not from this process's environment.
 func defaultAgentModel(backend llmbackend.Backend) string {
 	return llmbackend.ModelDefault(backend)
 }

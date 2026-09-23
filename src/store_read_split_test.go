@@ -51,7 +51,7 @@ func TestWriterReadsAsksForTheWriterSide(t *testing.T) {
 // TestWriterReadsLeavesAStoreWithOneSideAlone: the built-in engine has no follower, so
 // asking for the writer must change nothing — and the port has to keep working.
 func TestWriterReadsLeavesAStoreWithOneSideAlone(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatalf("openStore: %v", err)
 	}

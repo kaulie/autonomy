@@ -46,7 +46,7 @@ func (p *inboxProbe) processed() []string {
 // inboxStore opens a store and an agent row to queue messages for.
 func inboxStore(t *testing.T) (rawStore, int64, string) {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "inbox.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "inbox.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

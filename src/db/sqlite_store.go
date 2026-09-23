@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS agents (
   llm_agent_id TEXT NOT NULL DEFAULT '',
   llm_provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
+  account_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -365,6 +366,12 @@ CREATE INDEX IF NOT EXISTS idx_llm_messages_task ON llm_messages(task_id, cycle)
 	}
 	if err := s.ensureColumn("reason_turns", "llm_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.llm_provider: %w", err)
+	}
+	// The account an agent runs on (src/accounts.go): the pool entry its credentials,
+	// model and workspace root come from, recorded so a restarted runtime resumes the
+	// same one instead of re-picking.
+	if err := s.ensureColumn("agents", "account_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate agents.account_id: %w", err)
 	}
 	if err := s.ensureColumn("reason_turns", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate reason_turns.model: %w", err)
@@ -795,9 +802,9 @@ func (s *SQLiteStore) UpsertAgent(agent *Agent) error {
 	// and derive the name from it.
 	if agent.ID == 0 {
 		res, err := s.db.Exec(`
-INSERT INTO agents (name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-`, "", agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
+INSERT INTO agents (name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id, created_at, updated_at, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+`, "", agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model, agent.AccountID,
 			formatTime(now), formatTime(now))
 		if err != nil {
 			return fmt.Errorf("insert agent: %w", err)
@@ -815,8 +822,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 	}
 
 	_, err := s.db.Exec(`
-INSERT INTO agents (id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+INSERT INTO agents (id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id, created_at, updated_at, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
   name=excluded.name,
   state=excluded.state,
@@ -826,9 +833,10 @@ ON CONFLICT(id) DO UPDATE SET
   llm_agent_id=excluded.llm_agent_id,
   llm_provider=excluded.llm_provider,
   model=excluded.model,
+  account_id=excluded.account_id,
   updated_at=excluded.updated_at,
   deleted_at=NULL
-`, agent.ID, agent.Name, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
+`, agent.ID, agent.Name, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model, agent.AccountID,
 		formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)

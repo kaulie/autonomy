@@ -56,14 +56,14 @@ func SwapCodexClient(next *codexsdk.Client) *codexsdk.Client {
 	return previous
 }
 
-// newCodexClient is the single entry for constructing a Codex client/bridge. The Codex SDK
-// reads its own credentials (AUTONOMY_CODEX_API_KEY / CODEX_API_KEY, or `codex auth`), so
-// there is no provider id here — the bridge's own config resolves the rest.
+// newCodexClient is the single entry for constructing a Codex client/bridge.
+//
+// It carries no credentials of its own: one bridge process serves every Codex account, and
+// each agent's account rides on its own CreateAgent call (src/llmbackend/codex/session.go).
+// There is no provider id either — Codex talks to OpenAI (or to whatever base URL the
+// account names).
 func newCodexClient(workspace string) *codexsdk.Client {
 	return codexsdk.NewClient(
-		codexsdk.WithModel(ResolveCodexModel()),
-		codexsdk.WithAPIKey(strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_API_KEY"))),
-		codexsdk.WithBaseURL(strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_BASE_URL"))),
 		codexsdk.WithSystemPrompt(defaultCodexSystemPrompt()),
 		codexsdk.WithWorkspace(workspace),
 	)
@@ -76,11 +76,9 @@ func agentWorkspace() string {
 	return "."
 }
 
-// ResolveCodexModel is the Codex model id (e.g. "gpt-5-codex"); empty means "let the CLI
-// decide", which is the Codex SDK's own behaviour.
-func ResolveCodexModel() string {
-	return strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_MODEL"))
-}
+// CodexDefaultModel is what a codex agent runs on when its account names no model: empty,
+// which leaves the choice to the CLI (the Codex SDK's own behaviour).
+func CodexDefaultModel() string { return "" }
 
 // defaultCodexSystemPrompt is the thread's instructions. The Codex SDK has no system-prompt
 // option, so the bridge prefixes this to a fresh thread's first turn (a resumed thread

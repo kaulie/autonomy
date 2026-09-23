@@ -12,7 +12,7 @@ import (
 // no world continues the task with the one the row has (accept → the run's prompt).
 
 func TestTaskRowKeepsItsGoalTypeAndContextRef(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

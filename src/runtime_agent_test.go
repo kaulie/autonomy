@@ -98,7 +98,7 @@ func TestADelegatedWorkerCycleCountsItsOwnInteractionRounds(t *testing.T) {
 	installFakeClineClient(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestRuntimeAcquireAgentWithoutWorkspaceUsesItsOwn(t *testing.T) {
 // current_task_id (it used to stay empty while its runs already recorded the
 // task).
 func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
 func TestNewCursorClientIsSingleEntry(t *testing.T) {
 	t.Parallel()
 	// Smoke: constructor returns a client; real bridge not required.
-	c := cursor.NewCursorClient(t.TempDir())
+	c := cursor.NewCursorClient(t.TempDir(), "")
 	if c == nil {
 		t.Fatal("nil client")
 	}

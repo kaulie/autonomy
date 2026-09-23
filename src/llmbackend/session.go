@@ -29,6 +29,10 @@ type Facts struct {
 	SessionID string // the provider session the agent row recorded, to re-attach
 	FrameSent bool   // the reasoning frame is already in the session
 	Ephemeral bool   // a one-shot worker: its session is deleted, not kept
+	// Creds is what the agent's account supplies. The runtime's account pool is the only
+	// place credentials come from (src/accounts.go), so a harness reads its key here and
+	// never out of the environment.
+	Creds Creds
 }
 
 // Host is the autonomy agent a Session belongs to, as a backend needs it: what it must
