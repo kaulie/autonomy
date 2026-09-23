@@ -68,6 +68,9 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// the page a human opens that polls it and renders a table with auto-refresh
 		// (src/agent_dashboard.go). Both are read-only.
 		{"GET /api/agents", s.handleAgentStatusList},
+		// The UI itself: GET / is the shell a human opens, and the modules below it are pages
+		// it embeds (src/ui_home_page.go). Both spellings stay: a module is reachable directly.
+		{"GET /", s.handleUIHome},
 		{"GET /dashboard", s.handleAgentDashboard},
 		// The graceful restart the deployment platform performs on this service: one
 		// notice before it stops us, then a poll while it waits for the runs in flight
@@ -764,6 +767,22 @@ func (s *HTTPServer) handleAccountsPage(w http.ResponseWriter, _ *http.Request) 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, accountsPageHTML)
+}
+
+// handleUIHome serves autonomy's UI shell: the page a human opens, with the modules of this
+// runtime in its navigation (src/ui_home_page.go). Each module is its own self-contained page and
+// is also reachable on its own path, so the shell is a way in rather than a wrapper everything
+// has to go through.
+//
+// @Summary  autonomy UI 主界面（左右导航 + 模块）
+// @Tags     system
+// @Produce  html
+// @Success  200  {string}  string  "HTML 页面（模块：/dashboard、/accounts）"
+// @Router   / [get]
+func (s *HTTPServer) handleUIHome(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, uiHomeHTML)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
