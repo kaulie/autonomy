@@ -18,15 +18,15 @@ var (
 
 // ClineClientFactory builds the process-wide Cline client. Tests replace it with
 // a client backed by the fake bridge (see cline_agent_test.go).
-var ClineClientFactory = NewClineClient
+var ClineClientFactory = newClineClient
 
-// ClineClient returns the process-wide Cline client, creating it (and thus
+// clineClient returns the process-wide Cline client, creating it (and thus
 // the single bridge) on first use.
-func ClineClient() *clinesdk.Client {
+func clineClient() *clinesdk.Client {
 	sharedClineMu.Lock()
 	defer sharedClineMu.Unlock()
 	if sharedClineClnt == nil {
-		sharedClineClnt = ClineClientFactory(AgentWorkspace())
+		sharedClineClnt = ClineClientFactory(agentWorkspace())
 	}
 	return sharedClineClnt
 }
@@ -44,19 +44,19 @@ func CloseClineClient() error {
 	return err
 }
 
-// NewClineClient is the single entry for constructing a Cline client/bridge.
-func NewClineClient(workspace string) *clinesdk.Client {
+// newClineClient is the single entry for constructing a Cline client/bridge.
+func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
 		clinesdk.WithProvider(ResolveClineProvider()),
 		clinesdk.WithModel(ResolveClineModel()),
 		clinesdk.WithAPIKey(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY"))),
 		clinesdk.WithBaseURL(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL"))),
-		clinesdk.WithSystemPrompt(DefaultClineSystemPrompt()),
+		clinesdk.WithSystemPrompt(defaultClineSystemPrompt()),
 		clinesdk.WithWorkspace(workspace),
 	)
 }
 
-func AgentWorkspace() string {
+func agentWorkspace() string {
 	if root, err := ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
 		return root
 	}
@@ -77,10 +77,10 @@ func ResolveClineModel() string {
 	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL"))
 }
 
-// DefaultClineSystemPrompt is the session system prompt. The Cline SDK requires
+// defaultClineSystemPrompt is the session system prompt. The Cline SDK requires
 // one, and autonomy's own instructions ride on the prompt itself, so this is
 // deliberately generic; AUTONOMY_CLINE_SYSTEM_PROMPT overrides it.
-func DefaultClineSystemPrompt() string {
+func defaultClineSystemPrompt() string {
 	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_SYSTEM_PROMPT")); p != "" {
 		return p
 	}
@@ -102,7 +102,7 @@ func DefaultBackend() Backend {
 }
 
 // SwapClineClient replaces the process-wide Cline client and returns the one that was
-// there; passing nil forgets it (the next ClineClient call builds a fresh one). It is how
+// there; passing nil forgets it (the next clineClient call builds a fresh one). It is how
 // a test points the bridge at an in-process fake and restores it afterwards.
 func SwapClineClient(next *clinesdk.Client) *clinesdk.Client {
 	sharedClineMu.Lock()

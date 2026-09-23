@@ -7,18 +7,18 @@ import (
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
-// CursorStreamAdapter maps the Cursor SDK bridge run stream onto neutral
+// cursorStreamAdapter maps the Cursor SDK bridge run stream onto neutral
 // LLMEvents. It is the only place that knows Cursor's payload shapes, so other
 // backends can be added without touching the trace or store layers.
-type CursorStreamAdapter struct{}
+type cursorStreamAdapter struct{}
 
-func (CursorStreamAdapter) Provider() Provider { return ProviderCursor }
+func (cursorStreamAdapter) Provider() Provider { return ProviderCursor }
 
 // MapEvent converts one Cursor RunEvent. Cursor events are always kept (ok is
 // true) because callers want the full raw stream. The payload is copied with the
 // neutral keys added (call_id/args/result/text/duration_ms/usage), so a consumer
 // sees the same shape as the Cline backend.
-func (CursorStreamAdapter) MapEvent(native any, _ time.Time) (Event, bool) {
+func (cursorStreamAdapter) MapEvent(native any, _ time.Time) (Event, bool) {
 	ev, ok := native.(cursorsdk.RunEvent)
 	if !ok {
 		return Event{}, false
@@ -173,9 +173,9 @@ func payloadInt(payload map[string]any, keys ...string) any {
 	return nil
 }
 
-// CursorRunResultToLLMRun captures run-level metadata (status, usage, timing)
+// cursorRunResultToLLMRun captures run-level metadata (status, usage, timing)
 // from a finished Cursor run.
-func CursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) RunResult {
+func cursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) RunResult {
 	status := LLMStatus(strings.ToLower(strings.TrimSpace(res.Status)))
 	switch status {
 	case StatusRunning, StatusFinished, StatusError, StatusCancelled, StatusExpired:
@@ -283,5 +283,5 @@ func contentText(content any) string {
 }
 
 func init() {
-	RegisterAdapter(CursorStreamAdapter{})
+	registerAdapter(cursorStreamAdapter{})
 }

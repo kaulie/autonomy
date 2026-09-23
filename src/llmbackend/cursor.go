@@ -37,7 +37,7 @@ func (c *cursorSession) attach(ctx context.Context, _ Mode) (bool, error) {
 	if model == "" {
 		model = DefaultCursorModel()
 	}
-	client := CursorClient()
+	client := cursorClient()
 	if err := client.Ping(ctx); err != nil {
 		return false, fmt.Errorf("cursor bridge ping: %w", bridgeCallErr(ctx, err))
 	}
@@ -113,12 +113,12 @@ func (c *cursorSession) prompt(ctx context.Context, text string, _ Mode, onEvent
 	if err != nil {
 		meta := RunResult{Status: StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
 		if result != nil {
-			meta = CursorRunResultToLLMRun(*result, started)
+			meta = cursorRunResultToLLMRun(*result, started)
 		}
 		return "", meta, fmt.Errorf("cursor wait: %w", err)
 	}
 	out := strings.TrimSpace(result.Text)
-	meta := CursorRunResultToLLMRun(*result, started)
+	meta := cursorRunResultToLLMRun(*result, started)
 	if out == "" {
 		// A run that answered nothing is a failed run, whatever the provider calls it: an
 		// exhausted account ends a session as "finished" with a message and no text at

@@ -14,7 +14,7 @@ type ClineStreamAdapter struct{}
 
 func (ClineStreamAdapter) Provider() Provider { return ProviderCline }
 
-func init() { RegisterAdapter(ClineStreamAdapter{}) }
+func init() { registerAdapter(ClineStreamAdapter{}) }
 
 // Cline core event types forwarded by the bridge (kept verbatim in EventType).
 const (

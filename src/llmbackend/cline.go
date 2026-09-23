@@ -55,7 +55,7 @@ func (c *clineSession) attach(ctx context.Context, mode Mode) (bool, error) {
 
 // attachFor creates (or reuses) the session for one mode/cwd and makes it the current one.
 func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, error) {
-	if _, _, err := ClineClient().Ping(ctx); err != nil {
+	if _, _, err := clineClient().Ping(ctx); err != nil {
 		return false, fmt.Errorf("cline bridge ping: %w", bridgeCallErr(ctx, err))
 	}
 	key := mode + "\x00" + cwd
@@ -66,13 +66,13 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	}
 	resume := c.resumeSession(mode)
 	c.nextResume = resume
-	agent, err := ClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
+	agent, err := clineClient().Agents().Create(ctx, clinesdk.CreateOptions{
 		ProviderID:      ResolveClineProvider(),
 		ModelID:         ResolveClineModel(),
 		APIKey:          strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
 		BaseURL:         strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
 		CWD:             cwd,
-		SystemPrompt:    DefaultClineSystemPrompt(),
+		SystemPrompt:    defaultClineSystemPrompt(),
 		Mode:            mode,
 		ResumeSessionID: resume,
 	})

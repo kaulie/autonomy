@@ -9,7 +9,7 @@
 
 ## 谁决定后端
 
-`AUTONOMY_LLM_BACKEND`（`src/cline_client.go: defaultAgentBackend()`）：
+`AUTONOMY_LLM_BACKEND`（`src/llmbackend/cline_client.go: DefaultBackend()`）：
 
 | 值 | 后端 | 说明 |
 |----|------|------|
@@ -80,6 +80,24 @@ rsync 不碰 `.cache/`，所以每次部署不用重解；按 sha 去重、只�
 起来后 `curl -s 127.0.0.1:4300/health` 应看到 `"llm_backend":"cline"`，`backend/server.log`
 里会出现 `[cline-bridge] …`（还有 start.sh 的 `cline桥=…` 一行，写的是它实际用的路径）。
 
+### 代码边界：`src/llmbackend` 是唯一知道 provider 的地方
+
+两个后端的**全部差异**都在一个模块里（`src/llmbackend/`）—— 这也是它存在的理由：
+
+| 文件 | 拥有的东西 |
+|------|-----------|
+| `backend.go` / `doc.go` | 词表（`Backend` / `Provider` / `Mode`）、环境选择与默认值、`PROJECT_ROOT` |
+| `session.go` | `Session`：`Attach`（续或新建）/ `Prompt`（一条流）/ `Dispose`（该 Close 就 Close、该 Delete 就 Delete）+ 它向宿主读写的 `Host` 接口 |
+| `cursor.go` / `cline.go` | 两个实现：Cursor 的 `Resume`/`Create`、Cline 的按 (mode, cwd) 常驻会话与 transcript 播种 |
+| `cursor_client.go` / `cline_client.go` | 进程内共享的桥客户端（各一个） |
+| `events.go` / `events_kind.go` / `events_cursor.go` / `events_cline.go` | 中性 `Event` 词表 + 适配器接口与注册表 + 两个后端的原生流映射 |
+
+**依赖只朝一个方向**：runtime import 这个模块，模块**不** import runtime（它用 `Host` 接口拿它需要的事实、写回它拥有的两件事）。这也是为什么**中性事件词表必须在这个模块里**：适配器产出它、并往注册表里注册自己 —— 只搬「客户端 + 会话」会让模块反过来 import runtime，成环。
+
+runtime 侧只剩它自己知道的事：某个 agent **是**哪个后端（它的行）、身份/生命周期/工作区、记下的会话 id 与 frame 记账；一轮 turn 通过 `Agent.llmSession()` 这一扇门走。
+
+**保持这条边界的规则**（改动时照着做）：`src/llmbackend/` 之外**没有非测试文件** import `src/cursorsdk` 或 `src/clinesdk`。加后端 = 在这个模块里加一个实现 + 一个事件适配器，runtime 一行不用改（这也是 [llm-event-stream.md](llm-event-stream.md) 里「加一个后端」那一节的落点）。
+
 ### 启动前自检：桥不可用 = 这次部署失败（不是起个坏服务）
 
 `scripts/start.sh` 在拉起 `autonomyd` 之前会检查**所选后端**的桥（`AUTONOMY_REASONER=local`
@@ -137,7 +155,7 @@ to continue.)
 
 `text_bytes=0`：**模型一个字都没答**，provider 把这个 run 以 `status=error` 结束。账号额度耗尽、
 限流、模型下架都会长成这样——不是 prompt 的问题，也不是 autonomy 的 bug。两个后端
-（`src/cursor_agent.go` / `src/cline_agent.go`）都把这种 run 记成失败并在错误里点名
+（`src/llmbackend/cursor.go` / `src/llmbackend/cline.go`）都把这种 run 记成失败并在错误里点名
 `AUTONOMY_LLM_BACKEND`：空答案唯一有效的修法是换后端 / 换账号 / 换模型（Cursor 侧换模型是
 `AUTONOMY_LLM_MODEL`）。重试没有意义——不在 `AUTONOMY_LLM_TURN_RETRIES` 的覆盖范围内，
 provider 报错、余额不足都不重试（`src/llm_turn_retry.go`）。

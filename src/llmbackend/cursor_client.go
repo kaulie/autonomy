@@ -15,14 +15,14 @@ var (
 	sharedCursorClnt *cursorsdk.Client
 )
 
-// CursorClient returns the process-wide Cursor SDK client, creating it
+// cursorClient returns the process-wide Cursor SDK client, creating it
 // (and thus the single bridge) on first use. The per-agent CWD is passed on
 // each CreateAgent call, so one bridge can serve agents in different workspaces.
-func CursorClient() *cursorsdk.Client {
+func cursorClient() *cursorsdk.Client {
 	sharedCursorMu.Lock()
 	defer sharedCursorMu.Unlock()
 	if sharedCursorClnt == nil {
-		sharedCursorClnt = NewCursorClient(CursorWorkspace())
+		sharedCursorClnt = NewCursorClient(cursorWorkspace())
 	}
 	return sharedCursorClnt
 }
@@ -41,7 +41,7 @@ func CloseCursorClient() error {
 	return err
 }
 
-func CursorWorkspace() string {
+func cursorWorkspace() string {
 	if root, err := ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
 		return root
 	}
@@ -74,7 +74,7 @@ func DefaultCursorModel() string {
 
 // SwapCursorClient replaces the process-wide Cursor client and returns the one that was
 // there, so a caller (a test pointing the client at an in-process bridge) can put it back.
-// Passing nil forgets the current client — the next CursorClient call builds a fresh one.
+// Passing nil forgets the current client — the next cursorClient call builds a fresh one.
 func SwapCursorClient(next *cursorsdk.Client) *cursorsdk.Client {
 	sharedCursorMu.Lock()
 	defer sharedCursorMu.Unlock()

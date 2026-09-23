@@ -9,10 +9,10 @@ prompt cache），而不是"每次一问一答"。
 Cline 的 agent 内核（`@cline/agents` / `@cline/llms` / `@cline/core`）**只有 TypeScript/Node**，
 autonomy 是 Go。所以 Go 侧 spawn 一个 Node 子进程（`src/clinesdk/bridge/bridge.mjs`），由它持有
 Cline session 并把 SDK 的**原生事件**流式回传；Go 负责进程生命周期、请求/响应关联、事件扇出，以及
-把原生事件映射成中立的 `LLMEvent`（`src/llm_event_cline.go`）—— 数据库与 trace 层不感知 provider。
+把原生事件映射成中立的 `LLMEvent`（`src/llmbackend/events_cline.go`）—— 数据库与 trace 层不感知 provider。
 
 ```
-Agent (Go, src/cline_agent.go)
+Agent (Go, src/llmbackend/cline.go)
   └─ clinesdk.Client (Go, src/clinesdk)
        └─ stdio NDJSON ─▶ bridge.mjs (Node)
                             └─ @cline/sdk ClineCore ─▶ provider (deepseek / anthropic / …)
@@ -101,7 +101,7 @@ runtime 的环境。当前在哪个后端可以直接问：`curl -s 127.0.0.1:43
   所有 session 在该 agent `Release`/dispose 时一起关闭。
 - 一只 agent 的 session 在它**被明确结束**时关闭（worker 的 `Release`、进程退出）；**一次运行结束不算** —— agent 常驻，session 留着给下一条消息复用。Cline 侧的 session 活在本进程里，**重启后由 autonomy 为同一个 agent 新建一个**（桥没有 re-attach，见 [agent.md](agent.md)），Cursor 侧则是 `CloseAgent` 之后仍可 Resume。只有明确用完即弃的 worker（`Ephemeral: true`）在 `Release` 时连 handle 一起丢。
 
-## 事件映射（`src/llm_event_cline.go`）
+## 事件映射（`src/llmbackend/events_cline.go`）
 
 | Cline 原生 | channel | 说明 |
 |---|---|---|

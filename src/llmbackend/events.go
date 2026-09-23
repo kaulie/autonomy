@@ -9,7 +9,7 @@ import (
 // This file defines the provider-neutral LLM run-stream model. Every LLM
 // backend (Cursor today; Cline / DeepSeek harness later) maps its native run
 // stream into Event, so persistence, replay, and analytics stay
-// backend-agnostic. Adding a backend means adding an StreamAdapter — the
+// backend-agnostic. Adding a backend means adding an streamAdapter — the
 // trace and store layers never change.
 
 // EventChannel is a coarse, provider-neutral classification of a stream
@@ -107,28 +107,28 @@ type RunResult struct {
 	EndedAt       time.Time
 }
 
-// StreamAdapter translates one provider's native run stream into neutral
+// streamAdapter translates one provider's native run stream into neutral
 // LLMEvents. Implement it per backend; the trace/store layer depends only on
 // Event, so adding a backend never touches persistence.
-type StreamAdapter interface {
+type streamAdapter interface {
 	// Provider is the backend this adapter handles.
 	Provider() Provider
 	// MapEvent converts one native stream event. ok=false drops the event.
 	MapEvent(native any, startedAt time.Time) (Event, bool)
 }
 
-var llmStreamAdapters = map[Provider]StreamAdapter{}
+var llmStreamAdapters = map[Provider]streamAdapter{}
 
-// RegisterAdapter makes a backend's stream adapter available to
+// registerAdapter makes a backend's stream adapter available to
 // LLMTrace. Backends register once (typically from bootstrap or init).
-func RegisterAdapter(adapter StreamAdapter) {
+func registerAdapter(adapter streamAdapter) {
 	if adapter == nil {
 		return
 	}
 	llmStreamAdapters[adapter.Provider()] = adapter
 }
 
-func AdapterFor(provider Provider) (StreamAdapter, bool) {
+func adapterFor(provider Provider) (streamAdapter, bool) {
 	a, ok := llmStreamAdapters[provider]
 	return a, ok
 }
@@ -137,7 +137,7 @@ func AdapterFor(provider Provider) (StreamAdapter, bool) {
 // reporting ok=false when no adapter is registered or the event is dropped.
 // Backends' Agent wrappers use it to stay provider-agnostic themselves.
 func MapNativeLLMEvent(provider Provider, native any, startedAt time.Time) (Event, bool) {
-	adapter, ok := AdapterFor(provider)
+	adapter, ok := adapterFor(provider)
 	if !ok {
 		return Event{}, false
 	}
