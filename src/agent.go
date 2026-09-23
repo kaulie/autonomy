@@ -216,11 +216,12 @@ type Agent struct {
 	// second kind of session to pick from.
 	Session *LLMSession
 
-	// llm is this agent's provider session — the whole of what differs between the
-	// backends (src/llmbackend). It is built lazily, on the backend the row names, and
-	// wired to this agent through the Host interface below, so the backend package never
-	// imports this one.
-	llm *llmbackend.Session
+	// llm is this agent's provider session — **the llmbackend.Session interface**, not a
+	// concrete backend: which implementation answers is decided when it is built (the
+	// backend the row names, looked up in src/llmbackend's registry), so this file never
+	// names a provider. It is built lazily and wired to this agent through the Host
+	// interface below, which the backend package depends on instead of importing us.
+	llm llmbackend.Session
 	// LLMAgentID is the provider session this agent was recorded with: the id a later
 	// process re-attaches (Cursor: the agent id; Cline: the plan session `cls-…`), and
 	// what a persistent agent keeps after Close.
@@ -235,7 +236,7 @@ type Agent struct {
 }
 
 // llmSession is this agent's provider session, built on first use and wired to it.
-func (a *Agent) llmSession() *llmbackend.Session {
+func (a *Agent) llmSession() llmbackend.Session {
 	if a == nil {
 		return nil
 	}

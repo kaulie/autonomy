@@ -53,8 +53,14 @@ type Host interface {
 	Persist()
 }
 
-// Session is one provider session for one autonomy agent: the whole of what differs
-// between Cursor and Cline, behind one door the runtime opens per turn.
+// Session is one provider session for one autonomy agent — **the interface the runtime
+// depends on**, whichever harness is behind it.
+//
+// The runtime never names a provider: it holds a Session and calls it. Which
+// implementation answers is decided at runtime, by the backend the agent's row (or
+// AUTONOMY_LLM_BACKEND) selects — llmbackend.New looks that harness up in the registry and
+// wraps its SessionImpl. So the upper layer compiles against this interface, and adding a
+// harness changes nothing above it.
 //
 // Attach is idempotent and re-attaches the session the agent was recorded with — a fresh
 // one when the provider no longer has it, because a session that expired while the runtime
@@ -62,23 +68,48 @@ type Host interface {
 // one turn and streams neutral Events. Dispose puts the session down the way its provider
 // wants: Close (durable state kept, resumable) for a resident agent, Delete for a one-shot
 // worker.
-type Session struct {
+type Session interface {
+	// Attach opens (or re-attaches) the session and reports the provider session id it
+	// ended up on plus whether that was a session that already existed.
+	Attach(ctx context.Context, mode Mode) (string, bool, error)
+	// Prompt runs one turn, streaming neutral events to onEvent (nil = drain only).
+	Prompt(ctx context.Context, text string, mode Mode, onEvent func(Event)) (string, RunResult, error)
+	// PromptText is Prompt without event delivery.
+	PromptText(ctx context.Context, text string, mode Mode) (string, error)
+	// Dispose ends the session for good (Close or Delete, the provider's choice).
+	Dispose(ctx context.Context)
+	// ProviderSessionID is the provider session attached now — what the agent row records
+	// so the next process can continue it.
+	ProviderSessionID() string
+	// Resumed reports whether the last Attach re-attached a session that already existed.
+	Resumed() bool
+	// ResumedFrom is the session the last Attach was asked to continue ("" for a fresh one).
+	ResumedFrom() string
+	// Mode is the attached session's own mode (Cline's plan/act; "" when it has none).
+	Mode() string
+}
+
+// session is the core's implementation of that interface: one harness's session, bound to
+// the agent that owns it. It adds what is the *core's* rather than a harness's — the
+// disposal deadline, the text-only prompt, nil-safety — and delegates the rest.
+type session struct {
 	host Host
 	impl SessionImpl
 }
 
-// New builds the session for an agent, on the backend its facts name.
-func New(host Host) *Session {
+// New builds the session for an agent, on the backend its facts name: the harness is looked
+// up in the registry, so this is the one place that decides which implementation answers.
+// nil when there is no host (nothing to serve).
+func New(host Host) Session {
 	if host == nil {
 		return nil
 	}
-	s := &Session{host: host}
+	s := &session{host: host}
 	backend := host.Facts().Backend
 	harness, ok := harnessFor(backend)
 	if !ok {
 		// A backend with no harness linked in is a build mistake, not something to guess
-		// around: fall back to any registered one so a session still exists, and let the
-		// attach report the truth (the missing-harness error is on the session).
+		// around: fall back to a session that says so, and let attach report the truth.
 		s.impl = missingHarness{backend: backend}
 		return s
 	}
@@ -107,7 +138,7 @@ func (m missingHarness) ResumedFrom() string           { return "" }
 // Attach opens (or re-attaches) the session, idempotently, and reports the provider
 // session id it ended up on plus whether that was a session that already existed. A nil
 // session attaches nothing.
-func (s *Session) Attach(ctx context.Context, mode Mode) (string, bool, error) {
+func (s *session) Attach(ctx context.Context, mode Mode) (string, bool, error) {
 	if s == nil || s.impl == nil {
 		return "", false, nil
 	}
@@ -123,7 +154,7 @@ func (s *Session) Attach(ctx context.Context, mode Mode) (string, bool, error) {
 // Prompt runs one turn on the attached session and streams neutral events to onEvent
 // (nil means "drain the stream, deliver nothing"). mode is the autonomy reasoning mode; a
 // backend that distinguishes plan from act maps it onto its own session mode.
-func (s *Session) Prompt(ctx context.Context, text string, mode Mode, onEvent func(Event)) (string, RunResult, error) {
+func (s *session) Prompt(ctx context.Context, text string, mode Mode, onEvent func(Event)) (string, RunResult, error) {
 	if s == nil || s.impl == nil {
 		return "", RunResult{Status: StatusError, ErrorMessage: "no session"}, ErrNoSession
 	}
@@ -132,7 +163,7 @@ func (s *Session) Prompt(ctx context.Context, text string, mode Mode, onEvent fu
 
 // Resumed reports whether the last Attach re-attached a session that already existed, as
 // opposed to opening a fresh one. It is false before the first Attach.
-func (s *Session) Resumed() bool {
+func (s *session) Resumed() bool {
 	if s == nil {
 		return false
 	}
@@ -144,7 +175,7 @@ func (s *Session) Resumed() bool {
 
 // Mode is the attached session's own mode — Cline's plan/act, which a turn must match —
 // and "" for a backend that does not distinguish (Cursor) or before the first attach.
-func (s *Session) Mode() string {
+func (s *session) Mode() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
@@ -155,7 +186,7 @@ func (s *Session) Mode() string {
 // agent row records so the next process can continue it. Before a run has started on a
 // fresh session the provider has not minted that id yet, so the bridge's own handle stands
 // in: it identifies the same session to anyone asking "is this still the one I had?".
-func (s *Session) ProviderSessionID() string {
+func (s *session) ProviderSessionID() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
@@ -165,7 +196,7 @@ func (s *Session) ProviderSessionID() string {
 // ResumedFrom is the provider session this attach was asked to continue: the id the agent
 // row recorded, handed to the provider so it seeds the conversation. "" when the turn
 // opened a fresh session instead.
-func (s *Session) ResumedFrom() string {
+func (s *session) ResumedFrom() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
@@ -173,14 +204,14 @@ func (s *Session) ResumedFrom() string {
 }
 
 // PromptText is Prompt without event delivery.
-func (s *Session) PromptText(ctx context.Context, text string, mode Mode) (string, error) {
+func (s *session) PromptText(ctx context.Context, text string, mode Mode) (string, error) {
 	out, _, err := s.Prompt(ctx, text, mode, nil)
 	return out, err
 }
 
 // Dispose puts the session down: the provider's own way of ending it, for good. It is safe
 // on a session that never attached.
-func (s *Session) Dispose(ctx context.Context) {
+func (s *session) Dispose(ctx context.Context) {
 	if s == nil || s.impl == nil {
 		return
 	}
