@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -151,7 +153,7 @@ func restoredAgent(stored *Agent, task *Task) *Agent {
 func (a *Agent) resumeCursorSession(ctx context.Context) (bool, error) {
 	model := a.Model
 	if model == "" {
-		model = defaultCursorModel()
+		model = llmbackend.DefaultCursorModel()
 	}
 	resumed := a.LLMAgentID != "" && !a.IsEphemeral()
 	err := a.AttachCursor(ctx, model)

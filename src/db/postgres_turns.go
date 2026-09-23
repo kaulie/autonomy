@@ -5,6 +5,7 @@ import . "github.com/kaulie/autonomy/src"
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"sort"
 	"strings"
 	"time"
@@ -146,7 +147,7 @@ func pgScanTurnRecord(row interface{ Scan(dest ...any) error }) (TurnRecord, err
 		return TurnRecord{}, err
 	}
 	rec.Mode = ReasonMode(mode)
-	rec.Provider = LLMProvider(provider)
+	rec.Provider = llmbackend.Provider(provider)
 	if costCents.Valid {
 		cost := costCents.Float64
 		rec.CostCents = &cost

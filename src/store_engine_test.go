@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"os"
 	"path/filepath"
@@ -17,13 +19,13 @@ func (fakeStore) InsertReasonTurn(ReasonTurn) error { return nil }
 func (fakeStore) BeginReasonTurn(ReasonTurn) (ReasonTurnHandle, error) {
 	return ReasonTurnHandle{}, nil
 }
-func (fakeStore) AppendLLMEvents(int64, string, []LLMEvent) error { return nil }
-func (fakeStore) AppendLLMMessages(int64, []LLMMessage) error     { return nil }
-func (fakeStore) FinishReasonTurn(ReasonTurnHandle, LLMRunResult) error {
+func (fakeStore) AppendLLMEvents(int64, string, []llmbackend.Event) error { return nil }
+func (fakeStore) AppendLLMMessages(int64, []LLMMessage) error             { return nil }
+func (fakeStore) FinishReasonTurn(ReasonTurnHandle, llmbackend.RunResult) error {
 	return nil
 }
-func (fakeStore) ListLLMEvents(int64) ([]LLMEvent, error)     { return nil, nil }
-func (fakeStore) ListLLMMessages(int64) ([]LLMMessage, error) { return nil, nil }
+func (fakeStore) ListLLMEvents(int64) ([]llmbackend.Event, error) { return nil, nil }
+func (fakeStore) ListLLMMessages(int64) ([]LLMMessage, error)     { return nil, nil }
 func (fakeStore) AssistantMessageID(int64) (int64, bool, error) {
 	return 0, false, nil
 }

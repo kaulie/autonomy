@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"path/filepath"
 	"testing"
@@ -12,46 +14,46 @@ func TestCursorStreamAdapterMapsRunEvents(t *testing.T) {
 	cases := []struct {
 		name        string
 		event       cursorsdk.RunEvent
-		wantChannel LLMEventChannel
+		wantChannel llmbackend.EventChannel
 		wantText    string
 		wantRole    string
 	}{
 		{
 			name:        "assistant chunk",
 			event:       cursorsdk.RunEvent{Type: "assistant", Payload: map[string]any{"text": "hello"}, Offset: "o1"},
-			wantChannel: LLMChannelAssistant,
+			wantChannel: llmbackend.ChannelAssistant,
 			wantText:    "hello",
 			wantRole:    "assistant",
 		},
 		{
 			name:        "tool call",
 			event:       cursorsdk.RunEvent{Type: "tool_call", Payload: map[string]any{"name": "read_file"}},
-			wantChannel: LLMChannelTool,
+			wantChannel: llmbackend.ChannelTool,
 			wantRole:    "tool",
 		},
 		{
 			name:        "status",
 			event:       cursorsdk.RunEvent{Type: "status", Payload: map[string]any{"message": "thinking"}},
-			wantChannel: LLMChannelStatus,
+			wantChannel: llmbackend.ChannelStatus,
 			wantRole:    "system",
 		},
 		{
 			name:        "interaction update delta",
 			event:       cursorsdk.RunEvent{Type: "interaction_update:text_delta", Payload: map[string]any{"text": "hi"}},
-			wantChannel: LLMChannelAssistant,
+			wantChannel: llmbackend.ChannelAssistant,
 			wantText:    "hi",
 			wantRole:    "assistant",
 		},
 		{
 			name:        "unknown type falls back to meta",
 			event:       cursorsdk.RunEvent{Type: "mystery"},
-			wantChannel: LLMChannelMeta,
+			wantChannel: llmbackend.ChannelMeta,
 			wantRole:    "system",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ev, ok := MapNativeLLMEvent(LLMProviderCursor, tc.event, time.Now())
+			ev, ok := llmbackend.MapNativeLLMEvent(llmbackend.ProviderCursor, tc.event, time.Now())
 			if !ok {
 				t.Fatalf("expected event to map")
 			}
@@ -75,7 +77,7 @@ func TestCursorStreamAdapterMapsRunEvents(t *testing.T) {
 }
 
 func TestMapNativeLLMEventUnknownProviderIsDropped(t *testing.T) {
-	if _, ok := MapNativeLLMEvent(LLMProvider("nope"), cursorsdk.RunEvent{}, time.Now()); ok {
+	if _, ok := llmbackend.MapNativeLLMEvent(llmbackend.Provider("nope"), cursorsdk.RunEvent{}, time.Now()); ok {
 		t.Fatal("expected unknown provider to be dropped")
 	}
 }
@@ -93,23 +95,23 @@ func TestLLMTraceRecordsRunStreamAndHeader(t *testing.T) {
 	_store = store
 	t.Cleanup(func() { _store = prev })
 
-	agent := &Agent{ID: 77, LLMProvider: LLMProviderCursor, Model: "composer-2", LLMAgentID: "cursor-agent-1"}
+	agent := &Agent{ID: 77, LLMProvider: llmbackend.ProviderCursor, Model: "composer-2", LLMAgentID: "cursor-agent-1"}
 	trace := BeginLLMTrace(agent, "task-9", 3, ReasonModeAgent, "do the thing")
 	if trace == nil || !trace.active {
 		t.Fatal("expected an active trace")
 	}
-	trace.Emit(LLMEvent{Channel: LLMChannelAssistant, EventType: "assistant", TextDelta: "hello",
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelAssistant, EventType: "assistant", TextDelta: "hello",
 		Payload: map[string]any{"text": "hello"}, OffsetToken: "o1"})
-	trace.Emit(LLMEvent{Channel: LLMChannelTool, EventType: "tool_call", Name: "read_file",
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelTool, EventType: "tool_call", Name: "read_file",
 		Payload: map[string]any{"name": "read_file"}})
-	trace.Emit(LLMEvent{Channel: LLMChannelStatus, EventType: "status", Payload: map[string]any{"message": "working"}})
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelStatus, EventType: "status", Payload: map[string]any{"message": "working"}})
 	fenced := "```json\n{\"type\":\"done\"}\n```"
-	trace.Finish(LLMRunResult{
+	trace.Finish(llmbackend.RunResult{
 		ProviderRunID: "run-1",
-		Status:        LLMStatusFinished,
+		Status:        llmbackend.StatusFinished,
 		RawOutput:     fenced,
 		DurationMS:    1234,
-		Usage:         LLMUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+		Usage:         llmbackend.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
 	})
 	if trace.active {
 		t.Fatal("trace should be closed after Finish")
@@ -126,7 +128,7 @@ FROM reason_turns WHERE agent_id = ?`, 77).
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runID != "run-1" || status != string(LLMStatusFinished) {
+	if runID != "run-1" || status != string(llmbackend.StatusFinished) {
 		t.Fatalf("run_id=%q status=%q", runID, status)
 	}
 	if llmAgentID != "cursor-agent-1" || mode != string(ReasonModeAgent) {
@@ -157,10 +159,10 @@ FROM reason_turns WHERE agent_id = ?`, 77).
 			t.Fatalf("event %d missing created_at", i)
 		}
 	}
-	if events[0].Channel != LLMChannelAssistant || events[0].TextDelta != "hello" || events[0].Payload["text"] != "hello" {
+	if events[0].Channel != llmbackend.ChannelAssistant || events[0].TextDelta != "hello" || events[0].Payload["text"] != "hello" {
 		t.Fatalf("event0=%+v", events[0])
 	}
-	if events[1].Name != "read_file" || events[1].Channel != LLMChannelTool {
+	if events[1].Name != "read_file" || events[1].Channel != llmbackend.ChannelTool {
 		t.Fatalf("event1=%+v", events[1])
 	}
 
@@ -181,7 +183,7 @@ func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
 	}
 	defer store.Close()
 
-	handle, err := store.BeginReasonTurn(ReasonTurn{AgentID: 5, Status: string(LLMStatusRunning)})
+	handle, err := store.BeginReasonTurn(ReasonTurn{AgentID: 5, Status: string(llmbackend.StatusRunning)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,9 +194,9 @@ func TestAppendLLMEventsIsIdempotentOnSeq(t *testing.T) {
 	if handle.InputMessageID == 0 {
 		t.Fatal("expected a user-input message id")
 	}
-	batch := []LLMEvent{
-		{Seq: 0, EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "a"},
-		{Seq: 1, EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "b"},
+	batch := []llmbackend.Event{
+		{Seq: 0, EventType: "assistant", Channel: llmbackend.ChannelAssistant, TextDelta: "a"},
+		{Seq: 1, EventType: "assistant", Channel: llmbackend.ChannelAssistant, TextDelta: "b"},
 	}
 	if err := store.AppendLLMEvents(turnID, "", batch); err != nil {
 		t.Fatal(err)
@@ -222,8 +224,8 @@ func TestLLMTraceWithoutStoreIsNoop(t *testing.T) {
 		t.Fatal("trace must never be nil")
 	}
 	// These must not panic or write anything without a store.
-	trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant})
-	trace.Finish(LLMRunResult{Status: LLMStatusFinished})
+	trace.Emit(llmbackend.Event{EventType: "assistant", Channel: llmbackend.ChannelAssistant})
+	trace.Finish(llmbackend.RunResult{Status: llmbackend.StatusFinished})
 }
 
 func TestLLMEventStreamEnabledParsing(t *testing.T) {
@@ -311,11 +313,11 @@ func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 			t.Cleanup(func() { _store = prev })
 			t.Setenv("AUTONOMY_LLM_EVENTS", value)
 
-			agent := &Agent{ID: 88, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+			agent := &Agent{ID: 88, LLMProvider: llmbackend.ProviderCursor, Model: "composer-2"}
 			trace := BeginLLMTrace(agent, "task-d", 1, ReasonModePlan, "in")
-			trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "x"})
-			trace.Emit(LLMEvent{EventType: "assistant", Channel: LLMChannelAssistant, TextDelta: "y"})
-			trace.Finish(LLMRunResult{ProviderRunID: "run-x", Status: LLMStatusFinished, RawOutput: "done"})
+			trace.Emit(llmbackend.Event{EventType: "assistant", Channel: llmbackend.ChannelAssistant, TextDelta: "x"})
+			trace.Emit(llmbackend.Event{EventType: "assistant", Channel: llmbackend.ChannelAssistant, TextDelta: "y"})
+			trace.Finish(llmbackend.RunResult{ProviderRunID: "run-x", Status: llmbackend.StatusFinished, RawOutput: "done"})
 
 			var (
 				turnID int64
@@ -324,8 +326,8 @@ func TestLLMTraceSkipsStreamByDefault(t *testing.T) {
 			if err := store.RawDB().QueryRow(`SELECT id, status FROM reason_turns WHERE agent_id = ?`, 88).Scan(&turnID, &status); err != nil {
 				t.Fatal(err)
 			}
-			if status != string(LLMStatusFinished) {
-				t.Fatalf("status=%q, want %q (run header must still be written)", status, LLMStatusFinished)
+			if status != string(llmbackend.StatusFinished) {
+				t.Fatalf("status=%q, want %q (run header must still be written)", status, llmbackend.StatusFinished)
 			}
 			var count int
 			if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM llm_events WHERE turn_id = ?`, turnID).Scan(&count); err != nil {

@@ -1,10 +1,9 @@
 package db
 
-import . "github.com/kaulie/autonomy/src"
-
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"strings"
 	"time"
 )
@@ -59,7 +58,7 @@ func pgFloat(f *float64) any {
 
 // pgUsageCost renders usage cost as a nullable column value, keeping unknown cost
 // distinct from a genuine zero.
-func pgUsageCost(u LLMUsage) any {
+func pgUsageCost(u llmbackend.Usage) any {
 	if !u.CostKnown {
 		return nil
 	}

@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -26,10 +28,10 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 		cwd, _ = os.Getwd()
 	}
 	if model == "" {
-		model = defaultCursorModel()
+		model = llmbackend.DefaultCursorModel()
 	}
 
-	client := sharedCursorClient()
+	client := llmbackend.CursorClient()
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("cursor bridge ping: %w", bridgeCallErr(ctx, err))
 	}
@@ -59,8 +61,8 @@ func (a *Agent) AttachCursor(ctx context.Context, model string) error {
 	// a freshly created one starts empty and needs it on its first decision cycle
 	// (see Agent.needsLLMFrame).
 	a.llmFrameSent = resumed
-	a.Backend = AgentBackendCursor
-	a.LLMProvider = LLMProviderCursor
+	a.Backend = llmbackend.Cursor
+	a.LLMProvider = llmbackend.ProviderCursor
 	a.Model = model
 	persistAgent(a)
 	return nil
@@ -92,45 +94,45 @@ func (a *Agent) PromptCursor(ctx context.Context, prompt string) (string, error)
 // PromptCursorStream sends a prompt and streams the provider's run events to
 // onEvent as neutral LLMEvents while the run is live, returning the final text
 // and run-level metadata. onEvent may be nil; the stream is still drained.
-func (a *Agent) PromptCursorStream(ctx context.Context, prompt string, onEvent func(LLMEvent)) (string, LLMRunResult, error) {
+func (a *Agent) PromptCursorStream(ctx context.Context, prompt string, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	if a == nil || a.cursorAgent == nil {
-		return "", LLMRunResult{}, fmt.Errorf("cursor session not attached")
+		return "", llmbackend.RunResult{}, fmt.Errorf("cursor session not attached")
 	}
 	started := time.Now()
 	run, err := a.cursorAgent.Send(ctx, prompt)
 	if err != nil {
-		return "", LLMRunResult{
-			Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
+		return "", llmbackend.RunResult{
+			Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
 		}, fmt.Errorf("cursor send: %w", err)
 	}
 	provider := a.LLMProvider
 	if provider == "" {
-		provider = LLMProviderCursor
+		provider = llmbackend.ProviderCursor
 	}
 	sink := func(native cursorsdk.RunEvent) {
 		if onEvent == nil {
 			return
 		}
-		if ev, ok := MapNativeLLMEvent(provider, native, started); ok {
+		if ev, ok := llmbackend.MapNativeLLMEvent(provider, native, started); ok {
 			onEvent(ev)
 		}
 	}
 	result, err := run.WaitStream(ctx, sink)
 	if err != nil {
-		meta := LLMRunResult{Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
+		meta := llmbackend.RunResult{Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
 		if result != nil {
-			meta = cursorRunResultToLLMRun(*result, started)
+			meta = llmbackend.CursorRunResultToLLMRun(*result, started)
 		}
 		return "", meta, fmt.Errorf("cursor wait: %w", err)
 	}
 	text := strings.TrimSpace(result.Text)
-	meta := cursorRunResultToLLMRun(*result, started)
+	meta := llmbackend.CursorRunResultToLLMRun(*result, started)
 	if text == "" {
 		// A run that answered nothing is a failed run, whatever the provider calls
 		// it: an exhausted account ends a session as "finished" with a message and
 		// no text at all. Recording that as finished would leave the only account
 		// of the failure in the run's message.
-		meta.Status = LLMStatusError
+		meta.Status = llmbackend.StatusError
 		return "", meta, emptyModelResponseErr(result.Status, result.ErrorMessage)
 	}
 	return text, meta, nil

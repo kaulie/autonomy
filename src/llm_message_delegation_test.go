@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"path/filepath"
 	"testing"
@@ -21,7 +23,7 @@ func TestDelegatedRunInputIsAttributedToTheAgent(t *testing.T) {
 
 	// The runtime's own run for the task the user submitted.
 	own := BeginLLMTrace(&Agent{ID: 5001, Name: "agent-5001"}, "task-1", 0, ReasonModePlan, "runtime prompt")
-	own.Finish(LLMRunResult{Status: LLMStatusFinished, RawOutput: "plan"})
+	own.Finish(llmbackend.RunResult{Status: llmbackend.StatusFinished, RawOutput: "plan"})
 	ownMsgs := mustListMessages(t, store, own.handle.TurnID)
 	if ownMsgs[0].Role != LLMMessageRoleUser {
 		t.Fatalf("runtime run input role=%q, want %q", ownMsgs[0].Role, LLMMessageRoleUser)
@@ -31,7 +33,7 @@ func TestDelegatedRunInputIsAttributedToTheAgent(t *testing.T) {
 	// the agent is what makes it a delegated turn.
 	sess := &LLMSession{agent: &Agent{ID: 5002, Name: "agent-5002", Role: AgentRoleWorker}, taskID: "task-1"}
 	trace := sess.beginTurn("You are an autonomous software engineer working in this workspace:\n\n/ws\n\nGoal:\n\ndo it", RoundAuto)
-	trace.Finish(LLMRunResult{Status: LLMStatusFinished, RawOutput: "done"})
+	trace.Finish(llmbackend.RunResult{Status: llmbackend.StatusFinished, RawOutput: "done"})
 
 	msgs := mustListMessages(t, store, trace.handle.TurnID)
 	if msgs[0].Role != LLMMessageRoleAgent {

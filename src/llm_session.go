@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -185,10 +187,10 @@ func (s *LLMSession) beginTurn(prompt string, round int) *LLMTrace {
 }
 
 // promptable reports whether this session runs on an LLM at all. A session opened as
-// local is the agent's own bookkeeping with no backend behind it (AgentBackendLocal):
+// local is the agent's own bookkeeping with no backend behind it (llmbackend.Local):
 // there is nothing to prompt, and nothing to attach.
 func (s *LLMSession) promptable() bool {
-	return AgentBackend(s.provider()) != AgentBackendLocal
+	return llmbackend.Backend(s.provider()) != llmbackend.Local
 }
 
 // workspaceOrCwd is where this session's provider run happens: the agent's own

@@ -1,4 +1,4 @@
-package autonomy
+package llmbackend
 
 import (
 	"os"
@@ -15,22 +15,22 @@ var (
 	sharedCursorClnt *cursorsdk.Client
 )
 
-// sharedCursorClient returns the process-wide Cursor SDK client, creating it
+// CursorClient returns the process-wide Cursor SDK client, creating it
 // (and thus the single bridge) on first use. The per-agent CWD is passed on
 // each CreateAgent call, so one bridge can serve agents in different workspaces.
-func sharedCursorClient() *cursorsdk.Client {
+func CursorClient() *cursorsdk.Client {
 	sharedCursorMu.Lock()
 	defer sharedCursorMu.Unlock()
 	if sharedCursorClnt == nil {
-		sharedCursorClnt = newCursorClient(sharedCursorWorkspace())
+		sharedCursorClnt = NewCursorClient(CursorWorkspace())
 	}
 	return sharedCursorClnt
 }
 
-// closeSharedCursorClient shuts down the process-wide bridge. It should only
+// CloseCursorClient shuts down the process-wide bridge. It should only
 // be called at runtime teardown (or process exit), never while agents are
 // actively using the client.
-func closeSharedCursorClient() error {
+func CloseCursorClient() error {
 	sharedCursorMu.Lock()
 	defer sharedCursorMu.Unlock()
 	if sharedCursorClnt == nil {
@@ -41,17 +41,17 @@ func closeSharedCursorClient() error {
 	return err
 }
 
-func sharedCursorWorkspace() string {
-	if root, err := projectRoot(); err == nil && strings.TrimSpace(root) != "" {
+func CursorWorkspace() string {
+	if root, err := ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
 		return root
 	}
 	return "."
 }
 
-// newCursorClient is the single entry for constructing a Cursor SDK client/bridge.
+// NewCursorClient is the single entry for constructing a Cursor SDK client/bridge.
 // It attaches to an external bridge when CURSOR_SDK_BRIDGE_URL and
 // CURSOR_SDK_BRIDGE_TOKEN are both set; otherwise it spawns its own bridge.
-func newCursorClient(workspace string) *cursorsdk.Client {
+func NewCursorClient(workspace string) *cursorsdk.Client {
 	opts := []cursorsdk.ClientOption{
 		cursorsdk.WithAPIKey(os.Getenv("CURSOR_API_KEY")),
 		cursorsdk.WithWorkspace(workspace),
@@ -65,9 +65,20 @@ func newCursorClient(workspace string) *cursorsdk.Client {
 	return cursorsdk.NewClient(opts...)
 }
 
-func defaultCursorModel() string {
+func DefaultCursorModel() string {
 	if m := strings.TrimSpace(os.Getenv("AUTONOMY_LLM_MODEL")); m != "" {
 		return m
 	}
 	return "composer-2"
+}
+
+// SwapCursorClient replaces the process-wide Cursor client and returns the one that was
+// there, so a caller (a test pointing the client at an in-process bridge) can put it back.
+// Passing nil forgets the current client — the next CursorClient call builds a fresh one.
+func SwapCursorClient(next *cursorsdk.Client) *cursorsdk.Client {
+	sharedCursorMu.Lock()
+	defer sharedCursorMu.Unlock()
+	previous := sharedCursorClnt
+	sharedCursorClnt = next
+	return previous
 }

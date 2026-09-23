@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -8,14 +10,14 @@ import (
 // This file routes an autonomy Agent's LLM calls to whichever backend backs it
 // (the Cursor SDK bridge or the Cline SDK bridge), so the reasoner and the
 // runtime loop stay backend-agnostic. Everything provider-specific lives in
-// cursor_agent.go / cline_agent.go plus the matching LLMStreamAdapter.
+// cursor_agent.go / cline_agent.go plus the matching llmbackend.StreamAdapter.
 
 // effectiveBackend is the backend an agent will use: the attached one, or the
 // host default while it is still unattached (agents are registered as "local"
 // by AgentFactory and only get a backend when a session is attached).
-func (a *Agent) effectiveBackend() AgentBackend {
-	if a == nil || a.Backend == "" || a.Backend == AgentBackendLocal {
-		return defaultAgentBackend()
+func (a *Agent) effectiveBackend() llmbackend.Backend {
+	if a == nil || a.Backend == "" || a.Backend == llmbackend.Local {
+		return llmbackend.DefaultBackend()
 	}
 	return a.Backend
 }
@@ -32,7 +34,7 @@ func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode Re
 		return "", fmt.Errorf("nil agent")
 	}
 	switch a.effectiveBackend() {
-	case AgentBackendCline:
+	case llmbackend.Cline:
 		return a.ensureClineSession(ctx, cwd, clineModeFor(mode))
 	default:
 		agent, err := a.ensureCursorSession(ctx, model, cwd)
@@ -46,12 +48,12 @@ func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode Re
 // PromptLLMStream runs one prompt on the agent's backend and reports neutral
 // LLMEvents as they arrive. mode is the autonomy reasoning mode; backends that
 // distinguish plan from act (Cline) map it onto their own session mode.
-func (a *Agent) PromptLLMStream(ctx context.Context, prompt string, mode ReasonMode, onEvent func(LLMEvent)) (string, LLMRunResult, error) {
+func (a *Agent) PromptLLMStream(ctx context.Context, prompt string, mode ReasonMode, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	if a == nil {
-		return "", LLMRunResult{}, fmt.Errorf("nil agent")
+		return "", llmbackend.RunResult{}, fmt.Errorf("nil agent")
 	}
 	switch a.effectiveBackend() {
-	case AgentBackendCline:
+	case llmbackend.Cline:
 		return a.PromptClineStream(ctx, prompt, clineModeFor(mode), onEvent)
 	default:
 		return a.PromptCursorStream(ctx, prompt, onEvent)
@@ -71,11 +73,11 @@ func (a *Agent) PromptLLMText(ctx context.Context, prompt string, mode ReasonMod
 // `cline auth` — a fact this process does not hold. It is what /health reports
 // next to the backend, so a caller can see what this runtime will run on without
 // reading its environment (docs/llm-backend.md).
-func defaultAgentModel(backend AgentBackend) string {
-	if backend == AgentBackendCline {
-		return resolveClineModel()
+func defaultAgentModel(backend llmbackend.Backend) string {
+	if backend == llmbackend.Cline {
+		return llmbackend.ResolveClineModel()
 	}
-	return defaultCursorModel()
+	return llmbackend.DefaultCursorModel()
 }
 
 // emptyModelResponseErr is what a run that produced no text at all is: a failed

@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"errors"
@@ -136,7 +138,7 @@ func TestATruncatedTurnIsRetriedOnTheSameSession(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("recorded %d turns, want the truncated one and its retry: %+v", len(turns), turns)
 	}
-	if turns[0].status != string(LLMStatusError) || !strings.Contains(turns[0].errMsg, "maximum output token limit") {
+	if turns[0].status != string(llmbackend.StatusError) || !strings.Contains(turns[0].errMsg, "maximum output token limit") {
 		t.Errorf("first turn = %+v, want the failure the provider reported", turns[0])
 	}
 	if turns[0].input != "truncate my turn" {
@@ -145,7 +147,7 @@ func TestATruncatedTurnIsRetriedOnTheSameSession(t *testing.T) {
 	if !strings.Contains(turns[1].input, "Your turn was cut off") {
 		t.Errorf("retry input=%q, want the continuation reminder", turns[1].input)
 	}
-	if turns[1].status == string(LLMStatusError) {
+	if turns[1].status == string(llmbackend.StatusError) {
 		t.Errorf("retry turn = %+v, want a successful run", turns[1])
 	}
 }

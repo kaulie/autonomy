@@ -5,6 +5,7 @@ import . "github.com/kaulie/autonomy/src"
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,7 +142,7 @@ func scanTurnRecord(row interface{ Scan(dest ...any) error }) (TurnRecord, error
 		return TurnRecord{}, err
 	}
 	rec.Mode = ReasonMode(mode)
-	rec.Provider = LLMProvider(provider)
+	rec.Provider = llmbackend.Provider(provider)
 	rec.AgentID = turnAgentID(agentID)
 	if costCents.Valid {
 		cost := costCents.Float64

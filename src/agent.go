@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -17,24 +19,6 @@ type AgentLifecycle string
 const (
 	AgentLifecycleEphemeral  AgentLifecycle = "ephemeral"
 	AgentLifecyclePersistent AgentLifecycle = "persistent"
-)
-
-// AgentBackend identifies how an autonomy agent is backed.
-type AgentBackend string
-
-const (
-	AgentBackendLocal  AgentBackend = "local"
-	AgentBackendCursor AgentBackend = "cursor"
-	AgentBackendCline  AgentBackend = "cline"
-)
-
-// LLMProvider identifies which LLM provider backs an agent.
-type LLMProvider string
-
-const (
-	LLMProviderCursor          LLMProvider = "cursor"
-	LLMProviderCline           LLMProvider = "cline"
-	LLMProviderDeepseekHarness LLMProvider = "deepseek_harness"
 )
 
 // AgentRole is what an agent is in the runtime's division of labour — the first
@@ -100,7 +84,7 @@ func (f *AgentFactory) NewAgent() *Agent {
 	agent := &Agent{
 		State:     "idle",
 		Lifecycle: AgentLifecyclePersistent,
-		Backend:   AgentBackendLocal,
+		Backend:   llmbackend.Local,
 	}
 	persistAgent(agent) // Store assigns ID and Name when available
 	if agent.ID == 0 {
@@ -208,8 +192,8 @@ type Agent struct {
 	Name        string // human identifier, agent-{id}
 	State       string // runtime: idle | running | ...
 	Lifecycle   AgentLifecycle
-	Backend     AgentBackend
-	LLMProvider LLMProvider
+	Backend     llmbackend.Backend
+	LLMProvider llmbackend.Provider
 	Model       string // LLM model in use (e.g. composer-2)
 	Workspace   string // AGENT_WORKSPACE for this agent (code sandbox)
 	// DeletedAt is when this agent was let go (agents.deleted_at), zero while it

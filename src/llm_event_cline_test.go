@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"strings"
 	"testing"
@@ -17,14 +19,14 @@ func clineAgentEvent(inner map[string]any) clinesdk.RunEvent {
 }
 
 func TestClineAdapterMapsChannels(t *testing.T) {
-	adapter := clineStreamAdapter{}
-	if adapter.Provider() != LLMProviderCline {
+	adapter := llmbackend.ClineStreamAdapter{}
+	if adapter.Provider() != llmbackend.ProviderCline {
 		t.Fatalf("provider=%q", adapter.Provider())
 	}
 	cases := []struct {
 		name      string
 		native    any
-		channel   LLMEventChannel
+		channel   llmbackend.EventChannel
 		eventType string
 		text      string
 		role      string
@@ -32,7 +34,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 		{
 			name:      "assistant delta",
 			native:    clineAgentEvent(map[string]any{"type": "content_start", "contentType": "text", "text": "po", "accumulated": "po"}),
-			channel:   LLMChannelAssistant,
+			channel:   llmbackend.ChannelAssistant,
 			eventType: "agent_event:content_start:text",
 			text:      "po",
 			role:      "assistant",
@@ -40,7 +42,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 		{
 			name:      "assistant final",
 			native:    clineAgentEvent(map[string]any{"type": "content_end", "contentType": "text", "text": "pong"}),
-			channel:   LLMChannelAssistant,
+			channel:   llmbackend.ChannelAssistant,
 			eventType: "agent_event:content_end:text",
 			text:      "pong",
 			role:      "assistant",
@@ -48,7 +50,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 		{
 			name:      "thinking delta",
 			native:    clineAgentEvent(map[string]any{"type": "content_start", "contentType": "reasoning", "reasoning": "why not"}),
-			channel:   LLMChannelThought,
+			channel:   llmbackend.ChannelThought,
 			eventType: "agent_event:content_start:reasoning",
 			text:      "why not",
 			role:      "assistant",
@@ -57,7 +59,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 			// content_end repeats the whole block, so it must not add text again.
 			name:      "thinking block end",
 			native:    clineAgentEvent(map[string]any{"type": "content_end", "contentType": "reasoning", "reasoning": "why not"}),
-			channel:   LLMChannelThought,
+			channel:   llmbackend.ChannelThought,
 			eventType: "agent_event:content_end:reasoning",
 			text:      "",
 			role:      "assistant",
@@ -68,7 +70,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 				"type": "content_start", "contentType": "tool", "toolName": "run_commands",
 				"toolCallId": "call-1", "input": map[string]any{"commands": []string{"echo hi"}},
 			}),
-			channel:   LLMChannelTool,
+			channel:   llmbackend.ChannelTool,
 			eventType: "agent_event:content_start:tool",
 			role:      "tool",
 		},
@@ -78,42 +80,42 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 				"type": "content_end", "contentType": "tool", "toolName": "run_commands",
 				"toolCallId": "call-1", "output": "hi\n", "durationMs": 7,
 			}),
-			channel:   LLMChannelTool,
+			channel:   llmbackend.ChannelTool,
 			eventType: "agent_event:content_end:tool",
 			role:      "tool",
 		},
 		{
 			name:      "usage",
 			native:    clineAgentEvent(map[string]any{"type": "usage", "inputTokens": 11, "outputTokens": 2}),
-			channel:   LLMChannelMeta,
+			channel:   llmbackend.ChannelMeta,
 			eventType: "agent_event:usage",
 			role:      "system",
 		},
 		{
 			name:      "done",
 			native:    clineAgentEvent(map[string]any{"type": "done", "reason": "completed", "text": "pong"}),
-			channel:   LLMChannelResult,
+			channel:   llmbackend.ChannelResult,
 			eventType: "agent_event:done",
 			role:      "assistant",
 		},
 		{
 			name:      "provider error",
 			native:    clineAgentEvent(map[string]any{"type": "error", "message": "boom"}),
-			channel:   LLMChannelError,
+			channel:   llmbackend.ChannelError,
 			eventType: "agent_event:error",
 			role:      "assistant",
 		},
 		{
 			name:      "lifecycle status",
 			native:    clineEvent("status", map[string]any{"status": "running"}),
-			channel:   LLMChannelStatus,
+			channel:   llmbackend.ChannelStatus,
 			eventType: "status",
 			role:      "system",
 		},
 		{
 			name:      "stdout chunk",
 			native:    clineEvent("chunk", map[string]any{"stream": "stdout", "chunk": "hi\n"}),
-			channel:   LLMChannelTool,
+			channel:   llmbackend.ChannelTool,
 			eventType: "chunk:stdout",
 			text:      "hi\n",
 			role:      "tool",
@@ -142,7 +144,7 @@ func TestClineAdapterMapsChannels(t *testing.T) {
 }
 
 func TestClineAdapterAnnotatesToolPayloads(t *testing.T) {
-	adapter := clineStreamAdapter{}
+	adapter := llmbackend.ClineStreamAdapter{}
 	mapped, ok := adapter.MapEvent(clineAgentEvent(map[string]any{
 		"type": "content_end", "contentType": "tool", "toolName": "run_commands",
 		"toolCallId": "call-9", "input": map[string]any{"commands": []string{"ls"}},
@@ -154,7 +156,7 @@ func TestClineAdapterAnnotatesToolPayloads(t *testing.T) {
 	if mapped.Name != "run_commands" {
 		t.Fatalf("name=%q", mapped.Name)
 	}
-	if got := payloadString(mapped.Payload, "call_id"); got != "call-9" {
+	if got := llmbackend.PayloadString(mapped.Payload, "call_id"); got != "call-9" {
 		t.Fatalf("call_id=%q want call-9", got)
 	}
 	if mapped.Payload["args"] == nil {
@@ -170,7 +172,7 @@ func TestClineAdapterAnnotatesToolPayloads(t *testing.T) {
 }
 
 func TestClineAdapterDropsAgentEchoChunks(t *testing.T) {
-	adapter := clineStreamAdapter{}
+	adapter := llmbackend.ClineStreamAdapter{}
 	if _, ok := adapter.MapEvent(clineEvent("chunk", map[string]any{"stream": "agent", "chunk": `{"type":"done"}`}), time.Now()); ok {
 		t.Fatal("agent echo chunk should be dropped (it duplicates agent_event)")
 	}
@@ -186,11 +188,11 @@ func TestClineRunResultToLLMRun(t *testing.T) {
 		TotalTokens: 1640, CostUSD: 0.000052113, HasCost: true, ReasoningTokens: &reasoning,
 	}
 	started := time.Now().Add(-2 * time.Second)
-	meta := clineRunResultToLLMRun(clinesdk.RunResult{
+	meta := llmbackend.ClineRunResultToLLMRun(clinesdk.RunResult{
 		AgentID: "cls_1", SessionID: "cls-session-1", Status: "finished",
 		Text: "pong", Usage: usage, StartedAt: started,
 	}, started)
-	if meta.Status != LLMStatusFinished {
+	if meta.Status != llmbackend.StatusFinished {
 		t.Fatalf("status=%q", meta.Status)
 	}
 	if meta.ProviderRunID != "cls-session-1" || meta.LLMAgentID != "cls_1" {
@@ -208,11 +210,11 @@ func TestClineRunResultToLLMRun(t *testing.T) {
 }
 
 func TestClineRunResultWithoutCostStaysUnknown(t *testing.T) {
-	meta := clineRunResultToLLMRun(clinesdk.RunResult{Status: "finished", Text: "ok"}, time.Now())
+	meta := llmbackend.ClineRunResultToLLMRun(clinesdk.RunResult{Status: "finished", Text: "ok"}, time.Now())
 	if meta.Usage.CostKnown {
 		t.Fatal("cost must stay unknown when the provider reports none")
 	}
-	if meta.Status != LLMStatusFinished || !strings.Contains(meta.RawOutput, "ok") {
+	if meta.Status != llmbackend.StatusFinished || !strings.Contains(meta.RawOutput, "ok") {
 		t.Fatalf("meta=%+v", meta)
 	}
 }
@@ -223,10 +225,10 @@ func TestClineRunResultWithoutCostStaysUnknown(t *testing.T) {
 // thinking_duration_ms) or only streams deltas (Cline).
 func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
 	start := time.Now()
-	adapter := clineStreamAdapter{}
+	adapter := llmbackend.ClineStreamAdapter{}
 
 	// Cline: reasoning deltas plus a block-end event repeating the whole text.
-	var clineEvents []LLMEvent
+	var clineEvents []llmbackend.Event
 	for i, delta := range []string{"Let", " me", " think"} {
 		ev, ok := adapter.MapEvent(clineAgentEvent(map[string]any{
 			"type": "content_start", "contentType": "reasoning", "reasoning": delta,
@@ -260,8 +262,8 @@ func TestThinkingIsAlignedAcrossBackends(t *testing.T) {
 	}
 
 	// Cursor: one thinking message per block, duration reported by the provider.
-	cursorMsgs := AggregateChatMessages([]LLMEvent{{
-		Seq: 0, Channel: LLMChannelThought, EventType: "thinking", TextDelta: "hmm", CreatedAt: start,
+	cursorMsgs := AggregateChatMessages([]llmbackend.Event{{
+		Seq: 0, Channel: llmbackend.ChannelThought, EventType: "thinking", TextDelta: "hmm", CreatedAt: start,
 		Payload: map[string]any{"text": "hmm", "thinking_duration_ms": float64(3456)},
 	}})
 	if len(cursorMsgs) != 1 || cursorMsgs[0].Content != "hmm" {

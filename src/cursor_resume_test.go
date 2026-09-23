@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"errors"
@@ -64,8 +66,8 @@ func cursorResumeSetup(t *testing.T, store rawStore, bridge *resumeBridge, taskI
 	pointSharedCursorClientAt(t, mux)
 
 	task, stored := pairedTask(t, store, taskID)
-	stored.Backend = AgentBackendCursor
-	stored.LLMProvider = LLMProviderCursor
+	stored.Backend = llmbackend.Cursor
+	stored.LLMProvider = llmbackend.ProviderCursor
 	stored.Model = "composer-2"
 	stored.LLMAgentID = "cursor-agent-before"
 	if err := store.UpsertAgent(stored); err != nil {

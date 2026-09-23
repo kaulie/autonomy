@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"fmt"
 	"os"
@@ -108,7 +110,7 @@ type ConversationStore interface {
 	// attach to. The handle's InputMessageID links the output back to its input.
 	BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 	// AppendLLMEvents appends a batch of neutral stream events to a run.
-	AppendLLMEvents(turnID int64, runID string, events []LLMEvent) error
+	AppendLLMEvents(turnID int64, runID string, events []llmbackend.Event) error
 	// AppendLLMMessages upserts aggregated conversation messages (the thinking/
 	// tool rows derived from the stream) for a run that is still streaming, so a
 	// consumer can follow the conversation before the run ends. Rows are keyed by
@@ -119,9 +121,9 @@ type ConversationStore interface {
 	// FinishReasonTurn finalizes the header with status, usage, and timing,
 	// records the assistant message (linked to the user input via the handle),
 	// and backfills the run id onto events written before it was known.
-	FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) error
+	FinishReasonTurn(h ReasonTurnHandle, res llmbackend.RunResult) error
 	// ListLLMEvents reads a run's stream events in Seq order.
-	ListLLMEvents(turnID int64) ([]LLMEvent, error)
+	ListLLMEvents(turnID int64) ([]llmbackend.Event, error)
 	// ListLLMMessages reads a run's messages in Seq order: the user input, the
 	// aggregated thinking/tool intermediates, then the assistant output.
 	ListLLMMessages(turnID int64) ([]LLMMessage, error)
@@ -265,34 +267,34 @@ type TurnQuery struct {
 // disagreeing with the file it read. CostCents is a pointer because the schema
 // allows NULL — "the provider did not say" and "it cost 0" are different facts.
 type TurnRecord struct {
-	ID               int64       `json:"id"`
-	TaskID           string      `json:"task_id"`
-	Cycle            int         `json:"cycle"`
-	Mode             ReasonMode  `json:"mode"`
-	AgentID          int64       `json:"agent_id"`
-	Agent            string      `json:"agent"`
-	Provider         LLMProvider `json:"provider"`
-	Model            string      `json:"model"`
-	LLMAgentID       string      `json:"llm_agent_id"`
-	Status           string      `json:"status"`
-	ErrorCode        string      `json:"error_code"`
-	ErrorMessage     string      `json:"error_message"`
-	Input            string      `json:"input"`
-	Output           string      `json:"output"`
-	NormalizedOutput string      `json:"normalized_output"`
-	RunID            string      `json:"run_id"`
-	DurationMS       int64       `json:"duration_ms"`
-	EventCount       int         `json:"event_count"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	ReasoningTokens  int64       `json:"reasoning_tokens"`
-	TotalTokens      int64       `json:"total_tokens"`
-	CostCents        *float64    `json:"cost_cents"`
-	StartedAt        string      `json:"started_at"`
-	EndedAt          string      `json:"ended_at"`
-	CreatedAt        string      `json:"created_at"`
+	ID               int64               `json:"id"`
+	TaskID           string              `json:"task_id"`
+	Cycle            int                 `json:"cycle"`
+	Mode             ReasonMode          `json:"mode"`
+	AgentID          int64               `json:"agent_id"`
+	Agent            string              `json:"agent"`
+	Provider         llmbackend.Provider `json:"provider"`
+	Model            string              `json:"model"`
+	LLMAgentID       string              `json:"llm_agent_id"`
+	Status           string              `json:"status"`
+	ErrorCode        string              `json:"error_code"`
+	ErrorMessage     string              `json:"error_message"`
+	Input            string              `json:"input"`
+	Output           string              `json:"output"`
+	NormalizedOutput string              `json:"normalized_output"`
+	RunID            string              `json:"run_id"`
+	DurationMS       int64               `json:"duration_ms"`
+	EventCount       int                 `json:"event_count"`
+	InputTokens      int64               `json:"input_tokens"`
+	OutputTokens     int64               `json:"output_tokens"`
+	CacheReadTokens  int64               `json:"cache_read_tokens"`
+	CacheWriteTokens int64               `json:"cache_write_tokens"`
+	ReasoningTokens  int64               `json:"reasoning_tokens"`
+	TotalTokens      int64               `json:"total_tokens"`
+	CostCents        *float64            `json:"cost_cents"`
+	StartedAt        string              `json:"started_at"`
+	EndedAt          string              `json:"ended_at"`
+	CreatedAt        string              `json:"created_at"`
 }
 
 // TurnFacets is the filter bar's data: each facet column's distinct values, with
@@ -416,7 +418,7 @@ type ReasonTurn struct {
 	AgentID     int64
 	Cycle       int
 	Mode        ReasonMode
-	LLMProvider LLMProvider
+	LLMProvider llmbackend.Provider
 	Model       string
 	LLMAgentID  string
 	Input       string
@@ -489,7 +491,7 @@ type LLMMessage struct {
 	ParentID          int64
 	Content           string
 	NormalizedContent string
-	LLMProvider       LLMProvider
+	LLMProvider       llmbackend.Provider
 	Model             string
 	RunID             string
 	Status            string

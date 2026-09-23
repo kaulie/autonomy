@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"encoding/json"
@@ -243,7 +245,7 @@ func (s *HTTPServer) handleRestartStatus(w http.ResponseWriter, _ *http.Request)
 // @Success  200  {object}  healthResponse
 // @Router   /health [get]
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	backend := defaultAgentBackend()
+	backend := llmbackend.DefaultBackend()
 	resp := healthResponse{
 		Status:     "ok",
 		LLMBackend: string(backend),

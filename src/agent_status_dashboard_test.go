@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -71,7 +73,7 @@ func TestAgentStatusListMergesStoreAndLiveHandle(t *testing.T) {
 	// The run in flight: its header carries the run id the page shows.
 	if _, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "task-live", AgentID: live.ID, Cycle: 1, Mode: ReasonModeAgent,
-		Input: "go", RunID: "run-abc", Status: string(LLMStatusRunning),
+		Input: "go", RunID: "run-abc", Status: string(llmbackend.StatusRunning),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestAgentStatusListMergesStoreAndLiveHandle(t *testing.T) {
 	// The live handle: this is where role / purpose live, since the row does not
 	// persist them.
 	factory := NewAgentFactory()
-	factory.Adopt(&Agent{ID: live.ID, Name: "live-planner", Role: AgentRolePlanner, Purpose: "the plan", Backend: AgentBackendLocal})
+	factory.Adopt(&Agent{ID: live.ID, Name: "live-planner", Role: AgentRolePlanner, Purpose: "the plan", Backend: llmbackend.Local})
 	auto := &Autonomy{Store: store, AgentFactory: factory}
 
 	list, err := auto.AgentStatusList(false)

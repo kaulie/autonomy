@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -38,7 +40,7 @@ func TestStoreQueryTaskAgentAndStream(t *testing.T) {
 
 	h, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "task-api", AgentID: 10001, Cycle: 1, Mode: ReasonModePlan,
-		Input: "hello", Status: string(LLMStatusRunning), CreatedAt: time.Now(),
+		Input: "hello", Status: string(llmbackend.StatusRunning), CreatedAt: time.Now(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +194,7 @@ func TestAgentStreamCarriesTheRunAndTheToolCall(t *testing.T) {
 	if err := store.UpsertTask(&Task{ID: taskID, Description: "watch me", Status: TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
-	agent := &Agent{State: "running", LLMProvider: LLMProvider("cline"), Model: "deepseek-v4-flash"}
+	agent := &Agent{State: "running", LLMProvider: llmbackend.Provider("cline"), Model: "deepseek-v4-flash"}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +225,8 @@ func TestAgentStreamCarriesTheRunAndTheToolCall(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.FinishReasonTurn(handle, LLMRunResult{
-		RawOutput: `{"type":"plan"}`, Status: LLMStatusFinished, ProviderRunID: "run-1",
+	if err := store.FinishReasonTurn(handle, llmbackend.RunResult{
+		RawOutput: `{"type":"plan"}`, Status: llmbackend.StatusFinished, ProviderRunID: "run-1",
 		DurationMS: 1234, EventCount: 3, EndedAt: at.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
@@ -263,7 +265,7 @@ func TestAgentStreamCarriesTheRunAndTheToolCall(t *testing.T) {
 		t.Fatalf("turns = %+v, want the one run this page touches", stream.Turns)
 	}
 	run := stream.Turns[0]
-	if run.TurnID != handle.TurnID || run.Status != string(LLMStatusFinished) || run.DurationMS != 1234 ||
+	if run.TurnID != handle.TurnID || run.Status != string(llmbackend.StatusFinished) || run.DurationMS != 1234 ||
 		run.Model != "deepseek-v4-flash" || run.Mode != string(ReasonModePlan) || run.Cycle != 1 || run.RunID != "run-1" {
 		t.Fatalf("run summary = %+v", run)
 	}

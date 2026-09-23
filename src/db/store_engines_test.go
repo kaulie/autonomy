@@ -4,6 +4,7 @@ import . "github.com/kaulie/autonomy/src"
 
 import (
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	add("missing task is nil: %v", missing == nil)
 
 	// Agents: the id/name pairing and a soft delete.
-	planner := &Agent{LLMProvider: LLMProvider("cline"), Model: "m"}
+	planner := &Agent{LLMProvider: llmbackend.Provider("cline"), Model: "m"}
 	must("UpsertAgent", store.UpsertAgent(planner))
 	worker := &Agent{}
 	must("UpsertAgent (worker)", store.UpsertAgent(worker))
@@ -106,7 +107,7 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	must("InsertReasonTurn", store.InsertReasonTurn(ReasonTurn{
 		TaskID: taskID, AgentID: planner.ID, Cycle: 1, Mode: ReasonModePlan,
 		LLMProvider: planner.LLMProvider, Model: planner.Model, Input: "wire up the deploy 100%",
-		RawOutput: `{"type":"plan"}`, Status: string(LLMStatusFinished),
+		RawOutput: `{"type":"plan"}`, Status: string(llmbackend.StatusFinished),
 		CreatedAt: at, StartedAt: at, EndedAt: at.Add(time.Second),
 	}))
 	turns, total, err := store.QueryTurns(TurnQuery{TaskID: taskID})
@@ -129,12 +130,12 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	// then finish with usage — so the header, the stream and the cost are all read back.
 	handle, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: taskID, AgentID: worker.ID, Cycle: 1, Mode: ReasonModeAgent,
-		LLMProvider: LLMProvider("cursor"), Model: "composer", Input: "ask the worker", CreatedAt: at,
+		LLMProvider: llmbackend.Provider("cursor"), Model: "composer", Input: "ask the worker", CreatedAt: at,
 	})
 	must("BeginReasonTurn", err)
-	events := []LLMEvent{
-		{Seq: 1, Channel: LLMChannelThought, Kind: LLMKindThoughtDelta, EventType: "thought_delta", TextDelta: "hmm", CreatedAt: at},
-		{Seq: 2, Channel: LLMChannelAssistant, Kind: LLMKindAssistantDelta, EventType: "assistant_delta", TextDelta: "hi", CreatedAt: at},
+	events := []llmbackend.Event{
+		{Seq: 1, Channel: llmbackend.ChannelThought, Kind: llmbackend.KindThoughtDelta, EventType: "thought_delta", TextDelta: "hmm", CreatedAt: at},
+		{Seq: 2, Channel: llmbackend.ChannelAssistant, Kind: llmbackend.KindAssistantDelta, EventType: "assistant_delta", TextDelta: "hi", CreatedAt: at},
 	}
 	for pass := 0; pass < 2; pass++ {
 		must("AppendLLMEvents", store.AppendLLMEvents(handle.TurnID, "run-9", events))
@@ -148,10 +149,10 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	must("AppendLLMMessages (grown)", store.AppendLLMMessages(handle.TurnID, []LLMMessage{
 		{Seq: 1, Role: LLMMessageRoleThinking, ParentID: handle.InputMessageID, Content: "hmmm", NormalizedContent: "hmmm", CreatedAt: at},
 	}))
-	must("FinishReasonTurn", store.FinishReasonTurn(handle, LLMRunResult{
-		RawOutput: "hi there", Status: LLMStatusFinished, ProviderRunID: "run-9", LLMAgentID: "bc-9",
+	must("FinishReasonTurn", store.FinishReasonTurn(handle, llmbackend.RunResult{
+		RawOutput: "hi there", Status: llmbackend.StatusFinished, ProviderRunID: "run-9", LLMAgentID: "bc-9",
 		DurationMS: 1500, EventCount: 2, EndedAt: at.Add(3 * time.Second),
-		Usage: LLMUsage{InputTokens: 11, OutputTokens: 4, TotalTokens: 15, CostCents: 0.25, CostKnown: true},
+		Usage: llmbackend.Usage{InputTokens: 11, OutputTokens: 4, TotalTokens: 15, CostCents: 0.25, CostKnown: true},
 	}))
 	streamed, err := store.ListLLMMessages(handle.TurnID)
 	must("ListLLMMessages (streamed)", err)
@@ -197,7 +198,7 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	// A task that only exists in the log, so the selector has both sources.
 	must("InsertReasonTurn (orphan)", store.InsertReasonTurn(ReasonTurn{
 		TaskID: ghostID, AgentID: planner.ID, Cycle: 1, Mode: ReasonModePlan, Input: "ghost",
-		RawOutput: "gone", Status: string(LLMStatusFinished), CreatedAt: at.Add(time.Minute),
+		RawOutput: "gone", Status: string(llmbackend.StatusFinished), CreatedAt: at.Add(time.Minute),
 	}))
 	options, err = store.ListTaskOptions()
 	must("ListTaskOptions (with orphan)", err)

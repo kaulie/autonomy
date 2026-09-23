@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -21,7 +23,7 @@ func TestHealthReportsTheLLMBackend(t *testing.T) {
 	if got.Status != "ok" {
 		t.Fatalf("status=%q want ok", got.Status)
 	}
-	if got.LLMBackend != string(AgentBackendCline) || got.LLMModel != "deepseek-v4-pro" {
+	if got.LLMBackend != string(llmbackend.Cline) || got.LLMModel != "deepseek-v4-pro" {
 		t.Fatalf("health=%+v want cline on deepseek-v4-pro", got)
 	}
 	if alias := healthBody(t, "/healthz"); alias != got {
@@ -34,7 +36,7 @@ func TestHealthReportsTheLLMBackend(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_MODEL", "")
 	t.Setenv("AUTONOMY_CLINE_MODEL", "")
 	got = healthBody(t, "/health")
-	if got.LLMBackend != string(AgentBackendCursor) || got.LLMModel != "composer-2" {
+	if got.LLMBackend != string(llmbackend.Cursor) || got.LLMModel != "composer-2" {
 		t.Fatalf("health=%+v want the cursor default", got)
 	}
 
@@ -42,7 +44,7 @@ func TestHealthReportsTheLLMBackend(t *testing.T) {
 	// inventing one: the bridge resolves it from the provider/model saved by
 	// `cline auth`, which this process does not hold.
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
-	if got = healthBody(t, "/health"); got.LLMBackend != string(AgentBackendCline) || got.LLMModel != "" {
+	if got = healthBody(t, "/health"); got.LLMBackend != string(llmbackend.Cline) || got.LLMModel != "" {
 		t.Fatalf("health=%+v want cline with no model of its own", got)
 	}
 }

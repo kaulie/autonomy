@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -32,7 +34,7 @@ func (a *Agent) attachClineMode(ctx context.Context, mode string) error {
 	if a.clineAgent != nil {
 		return nil
 	}
-	client := sharedClineClient()
+	client := llmbackend.ClineClient()
 	if _, _, err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("cline bridge ping: %w", err)
 	}
@@ -63,13 +65,13 @@ func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error 
 		return nil
 	}
 	resume := a.clineResumeSession(mode)
-	agent, err := sharedClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
-		ProviderID:      resolveClineProvider(),
-		ModelID:         resolveClineModel(),
+	agent, err := llmbackend.ClineClient().Agents().Create(ctx, clinesdk.CreateOptions{
+		ProviderID:      llmbackend.ResolveClineProvider(),
+		ModelID:         llmbackend.ResolveClineModel(),
 		APIKey:          strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
 		BaseURL:         strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
 		CWD:             cwd,
-		SystemPrompt:    defaultClineSystemPrompt(),
+		SystemPrompt:    llmbackend.DefaultClineSystemPrompt(),
 		Mode:            mode,
 		ResumeSessionID: resume,
 	})
@@ -81,19 +83,19 @@ func (a *Agent) attachClineSession(ctx context.Context, mode, cwd string) error 
 	// A brand-new session starts with no instructions: the next decision cycle
 	// sends the AGENT_V2 frame again (see Agent.needsLLMFrame).
 	a.resetLLMFrame()
-	a.Backend = AgentBackendCline
-	a.LLMProvider = LLMProviderCline
+	a.Backend = llmbackend.Cline
+	a.LLMProvider = llmbackend.ProviderCline
 	a.Model = agent.ModelID
 	a.recordClineSession()
 	fmt.Fprintf(os.Stderr, "[autonomy] cline session agent=%s mode=%s provider=%s model=%s cwd=%s resume=%s\n",
-		agent.ID, mode, agent.ProviderID, agent.ModelID, agent.CWD, firstNonEmptyString(resume, "-"))
+		agent.ID, mode, agent.ProviderID, agent.ModelID, agent.CWD, llmbackend.FirstNonEmptyString(resume, "-"))
 	return nil
 }
 
 func (a *Agent) setClineSession(agent *clinesdk.Agent) {
 	a.clineAgent = agent
-	a.Backend = AgentBackendCline
-	a.LLMProvider = LLMProviderCline
+	a.Backend = llmbackend.Cline
+	a.LLMProvider = llmbackend.ProviderCline
 	a.Model = agent.ModelID
 }
 
@@ -158,16 +160,16 @@ func (a *Agent) ensureClineSession(ctx context.Context, cwd, mode string) (strin
 	if err := a.attachClineSession(ctx, mode, a.Workspace); err != nil {
 		return "", err
 	}
-	return firstNonEmptyString(a.clineAgent.SessionID, a.clineAgent.ID), nil
+	return llmbackend.FirstNonEmptyString(a.clineAgent.SessionID, a.clineAgent.ID), nil
 }
 
 // PromptClineStream sends a prompt on the attached Cline session and streams the
 // provider's events to onEvent as neutral LLMEvents, returning the final text and
 // run-level metadata (mirrors PromptCursorStream).
-func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEvent func(LLMEvent)) (string, LLMRunResult, error) {
-	failure := func(err error) (string, LLMRunResult, error) {
-		return "", LLMRunResult{
-			Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: time.Now(), EndedAt: time.Now(),
+func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
+	failure := func(err error) (string, llmbackend.RunResult, error) {
+		return "", llmbackend.RunResult{
+			Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: time.Now(), EndedAt: time.Now(),
 		}, err
 	}
 	if a == nil {
@@ -186,14 +188,14 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 		if onEvent == nil {
 			return
 		}
-		if mapped, ok := MapNativeLLMEvent(a.LLMProvider, ev, started); ok {
+		if mapped, ok := llmbackend.MapNativeLLMEvent(a.LLMProvider, ev, started); ok {
 			onEvent(mapped)
 		}
 	}
 	run, err := a.clineAgent.Send(ctx, prompt)
 	if err != nil {
-		return "", LLMRunResult{
-			Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
+		return "", llmbackend.RunResult{
+			Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now(),
 		}, fmt.Errorf("cline send: %w", err)
 	}
 	result, err := run.WaitStream(ctx, sink)
@@ -202,24 +204,24 @@ func (a *Agent) PromptClineStream(ctx context.Context, prompt, mode string, onEv
 	// (src/clinesdk/bridge/resume.mjs).
 	a.recordClineSession()
 	if err != nil {
-		meta := LLMRunResult{Status: LLMStatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
+		meta := llmbackend.RunResult{Status: llmbackend.StatusError, ErrorMessage: err.Error(), StartedAt: started, EndedAt: time.Now()}
 		if result != nil {
-			meta = clineRunResultToLLMRun(*result, started)
+			meta = llmbackend.ClineRunResultToLLMRun(*result, started)
 		}
 		return "", meta, fmt.Errorf("cline wait: %w", err)
 	}
 	if result == nil {
-		return "", LLMRunResult{Status: LLMStatusError, StartedAt: started, EndedAt: time.Now()},
+		return "", llmbackend.RunResult{Status: llmbackend.StatusError, StartedAt: started, EndedAt: time.Now()},
 			fmt.Errorf("cline run ended without a result")
 	}
 	text := strings.TrimSpace(result.Text)
-	meta := clineRunResultToLLMRun(*result, started)
+	meta := llmbackend.ClineRunResultToLLMRun(*result, started)
 	if text == "" {
 		// A run that answered nothing is a failed run, whatever the provider calls
 		// it: an exhausted account ends a session as "finished" with a message and
 		// no text at all. Recording that as finished would leave the only account
 		// of the failure in the run's message.
-		meta.Status = LLMStatusError
+		meta.Status = llmbackend.StatusError
 		return "", meta, emptyModelResponseErr(result.Status, result.ErrorMessage)
 	}
 	return text, meta, nil

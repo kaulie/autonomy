@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -38,7 +40,7 @@ func pairedTask(t *testing.T, store rawStore, taskID string) (*Task, *Agent) {
 	agent := &Agent{
 		State:       "idle",
 		Lifecycle:   AgentLifecyclePersistent,
-		LLMProvider: LLMProviderCline,
+		LLMProvider: llmbackend.ProviderCline,
 		Model:       "deepseek-v4-pro",
 		LLMAgentID:  "cls-before-the-restart",
 		CurrentTask: task,

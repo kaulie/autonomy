@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"go/parser"
 	"go/token"
@@ -233,7 +235,7 @@ func TestTheUpperLayerWritesThroughItsPorts(t *testing.T) {
 	persistTask(&Task{ID: "task-1", Description: "ship it"})
 	persistAgent(&Agent{ID: 4, Name: "agent-4"})
 	softDeleteAgent(4)
-	recordReasonTurn(&Agent{ID: 4, LLMProvider: LLMProvider("cline"), Model: "m"}, "task-1", 2, ReasonModePlan, "ask", "answer")
+	recordReasonTurn(&Agent{ID: 4, LLMProvider: llmbackend.Provider("cline"), Model: "m"}, "task-1", 2, ReasonModePlan, "ask", "answer")
 
 	if len(store.tasks) != 1 || store.tasks[0].Description != "ship it" {
 		t.Fatalf("task write did not reach the store: %+v", store.tasks)

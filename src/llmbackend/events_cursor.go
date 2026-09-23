@@ -1,4 +1,4 @@
-package autonomy
+package llmbackend
 
 import (
 	"strings"
@@ -7,39 +7,39 @@ import (
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
-// cursorStreamAdapter maps the Cursor SDK bridge run stream onto neutral
+// CursorStreamAdapter maps the Cursor SDK bridge run stream onto neutral
 // LLMEvents. It is the only place that knows Cursor's payload shapes, so other
 // backends can be added without touching the trace or store layers.
-type cursorStreamAdapter struct{}
+type CursorStreamAdapter struct{}
 
-func (cursorStreamAdapter) Provider() LLMProvider { return LLMProviderCursor }
+func (CursorStreamAdapter) Provider() Provider { return ProviderCursor }
 
 // MapEvent converts one Cursor RunEvent. Cursor events are always kept (ok is
 // true) because callers want the full raw stream. The payload is copied with the
 // neutral keys added (call_id/args/result/text/duration_ms/usage), so a consumer
 // sees the same shape as the Cline backend.
-func (cursorStreamAdapter) MapEvent(native any, _ time.Time) (LLMEvent, bool) {
+func (CursorStreamAdapter) MapEvent(native any, _ time.Time) (Event, bool) {
 	ev, ok := native.(cursorsdk.RunEvent)
 	if !ok {
-		return LLMEvent{}, false
+		return Event{}, false
 	}
 	typ := strings.TrimSpace(ev.Type)
 	ch := classifyLLMChannel(typ)
-	mapped := LLMEvent{
+	mapped := Event{
 		OffsetToken: ev.Offset,
 		Channel:     ch,
 		Kind:        cursorEventKind(typ, ev.Payload),
 		EventType:   typ,
 		Payload:     cursorNeutralPayload(typ, ev.Payload),
 	}
-	mapped.Role = firstNonEmptyString(
-		payloadString(ev.Payload, "role"),
+	mapped.Role = FirstNonEmptyString(
+		PayloadString(ev.Payload, "role"),
 		defaultRoleForChannel(ch),
 	)
-	mapped.Name = firstNonEmptyString(
-		payloadString(ev.Payload, "name"),
-		payloadString(ev.Payload, "tool"),
-		payloadString(ev.Payload, "tool_name"),
+	mapped.Name = FirstNonEmptyString(
+		PayloadString(ev.Payload, "name"),
+		PayloadString(ev.Payload, "tool"),
+		PayloadString(ev.Payload, "tool_name"),
 	)
 	mapped.TextDelta = cursorEventText(ev.Payload)
 	return mapped, true
@@ -48,41 +48,41 @@ func (cursorStreamAdapter) MapEvent(native any, _ time.Time) (LLMEvent, bool) {
 // cursorEventKind classifies one native Cursor message. Cursor reports thinking
 // and assistant text as whole blocks (no deltas) and tool calls as
 // running/completed messages sharing a call_id.
-func cursorEventKind(typ string, payload map[string]any) LLMEventKind {
+func cursorEventKind(typ string, payload map[string]any) EventKind {
 	switch strings.ToLower(typ) {
 	case "assistant", "assistant_message":
-		return LLMKindAssistant
+		return KindAssistant
 	case "thinking", "thought", "reasoning":
-		return LLMKindThought
+		return KindThought
 	case "tool_call", "tool_use":
-		if strings.EqualFold(payloadString(payload, "status"), "running") {
-			return LLMKindToolCallStarted
+		if strings.EqualFold(PayloadString(payload, "status"), "running") {
+			return KindToolCallStarted
 		}
-		return LLMKindToolCallCompleted
+		return KindToolCallCompleted
 	case "status":
-		return LLMKindStatus
+		return KindStatus
 	case "usage":
-		return LLMKindUsage
+		return KindUsage
 	case "result", "done", "task":
-		return LLMKindRunResult
+		return KindRunResult
 	case "error", "run_error":
-		return LLMKindError
+		return KindError
 	}
 	switch ch := classifyLLMChannel(typ); ch {
-	case LLMChannelAssistant:
-		return LLMKindAssistantDelta
-	case LLMChannelThought:
-		return LLMKindThought
-	case LLMChannelTool:
-		return LLMKindToolCallDelta
-	case LLMChannelStatus:
-		return LLMKindStatus
-	case LLMChannelResult:
-		return LLMKindRunResult
-	case LLMChannelError:
-		return LLMKindError
+	case ChannelAssistant:
+		return KindAssistantDelta
+	case ChannelThought:
+		return KindThought
+	case ChannelTool:
+		return KindToolCallDelta
+	case ChannelStatus:
+		return KindStatus
+	case ChannelResult:
+		return KindRunResult
+	case ChannelError:
+		return KindError
 	default:
-		return LLMKindMeta
+		return KindMeta
 	}
 }
 
@@ -99,25 +99,25 @@ func cursorNeutralPayload(typ string, payload map[string]any) map[string]any {
 		return payload
 	case "thinking", "thought", "reasoning":
 		// Cursor reports the thinking duration; expose it under the neutral key.
-		out := withNeutralText(payload, payloadString(payload, "text"))
+		out := withNeutralText(payload, PayloadString(payload, "text"))
 		if ms, ok := payloadNumber(payload, "thinking_duration_ms", "thinkingDurationMs", "duration_ms"); ok {
-			out = withNeutralKV(out, LLMKeyDurationMS, int64(ms))
+			out = withNeutralKV(out, KeyDurationMS, int64(ms))
 		}
 		return out
 	case "tool_call", "tool_use":
-		status := normalizeToolStatus(payloadString(payload, "status"))
+		status := normalizeToolStatus(PayloadString(payload, "status"))
 		out := withNeutralKV(payload,
-			LLMKeyCallID, firstNonEmptyString(payloadString(payload, "call_id"), payloadString(payload, "callId"), payloadString(payload, "id")),
-			LLMKeyName, payloadString(payload, "name"),
-			LLMKeyStatus, status,
+			KeyCallID, FirstNonEmptyString(PayloadString(payload, "call_id"), PayloadString(payload, "callId"), PayloadString(payload, "id")),
+			KeyName, PayloadString(payload, "name"),
+			KeyStatus, status,
 		)
 		return withNeutralKV(out,
-			LLMKeyArgs, payload["args"],
-			LLMKeyResult, payload["result"],
-			LLMKeyDurationMS, payloadInt(payload, "duration_ms", "durationMs"),
+			KeyArgs, payload["args"],
+			KeyResult, payload["result"],
+			KeyDurationMS, payloadInt(payload, "duration_ms", "durationMs"),
 		)
 	case "usage":
-		return withUsageKeys(payload, payloadMap(payload, "usage"))
+		return withUsageKeys(payload, PayloadMap(payload, "usage"))
 	}
 	return payload
 }
@@ -140,14 +140,14 @@ func withUsageKeys(payload map[string]any, usage map[string]any) map[string]any 
 			out = withNeutralKV(out, key, v)
 		}
 	}
-	add(LLMKeyInputTokens, "input_tokens", "inputTokens", "total_input_tokens", "totalInputTokens")
-	add(LLMKeyOutputTokens, "output_tokens", "outputTokens", "total_output_tokens", "totalOutputTokens")
-	add(LLMKeyCacheReadTokens, "cache_read_tokens", "cacheReadTokens", "total_cache_read_tokens", "totalCacheReadTokens")
-	add(LLMKeyCacheWriteTokens, "cache_write_tokens", "cacheWriteTokens", "total_cache_write_tokens", "totalCacheWriteTokens")
-	add(LLMKeyTotalTokens, "total_tokens", "totalTokens")
+	add(KeyInputTokens, "input_tokens", "inputTokens", "total_input_tokens", "totalInputTokens")
+	add(KeyOutputTokens, "output_tokens", "outputTokens", "total_output_tokens", "totalOutputTokens")
+	add(KeyCacheReadTokens, "cache_read_tokens", "cacheReadTokens", "total_cache_read_tokens", "totalCacheReadTokens")
+	add(KeyCacheWriteTokens, "cache_write_tokens", "cacheWriteTokens", "total_cache_write_tokens", "totalCacheWriteTokens")
+	add(KeyTotalTokens, "total_tokens", "totalTokens")
 	// Cost is deliberately not normalized here: the unit depends on the provider
 	// (Cline reports USD, Cursor's stream does not report cost at all), so each
-	// adapter fills LLMKeyCostUSD when it knows the unit.
+	// adapter fills KeyCostUSD when it knows the unit.
 	return out
 }
 
@@ -173,16 +173,16 @@ func payloadInt(payload map[string]any, keys ...string) any {
 	return nil
 }
 
-// cursorRunResultToLLMRun captures run-level metadata (status, usage, timing)
+// CursorRunResultToLLMRun captures run-level metadata (status, usage, timing)
 // from a finished Cursor run.
-func cursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) LLMRunResult {
+func CursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) RunResult {
 	status := LLMStatus(strings.ToLower(strings.TrimSpace(res.Status)))
 	switch status {
-	case LLMStatusRunning, LLMStatusFinished, LLMStatusError, LLMStatusCancelled, LLMStatusExpired:
+	case StatusRunning, StatusFinished, StatusError, StatusCancelled, StatusExpired:
 	default:
-		status = LLMStatusError
+		status = StatusError
 	}
-	return LLMRunResult{
+	return RunResult{
 		ProviderRunID: res.RunID,
 		LLMAgentID:    res.AgentID,
 		Status:        status,
@@ -191,7 +191,7 @@ func cursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) LLMRu
 		DurationMS:    res.DurationMS,
 		StartedAt:     startedAt,
 		EndedAt:       time.Now(),
-		Usage: LLMUsage{
+		Usage: Usage{
 			InputTokens:      res.Usage.InputTokens,
 			OutputTokens:     res.Usage.OutputTokens,
 			CacheReadTokens:  res.Usage.CacheReadTokens,
@@ -202,20 +202,20 @@ func cursorRunResultToLLMRun(res cursorsdk.RunResult, startedAt time.Time) LLMRu
 	}
 }
 
-func defaultRoleForChannel(ch LLMEventChannel) string {
+func defaultRoleForChannel(ch EventChannel) string {
 	switch ch {
-	case LLMChannelAssistant, LLMChannelThought:
+	case ChannelAssistant, ChannelThought:
 		return "assistant"
-	case LLMChannelTool:
+	case ChannelTool:
 		return "tool"
-	case LLMChannelStatus, LLMChannelResult, LLMChannelError, LLMChannelMeta:
+	case ChannelStatus, ChannelResult, ChannelError, ChannelMeta:
 		return "system"
 	default:
 		return ""
 	}
 }
 
-func payloadString(payload map[string]any, key string) string {
+func PayloadString(payload map[string]any, key string) string {
 	if payload == nil {
 		return ""
 	}
@@ -225,7 +225,7 @@ func payloadString(payload map[string]any, key string) string {
 	return ""
 }
 
-func firstNonEmptyString(vals ...string) string {
+func FirstNonEmptyString(vals ...string) string {
 	for _, v := range vals {
 		if s := strings.TrimSpace(v); s != "" {
 			return s
@@ -283,5 +283,5 @@ func contentText(content any) string {
 }
 
 func init() {
-	RegisterLLMStreamAdapter(cursorStreamAdapter{})
+	RegisterAdapter(CursorStreamAdapter{})
 }

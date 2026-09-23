@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"strings"
@@ -109,7 +111,7 @@ func TestLLMFrameResetsOnNewClineSession(t *testing.T) {
 	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
 
 	ws := t.TempDir()
-	agent := &Agent{ID: 8803, Name: "agent-8803", Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendLocal, Workspace: ws}
+	agent := &Agent{ID: 8803, Name: "agent-8803", Lifecycle: AgentLifecycleEphemeral, Backend: llmbackend.Local, Workspace: ws}
 	if _, err := agent.ensureLLMSession(context.Background(), "composer-2", ws, ReasonModePlan); err != nil {
 		t.Fatalf("ensure session: %v", err)
 	}

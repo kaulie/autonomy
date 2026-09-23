@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 // A run is not the whole story of a task. The task's own record — the plans it made,
 // the steps that ran and what those steps produced — is written to the store as it
 // happens (execution_plan / execution_step_plan / execution_step, src/execution.go,
@@ -310,7 +312,7 @@ func (r *Autonomy) openCriteria(taskID string) []string {
 	}
 	open := make([]string, 0, len(contract))
 	for i, criterion := range contract {
-		name := firstNonEmptyString(criterion.Name, fmt.Sprintf("C%d", i+1))
+		name := llmbackend.FirstNonEmptyString(criterion.Name, fmt.Sprintf("C%d", i+1))
 		if !passed[name] {
 			open = append(open, name)
 		}

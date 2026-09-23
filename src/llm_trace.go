@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"fmt"
 	"os"
@@ -47,7 +49,7 @@ type LLMTrace struct {
 	runID  string
 	seq    int
 	start  time.Time
-	buf    []LLMEvent
+	buf    []llmbackend.Event
 	active bool
 	// events is true only when AUTONOMY_LLM_EVENTS opts in to raw stream
 	// persistence (off by default); the run header and its messages are written
@@ -89,7 +91,7 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cy
 		Mode:      mode,
 		Input:     input,
 		InputRole: inputRole,
-		Status:    string(LLMStatusRunning),
+		Status:    string(llmbackend.StatusRunning),
 		StartedAt: t.start,
 	}
 	if agent != nil {
@@ -117,7 +119,7 @@ func BeginLLMTraceFrom(agent *Agent, inputRole LLMMessageRole, taskID string, cy
 // AUTONOMY_LLM_EVENTS — but only for the raw rows: the aggregated messages are
 // still persisted and logged as they complete, because they are the run's
 // conversation rather than its replay.
-func (t *LLMTrace) Emit(ev LLMEvent) {
+func (t *LLMTrace) Emit(ev llmbackend.Event) {
 	if t == nil || !t.active {
 		return
 	}
@@ -163,7 +165,7 @@ func (t *LLMTrace) emitMessages(messages []LLMMessage) {
 
 // Finish flushes remaining events and finalizes the run header. EventCount is
 // filled from the number of events observed. It is a no-op when already closed.
-func (t *LLMTrace) Finish(res LLMRunResult) {
+func (t *LLMTrace) Finish(res llmbackend.RunResult) {
 	if t == nil || !t.active {
 		return
 	}
