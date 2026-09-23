@@ -33,6 +33,32 @@ CREATE INDEX IF NOT EXISTS idx_provider_accounts_harness
 
 const accountCols = `account_id, harness, vendor, label, api_key, base_url, model, workspace_root, enabled, is_default, created_at, updated_at`
 
+// accountsWorkspaceIndex makes "one account per root" a fact of the schema as well as a check
+// in the writes below. It is created separately from the table because an older database may
+// already hold two accounts on one root (the pool was not exclusive when it was introduced):
+// failing to build the index must not keep a runtime from starting, and the write-time check
+// below keeps new claims exclusive either way.
+func (s *SQLiteStore) ensureAccountsWorkspaceIndex() error {
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_accounts_workspace
+  ON provider_accounts(workspace_root)`)
+	return err
+}
+
+// ensureWorkspaceRootFree rejects a root another account already claims. Empty is a claim too:
+// "the runtime's default root" belongs to one account, so every other account must name its own.
+func (s *SQLiteStore) ensureWorkspaceRootFree(root, accountID string) error {
+	var otherID, otherLabel string
+	err := s.db.QueryRow(`SELECT account_id, label FROM provider_accounts
+WHERE workspace_root = ? AND account_id <> ? LIMIT 1`, root, accountID).Scan(&otherID, &otherLabel)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			return nil
+		}
+		return err
+	}
+	return WorkspaceClaimedErr(root, otherID, otherLabel)
+}
+
 func scanAccount(sc interface{ Scan(...any) error }) (Account, error) {
 	var (
 		account          Account
@@ -107,6 +133,9 @@ func (s *SQLiteStore) GetAccount(id string) (*Account, error) {
 func (s *SQLiteStore) CreateAccount(account Account) (Account, error) {
 	account, err := NormalizeAccount(account)
 	if err != nil {
+		return Account{}, err
+	}
+	if err := s.ensureWorkspaceRootFree(account.WorkspaceRoot, account.ID); err != nil {
 		return Account{}, err
 	}
 	ctx := context.Background()
@@ -184,6 +213,9 @@ func (s *SQLiteStore) UpdateAccount(id string, patch AccountPatch) (Account, err
 	}
 	next, err = NormalizeAccount(next)
 	if err != nil {
+		return Account{}, err
+	}
+	if err := s.ensureWorkspaceRootFree(next.WorkspaceRoot, next.ID); err != nil {
 		return Account{}, err
 	}
 	next.CreatedAt = current.CreatedAt

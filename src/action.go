@@ -131,7 +131,13 @@ func activeCapabilityFactory() *capability.Factory {
 
 // ensureAgentWorkspace creates AGENT_WORKSPACE for the agent name and returns the path with trailing separator.
 func ensureAgentWorkspace(agentName string) (string, error) {
-	ws := AgentWorkspacePath(agentName)
+	return ensureAgentWorkspaceIn(DefaultAgentWorkspaceRoot, agentName)
+}
+
+// ensureAgentWorkspaceIn is ensureAgentWorkspace under a specific root (an account's own root,
+// when the agent runs on one).
+func ensureAgentWorkspaceIn(root, agentName string) (string, error) {
+	ws := AgentWorkspacePathIn(root, agentName)
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir AGENT_WORKSPACE %s: %w", ws, err)
 	}

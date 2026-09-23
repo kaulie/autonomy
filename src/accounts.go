@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -107,12 +108,29 @@ func NormalizeAccount(account Account) (Account, error) {
 	account.APIKey = strings.TrimSpace(account.APIKey)
 	account.BaseURL = strings.TrimSpace(account.BaseURL)
 	account.Model = strings.TrimSpace(account.Model)
+	// The workspace root is exclusive: cleaned, so "…/a/" and "…/a" are the same claim, and
+	// empty is itself a claim ("the runtime's default root") that only one account may make
+	// (src/db/sqlite_accounts.go).
 	account.WorkspaceRoot = strings.TrimSpace(account.WorkspaceRoot)
+	if account.WorkspaceRoot != "" {
+		account.WorkspaceRoot = filepath.Clean(account.WorkspaceRoot)
+	}
 	if account.CreatedAt.IsZero() {
 		account.CreatedAt = time.Now()
 	}
 	account.UpdatedAt = time.Now()
 	return account, nil
+}
+
+// WorkspaceClaimedErr is the refusal a pool write gets when the workspace root it asks for is
+// already another account's. Roots are exclusive — including the empty one, which means "the
+// runtime's default root" — because an account's agents work under its own root, and two
+// accounts sharing one would put different tenants' agents in the same place.
+func WorkspaceClaimedErr(root, accountID, label string) error {
+	if strings.TrimSpace(root) == "" {
+		return fmt.Errorf("the runtime's default agent root is already claimed by account %s (%s): give this account its own agent_root_workspace", accountID, label)
+	}
+	return fmt.Errorf("agent_root_workspace %s is already claimed by account %s (%s): each account owns its own root, so two accounts' agents cannot share a directory", root, accountID, label)
 }
 
 // MaskAPIKey is how a key is shown to a human: the first and last few characters, and

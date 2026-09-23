@@ -335,10 +335,10 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	// (the API masks them, the store does not); timestamps are not — they are the engine's
 	// own bookkeeping and the snapshot is about the contract.
 	for _, account := range []Account{
-		{ID: "acct-cursor", Harness: "cursor", Label: "cursor main", APIKey: "sk-cursor-abcdefgh", CreatedAt: at},
-		{ID: "acct-ds-1", Harness: "cline", Vendor: "deepseek", Label: "deepseek one", APIKey: "sk-ds-abcdefgh", BaseURL: "https://api.deepseek.test/", Model: "deepseek-v4-pro", WorkspaceRoot: "/tmp/agents", CreatedAt: at},
-		{ID: "acct-mm-1", Harness: "cline", Vendor: "minimax", Label: "minimax one", APIKey: "sk-mm-abcdefgh", Enabled: false, CreatedAt: at},
-		{ID: "acct-codex", Harness: "codex", Label: "codex cli auth", CreatedAt: at},
+		{ID: "acct-cursor", Harness: "cursor", Label: "cursor main", APIKey: "sk-cursor-abcdefgh", WorkspaceRoot: "/tmp/agents-cursor", CreatedAt: at},
+		{ID: "acct-ds-1", Harness: "cline", Vendor: "deepseek", Label: "deepseek one", APIKey: "sk-ds-abcdefgh", BaseURL: "https://api.deepseek.test/", Model: "deepseek-v4-pro", WorkspaceRoot: "/tmp/agents/ds", CreatedAt: at},
+		{ID: "acct-mm-1", Harness: "cline", Vendor: "minimax", Label: "minimax one", APIKey: "sk-mm-abcdefgh", Enabled: false, WorkspaceRoot: "/tmp/agents/mm", CreatedAt: at},
+		{ID: "acct-codex", Harness: "codex", Label: "codex cli auth", WorkspaceRoot: "/tmp/agents/codex", CreatedAt: at},
 	} {
 		created, err := store.CreateAccount(account)
 		must("CreateAccount", err)
@@ -386,6 +386,15 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	if _, err := store.CreateAccount(Account{Harness: "gemini", Label: "nope"}); err == nil {
 		t.Fatalf("CreateAccount accepted an unknown harness")
 	}
+	// Two accounts cannot share a workspace root — nor the empty one, which means "the runtime's
+	// default root" — because an account's agents work under its own root.
+	if _, err := store.CreateAccount(Account{ID: "acct-copy", Harness: "cline", Label: "same root", WorkspaceRoot: "/tmp/agents/ds"}); err == nil {
+		t.Fatalf("CreateAccount accepted a workspace root another account claims")
+	}
+	if _, err := store.CreateAccount(Account{ID: "acct-dup-root", Harness: "codex", Label: "trailing slash", WorkspaceRoot: "/tmp/agents/ds/"}); err == nil {
+		t.Fatalf("CreateAccount accepted the same root written with a trailing slash")
+	}
+	add("workspace roots are exclusive: %t", true)
 	if _, err := store.UpdateAccount("acct-nope", AccountPatch{Label: strPtr("x")}); err == nil {
 		t.Fatalf("UpdateAccount accepted an unknown account")
 	}

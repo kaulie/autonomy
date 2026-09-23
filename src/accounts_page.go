@@ -90,8 +90,8 @@ const accountsPageHTML = `<!DOCTYPE html>
       <input type="text" id="f-model" placeholder="可省：用该 harness 的默认">
     </div>
     <div>
-      <label for="f-root">agent root workspace</label>
-      <input type="text" id="f-root" placeholder="可省：用运行时默认">
+      <label for="f-root">agent root workspace <span class="hint">(exclusive: one account per root)</span></label>
+      <input type="text" id="f-root" placeholder="每个账号独占一个根目录；留空 = 运行时默认根（也只能一个账号用）">
     </div>
   </div>
   <div class="row">
@@ -105,7 +105,7 @@ const accountsPageHTML = `<!DOCTYPE html>
 
 <table>
   <thead>
-    <tr><th>harness</th><th>vendor</th><th>label</th><th>key</th><th>model</th><th>state</th><th>actions</th></tr>
+    <tr><th>harness</th><th>vendor</th><th>label</th><th>key</th><th>model</th><th>agent root</th><th>state</th><th>actions</th></tr>
   </thead>
   <tbody id="rows"><tr><td colspan="7" class="hint">loading…</td></tr></tbody>
 </table>
@@ -149,7 +149,7 @@ function esc(value) {
 function render() {
   const rows = $("rows");
   if (!accounts.length) {
-    rows.innerHTML = '<tr><td colspan="7" class="hint">the pool is empty — add an account (nothing can run without one)</td></tr>';
+    rows.innerHTML = '<tr><td colspan="8" class="hint">the pool is empty — add an account (nothing can run without one)</td></tr>';
     return;
   }
   rows.innerHTML = accounts.map((a) => {
@@ -158,7 +158,7 @@ function render() {
       a.isDefault ? '<span class="pill def">default</span>' : "",
     ].join(" ");
     const verify = (lastVerify && lastVerify.accountId === a.accountId)
-      ? '<tr><td colspan="7"><div class="msg ' + (lastVerify.ok ? "ok" : "err") + '">' +
+      ? '<tr><td colspan="8"><div class="msg ' + (lastVerify.ok ? "ok" : "err") + '">' +
         esc(lastVerify.detail) + (lastVerify.text ? " → " + esc(lastVerify.text) : "") + "</div></td></tr>"
       : "";
     return "<tr>" +
@@ -168,6 +168,7 @@ function render() {
       "<td><code>" + esc(a.apiKeyMasked || (a.hasKey ? "••••" : "—")) + "</code>" +
       (a.hasKey ? "" : ' <span class="hint">cli auth</span>') + "</td>" +
       "<td>" + esc(a.model || "—") + "</td>" +
+      "<td><code>" + esc(a.agentRootWorkspace || "runtime default") + "</code></td>" +
       "<td>" + state + "</td>" +
       '<td style="white-space:nowrap">' +
         '<button data-act="edit" data-id="' + esc(a.accountId) + '">edit</button> ' +

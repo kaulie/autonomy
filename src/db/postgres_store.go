@@ -226,6 +226,9 @@ func (s *PostgresStore) migrate() error {
 	if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("migrate postgres agents.account_id: %w", err)
 	}
+	if err := s.ensureAccountsWorkspaceIndex(); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] accounts workspace index: %v\n", err)
+	}
 	if err := s.ensureIDSequences(); err != nil {
 		return fmt.Errorf("migrate postgres id sequences: %w", err)
 	}
