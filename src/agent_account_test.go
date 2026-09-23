@@ -116,7 +116,9 @@ func TestPoolWithoutTheHarnessRefusesAndSaysWhereToAddOne(t *testing.T) {
 
 func TestADisabledAccountIsRefusedNotSkipped(t *testing.T) {
 	store := resumeTestStore(t)
-	account, err := store.CreateAccount(Account{Harness: "cline", Vendor: "deepseek", Label: "off", Enabled: false})
+	account, err := store.CreateAccount(Account{
+		Harness: "cline", Vendor: "deepseek", Label: "off", WorkspaceRoot: t.TempDir(), Enabled: false,
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -133,7 +135,8 @@ func TestATaskCanNameTheAccountItRunsOn(t *testing.T) {
 	store := resumeTestStore(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 	account, err := store.CreateAccount(Account{
-		Harness: "cline", Vendor: "minimax", Label: "minimax prod", Model: "minimax-m2", Enabled: true, IsDefault: true,
+		Harness: "cline", Vendor: "minimax", Label: "minimax prod", Model: "minimax-m2",
+		WorkspaceRoot: t.TempDir(), Enabled: true, IsDefault: true,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -166,3 +169,17 @@ func TestATaskCanNameTheAccountItRunsOn(t *testing.T) {
 }
 
 var _ = context.Background
+
+// An account must own a real directory: the root is required and absolute, the same rule
+// web-cursor's pool enforces (docs/accounts.md).
+func TestAnAccountNeedsAnAbsoluteRoot(t *testing.T) {
+	store := resumeTestStore(t)
+	_, err := store.CreateAccount(Account{Harness: "cline", Vendor: "deepseek", Label: "no root"})
+	if err == nil || !strings.Contains(err.Error(), "agent_root_workspace is required") {
+		t.Fatalf("err=%v want a required-root refusal", err)
+	}
+	_, err = store.CreateAccount(Account{Harness: "cline", Vendor: "deepseek", Label: "relative", WorkspaceRoot: "relative/root"})
+	if err == nil || !strings.Contains(err.Error(), "must be an absolute path") {
+		t.Fatalf("err=%v want an absolute-path refusal", err)
+	}
+}
