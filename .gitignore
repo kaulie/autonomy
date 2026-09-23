@@ -38,6 +38,10 @@ third_party/
 # the lockfile IS committed so installs are reproducible.
 src/clinesdk/bridge/node_modules/
 
+# Codex bridge Node dependencies (install via scripts/install-codex-bridge.sh);
+# same rule: the lockfile is committed, the tree is not.
+src/codexsdk/bridge/node_modules/
+
 # Local SQLite persistence ($PROJECT_ROOT/data/autonomy.db)
 data/
 
