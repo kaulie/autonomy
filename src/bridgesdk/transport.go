@@ -1,4 +1,4 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// RunEvent is one native event from a cline run stream. Payload is the SDK's own
+// RunEvent is one native event from a bridge run stream. Payload is the provider SDK's own
 // payload, verbatim: this package never interprets provider shapes.
 type RunEvent struct {
 	// Type is the core event type: agent_event, chunk, status, session_snapshot, ended, ...
@@ -123,7 +123,7 @@ func (t *transport) readLoop() {
 		}
 		var msg bridgeMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintf(os.Stderr, "[cline-bridge] unparsable message: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[llm-bridge] unparsable message: %v\n", err)
 			continue
 		}
 		switch msg.Type {

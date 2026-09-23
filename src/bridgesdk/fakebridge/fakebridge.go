@@ -1,6 +1,7 @@
-// Package fakebridge is a test double for the Cline bridge: it speaks the same
-// NDJSON stdio protocol as src/clinesdk/bridge/bridge.mjs without needing Node,
-// the Cline SDK or a provider account, so client tests stay hermetic.
+// Package fakebridge is a test double for a bridge process: it speaks the same NDJSON
+// stdio protocol as the real bridges (src/clinesdk/bridge/bridge.mjs,
+// src/codexsdk/bridge/bridge.mjs) without needing Node, a provider SDK or an account, so
+// client tests stay hermetic.
 //
 // A test process re-executes its own binary with TestHelperProcess-style
 // plumbing: the spawning test sets EnvVar=1 and calls Manager(os.Args[0]).
@@ -13,12 +14,14 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/kaulie/autonomy/src/clinesdk"
 )
 
 // EnvVar marks a re-executed test binary as the fake bridge.
 const EnvVar = "CLINE_FAKE_BRIDGE"
+
+// Protocol is the wire shape this fake speaks: the cline bridge's (its events carry the
+// Cline SDK's own envelope). A harness with another shape gets its own fake.
+const Protocol = "cline-bridge/1"
 
 // Enabled reports whether this process was started as the fake bridge.
 func Enabled() bool { return os.Getenv(EnvVar) == "1" }
@@ -73,12 +76,11 @@ func cannedDecisionAnswer(prompt string) string {
 	return ""
 }
 
-// Manager returns a BridgeManager that runs this test binary as the bridge.
-func Manager(self string) *clinesdk.BridgeManager {
-	return &clinesdk.BridgeManager{
-		Command: []string{self, "-test.run=TestFakeBridgeProcess"},
-		Env:     []string{EnvVar + "=1"},
-	}
+// Command returns the argv and environment that make a test binary serve the bridge
+// protocol. It deliberately imports nothing: the caller wraps it in its own bridge
+// manager, so this fake can be used from any package (including the client's own tests).
+func Command(self string) (argv, env []string) {
+	return []string{self, "-test.run=TestFakeBridgeProcess"}, []string{EnvVar + "=1"}
 }
 
 // Main serves the bridge protocol on stdin/stdout until EOF or "shutdown".
@@ -125,7 +127,7 @@ func Main() {
 			}},
 		})
 	}
-	write(map[string]any{"type": "ready", "protocol": clinesdk.Protocol, "pid": os.Getpid(), "node": "fake", "sdk": "0.0.82"})
+	write(map[string]any{"type": "ready", "protocol": Protocol, "pid": os.Getpid(), "node": "fake", "sdk": "0.0.82"})
 
 	sessionForAgent := map[string]string{}
 	modeForAgent := map[string]string{}
@@ -143,7 +145,7 @@ func Main() {
 		switch req.Cmd {
 		case "ping":
 			result(req.ID, map[string]any{
-				"protocol": clinesdk.Protocol, "node": "fake", "sdk": "0.0.82", "pid": os.Getpid(),
+				"protocol": Protocol, "node": "fake", "sdk": "0.0.82", "pid": os.Getpid(),
 				"providers": []string{"deepseek", "anthropic"},
 			})
 		case "models":

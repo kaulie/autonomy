@@ -1,15 +1,16 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 	"sync"
 )
 
-// Client owns one bridge and exposes the Cline surface autonomy needs.
+// Client owns one bridge process and exposes the surface autonomy needs from it.
 type Client struct {
+	// Config says which bridge this is (protocol, script, env names, label).
+	Config Config
 	// ProviderID / ModelID / APIKey / BaseURL are the provider defaults applied
 	// to every agent this client creates.
 	ProviderID string
@@ -44,15 +45,18 @@ func WithSystemPrompt(p string) ClientOption { return func(c *Client) { c.System
 // managed bridge).
 func WithManager(m *BridgeManager) ClientOption { return func(c *Client) { c.Manager = m } }
 
-// NewClient builds a client from options plus environment defaults.
-func NewClient(opts ...ClientOption) *Client {
+// NewClient builds a client for one harness from its config plus options and environment
+// defaults.
+func NewClient(cfg Config, opts ...ClientOption) *Client {
+	cfg = cfg.normalize()
 	c := &Client{
-		ProviderID: strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_PROVIDER")),
-		ModelID:    strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL")),
-		APIKey:     strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY")),
-		BaseURL:    strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL")),
-		Mode:       DefaultMode,
-		Manager:    &BridgeManager{},
+		Config:     cfg,
+		ProviderID: cfg.env(cfg.ProviderIDEnv),
+		ModelID:    cfg.env(cfg.ModelIDEnv),
+		APIKey:     cfg.env(cfg.APIKeyEnv),
+		BaseURL:    cfg.env(cfg.BaseURLEnv),
+		Mode:       cfg.DefaultMode,
+		Manager:    &BridgeManager{Config: cfg},
 	}
 	if c.Workspace == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -65,8 +69,9 @@ func NewClient(opts ...ClientOption) *Client {
 	return c
 }
 
-// DefaultMode runs a Cline session with tools enabled and auto-approved, which
-// is what an autonomy capability prompt expects.
+// DefaultMode is the mode used when neither the caller nor the harness config names one:
+// a session with tools enabled and auto-approved, which is what an autonomy capability
+// prompt expects.
 const DefaultMode = "yolo"
 
 // ensure starts the bridge on first use and returns the transport.
@@ -78,7 +83,9 @@ func (c *Client) ensure(ctx context.Context) (*transport, error) {
 	}
 	manager := c.Manager
 	if manager == nil {
-		manager = &BridgeManager{}
+		manager = &BridgeManager{Config: c.Config}
+	} else if manager.Config.Name == "" {
+		manager.Config = c.Config
 	}
 	info, err := manager.Start(ctx)
 	if err != nil {

@@ -1,4 +1,4 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"fmt"
@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// Progress logging. The Cursor client traces every stage unconditionally, which
-// is how a long-but-alive run is told apart from a hung one; the Cline client
-// needs the same, because the bridge itself only logs session lifecycle.
+// Progress logging. The Cursor client traces every stage unconditionally, which is how a
+// long-but-alive run is told apart from a hung one; a bridge-backed client needs the same,
+// because the bridge itself only logs session lifecycle.
 //
 // AUTONOMY_LLM_DEBUG=1 (shared with the Cursor SDK traces) adds per-event noise.
 
@@ -28,7 +28,7 @@ func Trace(stage, format string, args ...any) {
 		}
 	}
 	elapsed := time.Since(time.Unix(0, start)).Round(time.Millisecond)
-	fmt.Fprintf(os.Stderr, "[cline %s +%s] %s\n", stage, elapsed, fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "[llm %s +%s] %s\n", stage, elapsed, fmt.Sprintf(format, args...))
 }
 
 // TraceVerbose reports whether verbose (per-event) tracing is on. It mirrors the

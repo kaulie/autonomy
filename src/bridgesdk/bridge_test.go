@@ -1,4 +1,4 @@
-package clinesdk_test
+package bridgesdk_test
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaulie/autonomy/src/bridgesdk/fakebridge"
 	"github.com/kaulie/autonomy/src/clinesdk"
-	"github.com/kaulie/autonomy/src/clinesdk/fakebridge"
 	"github.com/kaulie/autonomy/src/llmrun"
 )
 
@@ -22,10 +22,18 @@ func TestFakeBridgeProcess(t *testing.T) {
 	fakebridge.Main()
 }
 
+// fakeManager runs this test binary as the fake cline bridge.
+func fakeManager(self string) *clinesdk.BridgeManager {
+	argv, env := fakebridge.Command(self)
+	manager := clinesdk.NewBridgeManager()
+	manager.Command, manager.Env = argv, env
+	return manager
+}
+
 func newFakeClient(t *testing.T) *clinesdk.Client {
 	t.Helper()
 	client := clinesdk.NewClient(
-		clinesdk.WithManager(fakebridge.Manager(os.Args[0])),
+		clinesdk.WithManager(fakeManager(os.Args[0])),
 		clinesdk.WithProvider("deepseek"),
 		clinesdk.WithModel("deepseek-v4-pro"),
 		clinesdk.WithWorkspace(t.TempDir()),
