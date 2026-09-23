@@ -36,6 +36,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"os/signal"
 	"strings"
@@ -91,6 +92,13 @@ func run() error {
 	}
 
 	fmt.Fprintf(os.Stderr, "[autonomy] version=%s listen=%s\n", version, addr)
+	// Which harnesses this build can run agents on: a build that forgot a blank import
+	// (src/llmbackend/all) says so here instead of failing a task later.
+	names := make([]string, 0, 2)
+	for _, b := range llmbackend.Harnesses() {
+		names = append(names, string(b))
+	}
+	fmt.Fprintf(os.Stderr, "[autonomy] llm backend=%s harnesses=%s\n", llmbackend.DefaultBackend(), strings.Join(names, ","))
 	server := autonomy.NewHTTPServer(runtime)
 
 	// SIGTERM is how scripts/stop.sh — and the deployment platform's restart — ends

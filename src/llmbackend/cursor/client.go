@@ -1,6 +1,7 @@
-package llmbackend
+package cursor
 
 import (
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"sync"
@@ -8,14 +9,14 @@ import (
 	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
-// Shared Cursor SDK client (single bridge). All cursor-backed agents
+// Shared llmbackend.Cursor SDK client (single bridge). All cursor-backed agents
 // multiplex on this process-wide client instead of spawning one bridge each.
 var (
 	sharedCursorMu   sync.Mutex
 	sharedCursorClnt *cursorsdk.Client
 )
 
-// cursorClient returns the process-wide Cursor SDK client, creating it
+// cursorClient returns the process-wide llmbackend.Cursor SDK client, creating it
 // (and thus the single bridge) on first use. The per-agent CWD is passed on
 // each CreateAgent call, so one bridge can serve agents in different workspaces.
 func cursorClient() *cursorsdk.Client {
@@ -42,13 +43,13 @@ func CloseCursorClient() error {
 }
 
 func cursorWorkspace() string {
-	if root, err := ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
+	if root, err := llmbackend.ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
 		return root
 	}
 	return "."
 }
 
-// NewCursorClient is the single entry for constructing a Cursor SDK client/bridge.
+// NewCursorClient is the single entry for constructing a llmbackend.Cursor SDK client/bridge.
 // It attaches to an external bridge when CURSOR_SDK_BRIDGE_URL and
 // CURSOR_SDK_BRIDGE_TOKEN are both set; otherwise it spawns its own bridge.
 func NewCursorClient(workspace string) *cursorsdk.Client {
@@ -72,7 +73,7 @@ func DefaultCursorModel() string {
 	return "composer-2"
 }
 
-// SwapCursorClient replaces the process-wide Cursor client and returns the one that was
+// SwapCursorClient replaces the process-wide llmbackend.Cursor client and returns the one that was
 // there, so a caller (a test pointing the client at an in-process bridge) can put it back.
 // Passing nil forgets the current client — the next cursorClient call builds a fresh one.
 func SwapCursorClient(next *cursorsdk.Client) *cursorsdk.Client {
