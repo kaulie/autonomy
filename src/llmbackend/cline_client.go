@@ -1,7 +1,6 @@
-package cline
+package llmbackend
 
 import (
-	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"sync"
@@ -9,19 +8,19 @@ import (
 	"github.com/kaulie/autonomy/src/clinesdk"
 )
 
-// Shared llmbackend.Cline SDK client (single bridge process). Every cline-backed agent
-// multiplexes on this process-wide client, exactly like the llmbackend.Cursor path: one
-// Node bridge holds all resident llmbackend.Cline sessions.
+// Shared Cline SDK client (single bridge process). Every cline-backed agent
+// multiplexes on this process-wide client, exactly like the Cursor path: one
+// Node bridge holds all resident Cline sessions.
 var (
 	sharedClineMu   sync.Mutex
 	sharedClineClnt *clinesdk.Client
 )
 
-// ClineClientFactory builds the process-wide llmbackend.Cline client. Tests replace it with
+// ClineClientFactory builds the process-wide Cline client. Tests replace it with
 // a client backed by the fake bridge (see cline_agent_test.go).
 var ClineClientFactory = newClineClient
 
-// clineClient returns the process-wide llmbackend.Cline client, creating it (and thus
+// clineClient returns the process-wide Cline client, creating it (and thus
 // the single bridge) on first use.
 func clineClient() *clinesdk.Client {
 	sharedClineMu.Lock()
@@ -45,7 +44,7 @@ func CloseClineClient() error {
 	return err
 }
 
-// newClineClient is the single entry for constructing a llmbackend.Cline client/bridge.
+// newClineClient is the single entry for constructing a Cline client/bridge.
 func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
 		clinesdk.WithProvider(ResolveClineProvider()),
@@ -58,27 +57,27 @@ func newClineClient(workspace string) *clinesdk.Client {
 }
 
 func agentWorkspace() string {
-	if root, err := llmbackend.ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
+	if root, err := ProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
 		return root
 	}
 	return "."
 }
 
-// ResolveClineProvider is the llmbackend.Cline provider id (e.g. "deepseek", "anthropic");
+// ResolveClineProvider is the Cline provider id (e.g. "deepseek", "anthropic");
 // empty means "let the bridge fall back to the provider saved by cline auth".
 func ResolveClineProvider() string {
 	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_PROVIDER"))
 }
 
-// ResolveClineModel is the llmbackend.Cline model id. It deliberately does NOT fall back to
-// AUTONOMY_LLM_MODEL: that variable holds the default (llmbackend.Cursor) backend's model,
-// and those ids are meaningless to a llmbackend.Cline provider. Empty means "let the bridge
+// ResolveClineModel is the Cline model id. It deliberately does NOT fall back to
+// AUTONOMY_LLM_MODEL: that variable holds the default (Cursor) backend's model,
+// and those ids are meaningless to a Cline provider. Empty means "let the bridge
 // resolve the model from the saved cline auth config".
 func ResolveClineModel() string {
 	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL"))
 }
 
-// defaultClineSystemPrompt is the session system prompt. The llmbackend.Cline SDK requires
+// defaultClineSystemPrompt is the session system prompt. The Cline SDK requires
 // one, and autonomy's own instructions ride on the prompt itself, so this is
 // deliberately generic; AUTONOMY_CLINE_SYSTEM_PROMPT overrides it.
 func defaultClineSystemPrompt() string {
@@ -93,16 +92,16 @@ func defaultClineSystemPrompt() string {
 
 // defaultAgentBackend resolves which LLM backend acquired agents use:
 // AUTONOMY_LLM_BACKEND=cursor (default) or =cline.
-func DefaultBackend() llmbackend.Backend {
+func DefaultBackend() Backend {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_BACKEND"))) {
-	case string(llmbackend.Cline), "cline_sdk":
-		return llmbackend.Cline
+	case string(Cline), "cline_sdk":
+		return Cline
 	default:
-		return llmbackend.Cursor
+		return Cursor
 	}
 }
 
-// SwapClineClient replaces the process-wide llmbackend.Cline client and returns the one that was
+// SwapClineClient replaces the process-wide Cline client and returns the one that was
 // there; passing nil forgets it (the next clineClient call builds a fresh one). It is how
 // a test points the bridge at an in-process fake and restores it afterwards.
 func SwapClineClient(next *clinesdk.Client) *clinesdk.Client {

@@ -3,7 +3,7 @@ package autonomy
 import (
 	"context"
 	"fmt"
-	"github.com/kaulie/autonomy/src/llmbackend/cursor"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"time"
@@ -79,7 +79,7 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 		return ReasoningResult{}, fmt.Errorf("build prompt: %w", err)
 	}
 	stage("prompt", "ready bytes=%d frame=%v elapsed=%s", len(prompt), sentFrame, time.Since(tPrompt).Round(time.Millisecond))
-	if cursor.TraceVerbose() {
+	if llmbackend.TraceVerbose() {
 		stage("prompt", "body:\n%s", prompt)
 	}
 

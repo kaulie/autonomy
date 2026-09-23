@@ -64,7 +64,22 @@ type Host interface {
 // worker.
 type Session struct {
 	host Host
-	impl SessionImpl
+	impl sessionImpl
+}
+
+// sessionImpl is what the two backends differ in, one implementation each.
+type sessionImpl interface {
+	// attach opens (or re-attaches) the session and says whether it was an existing one.
+	attach(ctx context.Context, mode Mode) (bool, error)
+	// sessionID is the provider session this agent is attached to now ("" when none).
+	sessionID() string
+	// mode is the provider session's own mode ("" for a backend without them).
+	mode() string
+	// resumedFrom is the provider session this attach was asked to continue ("" when the
+	// turn opened a fresh one instead).
+	resumedFrom() string
+	prompt(ctx context.Context, text string, mode Mode, onEvent func(Event)) (string, RunResult, error)
+	dispose(ctx context.Context, ephemeral bool)
 }
 
 // New builds the session for an agent, on the backend its facts name.
@@ -73,36 +88,13 @@ func New(host Host) *Session {
 		return nil
 	}
 	s := &Session{host: host}
-	backend := host.Facts().Backend
-	harness, ok := harnessFor(backend)
-	if !ok {
-		// A backend with no harness linked in is a build mistake, not something to guess
-		// around: fall back to any registered one so a session still exists, and let the
-		// attach report the truth (the missing-harness error is on the session).
-		s.impl = missingHarness{backend: backend}
-		return s
+	if host.Facts().Backend == Cline {
+		s.impl = newClineSession(s)
+	} else {
+		s.impl = newCursorSession(s)
 	}
-	s.impl = harness.New(host)
 	return s
 }
-
-// missingHarness is the session of a backend this process has no harness for: every call
-// says so.
-type missingHarness struct{ backend Backend }
-
-func (m missingHarness) Attach(context.Context, Mode) (bool, error) {
-	return false, harnessMissingErr(m.backend)
-}
-
-func (m missingHarness) Prompt(context.Context, string, Mode, func(Event)) (string, RunResult, error) {
-	return "", RunResult{Status: StatusError, ErrorMessage: harnessMissingErr(m.backend).Error()}, harnessMissingErr(m.backend)
-}
-
-func (m missingHarness) Dispose(context.Context, bool) {}
-func (m missingHarness) SessionID() string             { return "" }
-func (m missingHarness) Mode() string                  { return "" }
-func (m missingHarness) Resumed() bool                 { return false }
-func (m missingHarness) ResumedFrom() string           { return "" }
 
 // Attach opens (or re-attaches) the session, idempotently, and reports the provider
 // session id it ended up on plus whether that was a session that already existed. A nil
@@ -111,13 +103,13 @@ func (s *Session) Attach(ctx context.Context, mode Mode) (string, bool, error) {
 	if s == nil || s.impl == nil {
 		return "", false, nil
 	}
-	resumed, err := s.impl.Attach(ctx, mode)
+	resumed, err := s.impl.attach(ctx, mode)
 	if err != nil {
 		return "", false, err
 	}
 	// The label is what a log or a caller can point at: the provider session id once the
 	// provider has minted one, the bridge's handle until then.
-	return s.impl.SessionID(), resumed, nil
+	return s.impl.sessionID(), resumed, nil
 }
 
 // Prompt runs one turn on the attached session and streams neutral events to onEvent
@@ -125,9 +117,9 @@ func (s *Session) Attach(ctx context.Context, mode Mode) (string, bool, error) {
 // backend that distinguishes plan from act maps it onto its own session mode.
 func (s *Session) Prompt(ctx context.Context, text string, mode Mode, onEvent func(Event)) (string, RunResult, error) {
 	if s == nil || s.impl == nil {
-		return "", RunResult{Status: StatusError, ErrorMessage: "no session"}, ErrNoSession
+		return "", RunResult{Status: StatusError, ErrorMessage: "no session"}, errNoSession
 	}
-	return s.impl.Prompt(ctx, text, mode, onEvent)
+	return s.impl.prompt(ctx, text, mode, onEvent)
 }
 
 // Resumed reports whether the last Attach re-attached a session that already existed, as
@@ -136,10 +128,14 @@ func (s *Session) Resumed() bool {
 	if s == nil {
 		return false
 	}
-	if s.impl == nil {
+	switch impl := s.impl.(type) {
+	case *cursorSession:
+		return impl.resumed
+	case *clineSession:
+		return impl.resumed
+	default:
 		return false
 	}
-	return s.impl.Resumed()
 }
 
 // Mode is the attached session's own mode — Cline's plan/act, which a turn must match —
@@ -148,7 +144,7 @@ func (s *Session) Mode() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
-	return s.impl.Mode()
+	return s.impl.mode()
 }
 
 // ProviderSessionID is the provider session this agent is attached to now — the id the
@@ -159,7 +155,7 @@ func (s *Session) ProviderSessionID() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
-	return s.impl.SessionID()
+	return s.impl.sessionID()
 }
 
 // ResumedFrom is the provider session this attach was asked to continue: the id the agent
@@ -169,7 +165,7 @@ func (s *Session) ResumedFrom() string {
 	if s == nil || s.impl == nil {
 		return ""
 	}
-	return s.impl.ResumedFrom()
+	return s.impl.resumedFrom()
 }
 
 // PromptText is Prompt without event delivery.
@@ -189,5 +185,5 @@ func (s *Session) Dispose(ctx context.Context) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	s.impl.Dispose(cctx, s.host.Facts().Ephemeral)
+	s.impl.dispose(cctx, s.host.Facts().Ephemeral)
 }

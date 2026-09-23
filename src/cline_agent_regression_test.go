@@ -4,7 +4,6 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
 	"context"
-	"github.com/kaulie/autonomy/src/llmbackend/cline"
 	"testing"
 
 	"github.com/kaulie/autonomy/src/clinesdk"
@@ -48,18 +47,18 @@ func TestClineProviderAndModelResolution(t *testing.T) {
 	t.Setenv("AUTONOMY_CLINE_PROVIDER", "")
 	t.Setenv("AUTONOMY_CLINE_MODEL", "")
 	t.Setenv("AUTONOMY_LLM_MODEL", "composer-2")
-	if got := cline.ResolveClineProvider(); got != "" {
+	if got := llmbackend.ResolveClineProvider(); got != "" {
 		t.Fatalf("provider=%q want empty (bridge falls back to cline auth)", got)
 	}
-	if got := cline.ResolveClineModel(); got != "" {
+	if got := llmbackend.ResolveClineModel(); got != "" {
 		t.Fatalf("model=%q want empty: AUTONOMY_LLM_MODEL is the Cursor default and must not leak", got)
 	}
 	t.Setenv("AUTONOMY_CLINE_PROVIDER", "anthropic")
 	t.Setenv("AUTONOMY_CLINE_MODEL", "claude-sonnet-4-6")
-	if got := cline.ResolveClineProvider(); got != "anthropic" {
+	if got := llmbackend.ResolveClineProvider(); got != "anthropic" {
 		t.Fatalf("provider=%q", got)
 	}
-	if got := cline.ResolveClineModel(); got != "claude-sonnet-4-6" {
+	if got := llmbackend.ResolveClineModel(); got != "claude-sonnet-4-6" {
 		t.Fatalf("model=%q", got)
 	}
 }

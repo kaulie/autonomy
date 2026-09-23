@@ -5,7 +5,6 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 import (
 	"context"
 	"errors"
-	"github.com/kaulie/autonomy/src/llmbackend/cursor"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,9 +51,9 @@ func pointSharedCursorClientAt(t *testing.T, handler http.Handler) {
 	t.Setenv("CURSOR_SDK_BRIDGE_URL", srv.URL)
 	t.Setenv("CURSOR_SDK_BRIDGE_TOKEN", "test-token")
 
-	previous := cursor.SwapCursorClient(nil)
+	previous := llmbackend.SwapCursorClient(nil)
 	t.Cleanup(func() {
-		cursor.SwapCursorClient(previous)
+		llmbackend.SwapCursorClient(previous)
 	})
 }
 

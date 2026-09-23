@@ -175,7 +175,10 @@ func (r *Autonomy) Close() error {
 			closeAgent(agent, r.AgentFactory, context.Background())
 		}
 	}
-	if err := llmbackend.CloseClients(); err != nil && first == nil {
+	if err := llmbackend.CloseCursorClient(); err != nil && first == nil {
+		first = err
+	}
+	if err := llmbackend.CloseClineClient(); err != nil && first == nil {
 		first = err
 	}
 	if r != nil && r.Store != nil {

@@ -9,7 +9,7 @@ import (
 // This file defines the provider-neutral LLM run-stream model. Every LLM
 // backend (Cursor today; Cline / DeepSeek harness later) maps its native run
 // stream into Event, so persistence, replay, and analytics stay
-// backend-agnostic. Adding a backend means adding an StreamAdapter — the
+// backend-agnostic. Adding a backend means adding an streamAdapter — the
 // trace and store layers never change.
 
 // EventChannel is a coarse, provider-neutral classification of a stream
@@ -107,28 +107,28 @@ type RunResult struct {
 	EndedAt       time.Time
 }
 
-// StreamAdapter translates one provider's native run stream into neutral
+// streamAdapter translates one provider's native run stream into neutral
 // LLMEvents. Implement it per backend; the trace/store layer depends only on
 // Event, so adding a backend never touches persistence.
-type StreamAdapter interface {
+type streamAdapter interface {
 	// Provider is the backend this adapter handles.
 	Provider() Provider
 	// MapEvent converts one native stream event. ok=false drops the event.
 	MapEvent(native any, startedAt time.Time) (Event, bool)
 }
 
-var llmStreamAdapters = map[Provider]StreamAdapter{}
+var llmStreamAdapters = map[Provider]streamAdapter{}
 
 // registerAdapter makes a backend's stream adapter available to
 // LLMTrace. Backends register once (typically from bootstrap or init).
-func registerAdapter(adapter StreamAdapter) {
+func registerAdapter(adapter streamAdapter) {
 	if adapter == nil {
 		return
 	}
 	llmStreamAdapters[adapter.Provider()] = adapter
 }
 
-func adapterFor(provider Provider) (StreamAdapter, bool) {
+func adapterFor(provider Provider) (streamAdapter, bool) {
 	a, ok := llmStreamAdapters[provider]
 	return a, ok
 }
@@ -144,10 +144,10 @@ func MapNativeLLMEvent(provider Provider, native any, startedAt time.Time) (Even
 	return adapter.MapEvent(native, startedAt)
 }
 
-// ClassifyLLMChannel maps a provider event type to a neutral channel. It strips
+// classifyLLMChannel maps a provider event type to a neutral channel. It strips
 // an optional "envelope:" prefix (e.g. "interaction_update:text_delta") and
 // falls back to ChannelMeta for unknown types.
-func ClassifyLLMChannel(eventType string) EventChannel {
+func classifyLLMChannel(eventType string) EventChannel {
 	name := strings.ToLower(strings.TrimSpace(eventType))
 	if i := strings.Index(name, ":"); i >= 0 {
 		name = strings.TrimSpace(name[i+1:])

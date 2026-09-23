@@ -82,35 +82,21 @@ rsync 不碰 `.cache/`，所以每次部署不用重解；按 sha 去重、只�
 
 ### 代码边界：`src/llmbackend` 是唯一知道 provider 的地方
 
-两个后端的**全部差异**都在一个模块里，而且**各占一个文件夹**（这也是它存在的理由）：
+两个后端的**全部差异**都在一个模块里（`src/llmbackend/`）—— 这也是它存在的理由：
 
-```
-src/llmbackend/                    核心：词表 + Session 门面 + 事件词表 + 注册表
-  doc.go / backend.go / values.go   Backend/Provider/Mode 词表、环境选择与默认值、PROJECT_ROOT、共享小工具
-  session.go                        Session（Attach / Prompt / PromptText / Dispose + Mode/Resumed/… 观察点）
-                                    + Host 接口（Facts() 与写回）+ missingHarness（没接 harness 就明说）
-  registry.go                       Harness = {Backend, Provider, New, Adapter, DefaultModel, CloseClient}
-                                    + Register / Harnesses / ModelDefault / CloseClients
-  events.go / events_kind.go        中性 Event 词表（kind / channel / key / status / usage）+ 适配器接口与注册表
-  cursor/                           一个 harness：session.go（Resume/Create）、client.go（进程内共享桥）、
-                                    events.go（原生流→中性事件）、trace.go、register.go（自注册）
-  cline/                            另一个 harness：session.go（按 (mode,cwd) 常驻 + transcript 播种）、
-                                    client.go、events.go、register.go（自注册）
-  all/                              `import _ ".../llmbackend/all"`：把这个 build 要跑的 harness 链进来
-```
+| 文件 | 拥有的东西 |
+|------|-----------|
+| `backend.go` / `doc.go` | 词表（`Backend` / `Provider` / `Mode`）、环境选择与默认值、`PROJECT_ROOT` |
+| `session.go` | `Session`：`Attach`（续或新建）/ `Prompt`（一条流）/ `Dispose`（该 Close 就 Close、该 Delete 就 Delete）+ 它向宿主读写的 `Host` 接口 |
+| `cursor.go` / `cline.go` | 两个实现：Cursor 的 `Resume`/`Create`、Cline 的按 (mode, cwd) 常驻会话与 transcript 播种 |
+| `cursor_client.go` / `cline_client.go` | 进程内共享的桥客户端（各一个） |
+| `events.go` / `events_kind.go` / `events_cursor.go` / `events_cline.go` | 中性 `Event` 词表 + 适配器接口与注册表 + 两个后端的原生流映射 |
 
-**依赖只朝一个方向**：runtime → 模块 → harness；harness **不** import runtime（它用 `Host` 接口拿事实、写回它拥有的东西），核心也**不** import harness（它通过注册表拿实现）。这也是为什么**中性事件词表必须留在核心**：适配器产出它、并注册进核心的注册表 —— 只搬「客户端 + 会话」会让依赖成环。
+**依赖只朝一个方向**：runtime import 这个模块，模块**不** import runtime（它用 `Host` 接口拿它需要的事实、写回它拥有的两件事）。这也是为什么**中性事件词表必须在这个模块里**：适配器产出它、并往注册表里注册自己 —— 只搬「客户端 + 会话」会让模块反过来 import runtime，成环。
 
-**runtime 侧**只剩它自己知道的事：agent **是**哪个后端（行）、身份/生命周期/工作区、`llm_agent_id`、frame 记账；一轮 turn 走 `Agent.llmSession()` 一扇门，关桥走 `llmbackend.CloseClients()`（不点名任何 harness）。
+runtime 侧只剩它自己知道的事：某个 agent **是**哪个后端（它的行）、身份/生命周期/工作区、记下的会话 id 与 frame 记账；一轮 turn 通过 `Agent.llmSession()` 这一扇门走。
 
-**接入一个新 harness（例如 deepseek / codex）**——四步，核心与 runtime 一行不用改：
-
-1. 新建 `src/llmbackend/<name>/`：实现 `llmbackend.SessionImpl`（`Attach/Prompt/Dispose/SessionID/Mode/Resumed/ResumedFrom`）+ 一个 `llmbackend.StreamAdapter`（把它的原生事件映射成中性 `Event`）；
-2. 写 `register.go`：`func init() { llmbackend.Register(llmbackend.Harness{Backend: …, Provider: …, New: …, Adapter: …, DefaultModel: …, CloseClient: …}) }`；
-3. `src/llmbackend/all/all.go` 加一行 blank import；
-4. `AUTONOMY_LLM_BACKEND=<name>` 即可选中（`DefaultBackend` 里 `case` 一行，若它要被默认选中）。
-
-**保持这条边界的规则**（改动时照着做，也是验收标准）：`src/llmbackend/{cursor,cline}/` 之外**没有非测试文件** import `src/cursorsdk` 或 `src/clinesdk`。
+**保持这条边界的规则**（改动时照着做）：`src/llmbackend/` 之外**没有非测试文件** import `src/cursorsdk` 或 `src/clinesdk`。加后端 = 在这个模块里加一个实现 + 一个事件适配器，runtime 一行不用改（这也是 [llm-event-stream.md](llm-event-stream.md) 里「加一个后端」那一节的落点）。
 
 ### 启动前自检：桥不可用 = 这次部署失败（不是起个坏服务）
 

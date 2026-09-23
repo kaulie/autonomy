@@ -93,8 +93,8 @@ func neutralPayload(payload map[string]any) map[string]any {
 	return out
 }
 
-// WithNeutralText adds the neutral text key and, when non-empty, reports it.
-func WithNeutralText(payload map[string]any, text string) map[string]any {
+// withNeutralText adds the neutral text key and, when non-empty, reports it.
+func withNeutralText(payload map[string]any, text string) map[string]any {
 	if text == "" {
 		return payload
 	}
@@ -103,9 +103,9 @@ func WithNeutralText(payload map[string]any, text string) map[string]any {
 	return out
 }
 
-// WithNeutralKV copies payload and adds the given neutral keys (skipping empties
+// withNeutralKV copies payload and adds the given neutral keys (skipping empties
 // and nils), which keeps adapters free of bookkeeping.
-func WithNeutralKV(payload map[string]any, kv ...any) map[string]any {
+func withNeutralKV(payload map[string]any, kv ...any) map[string]any {
 	out := neutralPayload(payload)
 	for i := 0; i+1 < len(kv); i += 2 {
 		key, _ := kv[i].(string)
@@ -125,9 +125,9 @@ func WithNeutralKV(payload map[string]any, kv ...any) map[string]any {
 	return out
 }
 
-// PayloadNumber reads the first present numeric payload value among keys
+// payloadNumber reads the first present numeric payload value among keys
 // (JSON numbers decode as float64; ints are accepted for hand-built payloads).
-func PayloadNumber(payload map[string]any, keys ...string) (float64, bool) {
+func payloadNumber(payload map[string]any, keys ...string) (float64, bool) {
 	for _, key := range keys {
 		switch v := payload[key].(type) {
 		case float64:
