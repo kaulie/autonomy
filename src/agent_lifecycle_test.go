@@ -84,7 +84,7 @@ func TestFinishAgentKeepsPersistentInFactory(t *testing.T) {
 // there afterwards — the row a later instruction (in this process or in the one
 // after a restart) finds it by.
 func TestFinishAgentKeepsTheDefaultAgentInTheStore(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

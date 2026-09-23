@@ -29,7 +29,7 @@ var turnLogAt = time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
 // insert order, so A < B < … < F (F is inserted last and holds the highest id).
 func seedTurnLog(t *testing.T) (rawStore, map[string]int64) {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "turns.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "turns.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

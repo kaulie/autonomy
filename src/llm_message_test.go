@@ -11,7 +11,7 @@ import (
 // are stored as two independent llm_messages rows, and the return traces back to
 // the exact input it answers via parent_id.
 func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 // path: the header plus the user input and assistant output are written together
 // and linked.
 func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
 // TestLLMTraceRecordsLinkedMessages proves the streamed provider path also
 // records the input/output pair.
 func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
 // reason_turns rows written before it existed, and is idempotent across reopens.
 func TestBackfillLLMMessagesFromExistingTurns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.db")
-	store, err := openStore(path)
+	store, err := openStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 
 	// Reopening migrates and backfills.
-	reopened, err := openStore(path)
+	reopened, err := openStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 
 	// A second reopen must not duplicate the pair.
-	again, err := openStore(path)
+	again, err := openStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // per streamed delta), ordered by occurrence, with the assistant return last and
 // every row tracing back to the user input.
 func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

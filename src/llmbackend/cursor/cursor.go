@@ -38,7 +38,8 @@ func (c *cursorSession) Attach(ctx context.Context, _ llmbackend.Mode) (bool, er
 	if model == "" {
 		model = DefaultCursorModel()
 	}
-	client := cursorClient()
+	// The account's credential decides which bridge this session talks to (src/accounts.go).
+	client := cursorClientFor(facts.Creds.APIKey)
 	if err := client.Ping(ctx); err != nil {
 		return false, fmt.Errorf("cursor bridge ping: %w", llmbackend.BridgeCallErr(ctx, err))
 	}

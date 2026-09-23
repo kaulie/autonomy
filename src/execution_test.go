@@ -19,7 +19,7 @@ import (
 // persistTask / saveExecutionPlan write here.
 func executionTestStore(t *testing.T) rawStore {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

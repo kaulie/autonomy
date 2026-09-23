@@ -18,7 +18,7 @@ import (
 // ends without one, the held instruction runs. src/graceful.go is the story; this is the
 // proof that the pieces are wired to each other.
 func TestRestartNotifyHoldsNewInstructionsUntilTheDrainEnds(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "graceful.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "graceful.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestRestartNotifyHoldsNewInstructionsUntilTheDrainEnds(t *testing.T) {
 // holding every new instruction forever. Nothing here restarts the process, so the
 // safety timeout is what ends the drain — and the instruction it held starts.
 func TestDrainTimeoutResumesOnItsOwn(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "timeout.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "timeout.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestDrainTimeoutResumesOnItsOwn(t *testing.T) {
 // service, one poll while it waits. An empty body or a missing requestId is a mistake
 // (the platform always sends one), and a server with no runtime answers as one.
 func TestRestartEndpointsAreTheDeploymentContract(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "endpoints.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "endpoints.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestRestartEndpointsAreTheDeploymentContract(t *testing.T) {
 // drain starts, which is the harder half. The run in flight finishes; the loop behind it
 // must not start the next one, and the agent waits to be told the drain is over.
 func TestInboxHoldsInstructionsWhileTheRuntimeDrains(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "inbox-hold.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "inbox-hold.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -221,6 +221,11 @@ func (s *PostgresStore) migrate() error {
 			return fmt.Errorf("migrate postgres schema: %w", err)
 		}
 	}
+	// The account an agent runs on (src/accounts.go): added to databases that predate the
+	// pool, so an existing deployment migrates in place.
+	if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate postgres agents.account_id: %w", err)
+	}
 	if err := s.ensureIDSequences(); err != nil {
 		return fmt.Errorf("migrate postgres id sequences: %w", err)
 	}
@@ -296,6 +301,7 @@ CREATE TABLE IF NOT EXISTS agents (
   llm_agent_id    TEXT NOT NULL DEFAULT '',
   llm_provider    TEXT NOT NULL DEFAULT '',
   model           TEXT NOT NULL DEFAULT '',
+  account_id      TEXT NOT NULL DEFAULT '',
   created_at      TIMESTAMPTZ NOT NULL,
   updated_at      TIMESTAMPTZ NOT NULL,
   deleted_at      TIMESTAMPTZ
@@ -444,10 +450,10 @@ func (s *PostgresStore) UpsertAgent(agent *Agent) error {
 	if agent.ID == 0 {
 		var id int64
 		err := s.db.QueryRow(`
-INSERT INTO agents (name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
-VALUES ('', $1, $2, $3, $4, $5, $6, $7, $8, $8, NULL)
+INSERT INTO agents (name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id, created_at, updated_at, deleted_at)
+VALUES ('', $1, $2, $3, $4, $5, $6, $7, $8, $9, $9, NULL)
 RETURNING id
-`, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model,
+`, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID, string(agent.LLMProvider), agent.Model, agent.AccountID,
 			pgTime(now)).Scan(&id)
 		if err != nil {
 			return fmt.Errorf("insert agent: %w", err)
@@ -461,8 +467,8 @@ RETURNING id
 	}
 
 	_, err := s.db.Exec(`
-INSERT INTO agents (id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, NULL)
+INSERT INTO agents (id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id, created_at, updated_at, deleted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, NULL)
 ON CONFLICT(id) DO UPDATE SET
   name=excluded.name,
   state=excluded.state,
@@ -472,10 +478,11 @@ ON CONFLICT(id) DO UPDATE SET
   llm_agent_id=excluded.llm_agent_id,
   llm_provider=excluded.llm_provider,
   model=excluded.model,
+  account_id=excluded.account_id,
   updated_at=excluded.updated_at,
   deleted_at=NULL
 `, agent.ID, agent.Name, agent.State, lifecycle, taskID, agent.Context, agent.LLMAgentID,
-		string(agent.LLMProvider), agent.Model, pgTime(now))
+		string(agent.LLMProvider), agent.Model, agent.AccountID, pgTime(now))
 	if err != nil {
 		return fmt.Errorf("upsert agent: %w", err)
 	}

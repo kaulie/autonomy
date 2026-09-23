@@ -11,7 +11,7 @@ func init() {
 		Provider:     llmbackend.ProviderCodex,
 		New:          func(host llmbackend.Host) llmbackend.SessionImpl { return newCodexSession(host) },
 		Adapter:      CodexStreamAdapter{},
-		DefaultModel: ResolveCodexModel,
+		DefaultModel: CodexDefaultModel,
 		CloseClient:  func() error { return CloseCodexClient() },
 		Probe:        probeCodex,
 	})

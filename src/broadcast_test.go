@@ -19,7 +19,7 @@ import (
 // pointing at it (the agents' consumers write through the same one).
 func broadcastFixture(t *testing.T) (*Autonomy, rawStore) {
 	t.Helper()
-	store, err := openStore(filepath.Join(t.TempDir(), "broadcast.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "broadcast.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

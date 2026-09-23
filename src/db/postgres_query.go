@@ -100,7 +100,7 @@ func pgScanTask(row pgTaskRow) (*Task, error) {
 // pgAgentColumns is the agent columns every agent read selects, in the order
 // pgScanAgent expects. Both readers take the same columns so an agent is the same
 // value whichever way it was read (GetAgent, ListAgents).
-const pgAgentColumns = `id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model,
+const pgAgentColumns = `id, name, state, lifecycle, current_task_id, context, llm_agent_id, llm_provider, model, account_id,
        created_at, updated_at, deleted_at`
 
 // pgAgentRow is one row of the agent columns above.
@@ -121,7 +121,7 @@ func pgScanAgent(row pgAgentRow) (*Agent, error) {
 		deletedAt            sql.NullTime
 	)
 	if err := row.Scan(
-		&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model,
+		&a.ID, &a.Name, &a.State, &lifecycle, &taskID, &a.Context, &a.LLMAgentID, &provider, &a.Model, &a.AccountID,
 		&createdAt, &updatedAt, &deletedAt,
 	); err != nil {
 		return nil, err

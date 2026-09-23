@@ -18,7 +18,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	t.Setenv("PROJECT_ROOT", root)
 
 	path := filepath.Join(root, "data", "autonomy.db")
-	store, err := openStore(path)
+	store, err := openStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}

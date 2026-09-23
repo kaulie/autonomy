@@ -76,13 +76,14 @@ if [ ! -f "${ENV_FILE}" ]; then
 # AUTONOMY_STORE_READ_DSN=postgres://user:pass@127.0.0.1:5433/autonomy?sslmode=disable
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
-# LLM 后端：cursor（默认）或 cline。切 cline 之前先读 docs/llm-backend.md ——
-# 发版包自带 cline 桥（src/clinesdk/bridge + 依赖包，start.sh 自动解包并指过去），
-# 所以 provider/model 不设就由 `cline auth` 保存的配置解析。这一行只在包的桥
-# 不可用时才需要（指到一个装好 @cline/sdk 的桥脚本）。改完走平台重启，再用 /health 确认。
+# LLM 后端（默认 harness）：cursor（默认）/ cline / codex。发版包自带两个 Node 桥
+# （src/clinesdk/bridge、src/codexsdk/bridge + 依赖包，本脚本自动解包并指过去），
+# 所以桥不用配。见 docs/llm-backend.md；改完走平台重启，再用 /health 确认。
+#
+# 凭据不在这里：一个 agent 用哪把 key（哪个账号）由**账号池**决定 —— GET /accounts 页面或
+# /api/accounts，见 docs/accounts.md。池子里没有该 harness 的启用账号时，run 会被明确拒绝
+# （不再回落到环境变量），所以顺序是：先加账号，再部署/重启。
 # AUTONOMY_LLM_BACKEND=cline
-# AUTONOMY_CLINE_PROVIDER=deepseek
-# AUTONOMY_CLINE_MODEL=deepseek-v4-pro
 # AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/some/checkout/src/clinesdk/bridge/bridge.mjs
 # AUTONOMY_MAX_STEPS=4
 # provider 原始事件流（llm_events，一行一个逐 token 事件）默认不落库：它是一张叶子表，

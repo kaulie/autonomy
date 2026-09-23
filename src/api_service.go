@@ -30,6 +30,11 @@ type AcceptTaskRequest struct {
 	// releases the plan it paused on (status awaiting_approval) and implements it —
 	// implementation starts only after the plan is approved.
 	Approve bool `json:"approve,omitempty"`
+	// AccountID names the pool account this task's agent runs on (src/accounts.go):
+	// the harness, vendor, model, workspace root and credential all come from it. Empty
+	// leaves the choice to the pool (the harness's default account). It is how a caller
+	// configures which account an agent works with, per task.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // AcceptTaskResponse is returned as soon as the instruction is accepted: its task
@@ -169,6 +174,10 @@ type AgentWorkStatus struct {
 	Cycle       int    `json:"cycle,omitempty"`
 	LLMProvider string `json:"llm_provider,omitempty"`
 	Model       string `json:"model,omitempty"`
+	// Account says which pool entry this agent's credentials come from
+	// (src/accounts.go): a status that names the model but not who pays for it is
+	// half an answer.
+	Account string `json:"account,omitempty"`
 }
 
 // StreamEvent is one incremental conversation item for poll clients.
@@ -418,7 +427,43 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
 	}
+	// A request may name the account this task runs on. It is validated *here* so a typo is a
+	// refused instruction rather than a task that dies at its first cycle, and recorded on the
+	// agent row so the run resolves that account (src/agent_account.go).
+	if err := r.assignAccount(agent, req.AccountID); err != nil {
+		return nil, nil, AgentMessage{}, err
+	}
 	return task, agent, msg, nil
+}
+
+// assignAccount points an agent — and with it every run of that task — at one pool account.
+// An empty id changes nothing; a named one must exist and be enabled, because a requested
+// account that cannot be honoured is an error, not a reason to quietly run elsewhere and bill
+// a different key.
+func (r *Autonomy) assignAccount(agent *Agent, accountID string) error {
+	id := strings.TrimSpace(accountID)
+	if id == "" || agent == nil {
+		return nil
+	}
+	store, err := r.accountStoreOrErr()
+	if err != nil {
+		return err
+	}
+	account, err := store.GetAccount(id)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return fmt.Errorf("account %s is not in the pool: add it at /accounts", id)
+	}
+	if !account.Enabled {
+		return fmt.Errorf("account %s (%s) is disabled", account.ID, account.Label)
+	}
+	if agent.AccountID != account.ID {
+		agent.adoptAccount(account)
+		agent.Persist()
+	}
+	return nil
 }
 
 func newTaskID() string {
@@ -708,6 +753,7 @@ func (r *Autonomy) AgentStatus(taskID string, agentID int64) (*AgentWorkStatus, 
 		Name:        agent.Name,
 		State:       agent.State,
 		LLMProvider: string(agent.LLMProvider),
+		Account:     agent.accountSummary(),
 		Model:       agent.Model,
 	}
 	turn, err := r.conversationStore().ActiveReasonTurn(taskID, agentID)

@@ -7,6 +7,11 @@
 
 **切后端 = 让 runtime 以另一个后端启动。** 这就是全文。
 
+> **凭据不在这里**：一个 agent 用哪把自己（或哪个账号）的 key，由**账号池**决定
+> （[accounts.md](accounts.md)）—— 池子里没有该 harness 的启用账号时，run 会被明确拒绝，
+> 而不是回落到环境变量。这个开关只决定「默认用哪个 harness」。
+
+
 ## 谁决定后端
 
 `AUTONOMY_LLM_BACKEND`（`src/llmbackend/cline_client.go: DefaultBackend()`）：

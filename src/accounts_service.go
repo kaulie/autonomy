@@ -150,6 +150,30 @@ func (r *Autonomy) RemoveAccount(accountID string) error {
 	return store.DeleteAccount(accountID)
 }
 
+// DefaultAccount is the account a harness would resolve to right now: its default, else the
+// first enabled one. nil when the pool has nothing for that harness — which is exactly the
+// state /health should be able to show, together with the model a run would use.
+func (r *Autonomy) DefaultAccount(backend llmbackend.Backend) (*Account, error) {
+	store, err := r.accountStoreOrErr()
+	if err != nil {
+		return nil, err
+	}
+	enabled := true
+	pool, err := store.ListAccounts(AccountFilter{Harness: string(backend), Enabled: &enabled})
+	if err != nil {
+		return nil, err
+	}
+	for i := range pool {
+		if pool[i].IsDefault {
+			return &pool[i], nil
+		}
+	}
+	if len(pool) > 0 {
+		return &pool[0], nil
+	}
+	return nil, nil
+}
+
 // VerifyAccount probes one account. Without live it only loads the harness's bridge (free);
 // with it, the account's own credentials answer one short turn. The point is that "is this
 // entry usable" is answerable before a task is handed to it, instead of failing at that

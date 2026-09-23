@@ -171,7 +171,7 @@ func TestMaxStepsComesFromTheEnvironment(t *testing.T) {
 // two cycles the task must decide twice instead of aborting after the first
 // failure, and end reporting the failure.
 func TestRunKeepsDecidingAfterAFailedCycle(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestRunRecordsAnEmptyAnswerInTheStreamAndOnTheTask(t *testing.T) {
 	// The raw stream is opt-in: this test is about the stream carrying the reason.
 	t.Setenv("AUTONOMY_LLM_EVENTS", "1")
 
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestRunRecordsWhyItCouldNotDecide(t *testing.T) {
 	t.Setenv("AUTONOMY_REASONER", "llm")
 	t.Setenv("PROJECT_ROOT", "")
 
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

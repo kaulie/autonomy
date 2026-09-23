@@ -570,6 +570,7 @@ func activeStore() Store {
 // activeConversationStore(). Each is nil when no store is wired in.
 
 func activeTaskStore() TaskStore                 { return activeStore() }
+func activeAccountStore() AccountStore           { return activeStore() }
 func activeAgentStore() AgentStore               { return activeStore() }
 func activeConversationStore() ConversationStore { return activeStore() }
 func activeExecutionStore() ExecutionStore       { return activeStore() }

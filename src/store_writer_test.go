@@ -14,7 +14,7 @@ import (
 // engine registry (openStore).
 
 func TestLocalReasonerPersistsTurn(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestLocalReasonerPersistsTurn(t *testing.T) {
 }
 
 func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
 }
 
 func TestRecordAgentPromptPersistsTurn(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 // an agent somebody asked to throw away (ephemeral), and the row records it. The
 // default keeps the agent instead (see TestFinishAgentKeepsTheDefaultAgentInTheStore).
 func TestFinishAgentSoftDeletesAnEphemeralAgentInStore(t *testing.T) {
-	store, err := openStore(filepath.Join(t.TempDir(), "autonomy.db"))
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

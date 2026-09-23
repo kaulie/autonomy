@@ -54,7 +54,7 @@ const agentDashboardHTML = `<!DOCTYPE html>
   <thead>
     <tr>
       <th>ID</th><th>Name</th><th>Role</th><th>Lifecycle</th><th>State</th>
-      <th>Health</th><th>Current task</th><th>Working</th><th>Provider / model</th><th>Run id</th>
+      <th>Health</th><th>Current task</th><th>Working</th><th>Provider / model</th><th>Account</th><th>Run id</th>
     </tr>
   </thead>
   <tbody id="rows"><tr><td class="empty" colspan="10">loading…</td></tr></tbody>
@@ -85,6 +85,7 @@ const agentDashboardHTML = `<!DOCTYPE html>
         ? '<span class="work-yes">yes</span>'
         : '<span class="work-no">no</span>';
       var provider = [a.llm_provider, a.model].filter(Boolean).join(' / ');
+      var account = a.account || '-';
       return '<tr>' +
         '<td>' + esc(a.agent_id) + '</td>' +
         '<td>' + dash(a.name) + '</td>' +
@@ -95,6 +96,7 @@ const agentDashboardHTML = `<!DOCTYPE html>
         '<td class="run">' + dash(a.current_task) + '</td>' +
         '<td>' + working + '</td>' +
         '<td>' + dash(provider) + '</td>' +
+        '<td>' + dash(account) + '</td>' +
         '<td class="run">' + dash(a.agent_run_id) + '</td>' +
       '</tr>';
     }).join('');

@@ -46,12 +46,12 @@ func CloseClineClient() error {
 }
 
 // newClineClient is the single entry for constructing a llmbackend.Cline client/bridge.
+//
+// It carries no credentials of its own: one bridge process serves every Cline account, and
+// each agent's account rides on its own CreateAgent call (src/llmbackend/cline/session.go).
+// The pool is the runtime's only source of keys — nothing here reads the environment.
 func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
-		clinesdk.WithProvider(ResolveClineProvider()),
-		clinesdk.WithModel(ResolveClineModel()),
-		clinesdk.WithAPIKey(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_API_KEY"))),
-		clinesdk.WithBaseURL(strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BASE_URL"))),
 		clinesdk.WithSystemPrompt(defaultClineSystemPrompt()),
 		clinesdk.WithWorkspace(workspace),
 	)
@@ -64,19 +64,9 @@ func agentWorkspace() string {
 	return "."
 }
 
-// ResolveClineProvider is the llmbackend.Cline provider id (e.g. "deepseek", "anthropic");
-// empty means "let the bridge fall back to the provider saved by cline auth".
-func ResolveClineProvider() string {
-	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_PROVIDER"))
-}
-
-// ResolveClineModel is the llmbackend.Cline model id. It deliberately does NOT fall back to
-// AUTONOMY_LLM_MODEL: that variable holds the default (llmbackend.Cursor) backend's model,
-// and those ids are meaningless to a llmbackend.Cline provider. Empty means "let the bridge
-// resolve the model from the saved cline auth config".
-func ResolveClineModel() string {
-	return strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_MODEL"))
-}
+// ClineDefaultModel is what a cline agent runs on when its account names no model: empty,
+// which leaves the choice to the bridge (it resolves one from the saved cline auth).
+func ClineDefaultModel() string { return "" }
 
 // defaultClineSystemPrompt is the session system prompt. The llmbackend.Cline SDK requires
 // one, and autonomy's own instructions ride on the prompt itself, so this is
