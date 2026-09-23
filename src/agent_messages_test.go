@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -49,7 +50,7 @@ func TestAnAgentsMessagesAreWhatItReceivedAndWhatItAnswered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentMessages: %v", err)
 	}
-	if len(messages.Received) != 1 || messages.Received[0].Content != "do the thing" || messages.Received[0].Sender != MessageSenderUser {
+	if len(messages.Received) != 1 || messages.Received[0].Content != "do the thing" || messages.Received[0].Sender != string(MessageSenderUser) {
 		t.Fatalf("received=%+v want the inbox message", messages.Received)
 	}
 	if len(messages.Sent) != 1 {
@@ -78,6 +79,21 @@ func TestAnAgentsMessagesAreWhatItReceivedAndWhatItAnswered(t *testing.T) {
 	server.Handler().ServeHTTP(ok, httptest.NewRequest(http.MethodGet, "/api/agents/"+strconvID(agent.ID)+"/messages?limit=10", nil))
 	if ok.Code != http.StatusOK || !strings.Contains(ok.Body.String(), "do the thing") {
 		t.Fatalf("GET messages status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	// The keys are what a page reads, so they are part of the contract: snake_case, not the store's
+	// Go field names (the bug this assertion exists to keep fixed).
+	var decoded struct {
+		Received []map[string]any `json:"received"`
+		Sent     []map[string]any `json:"sent"`
+	}
+	if err := json.Unmarshal(ok.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Received) != 1 || decoded.Received[0]["sender"] != "user" || decoded.Received[0]["kind"] != "instruction" {
+		t.Fatalf("received json=%v want sender/kind spelled for a page", decoded.Received)
+	}
+	if len(decoded.Sent) != 1 || decoded.Sent[0]["output"] == nil || decoded.Sent[0]["input"] == nil {
+		t.Fatalf("sent json=%v want input/output", decoded.Sent)
 	}
 }
 
