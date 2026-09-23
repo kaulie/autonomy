@@ -210,3 +210,13 @@ func TestOpenDefaultStoreDefaultsToTheMachinesDatabase(t *testing.T) {
 		t.Fatalf("expected default sqlite file: %v", err)
 	}
 }
+
+// The account pool's side of the no-op store: a fakeStore is only ever asked whether the
+// engine SPI is pluggable, so its pool is empty and its writes are accepted.
+func (fakeStore) ListAccounts(AccountFilter) ([]Account, error) { return nil, nil }
+func (fakeStore) GetAccount(string) (*Account, error)           { return nil, nil }
+func (fakeStore) CreateAccount(a Account) (Account, error)      { return a, nil }
+func (fakeStore) UpdateAccount(_ string, _ AccountPatch) (Account, error) {
+	return Account{}, nil
+}
+func (fakeStore) DeleteAccount(string) error { return nil }

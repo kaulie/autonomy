@@ -417,6 +417,9 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 		return fmt.Errorf("migrate http query indexes: %w", err)
 	}
 	// The inbox: one row per message per agent (sqlite_inbox.go, src/inbox.go).
+	if _, err := s.db.Exec(accountsDDL); err != nil {
+		return fmt.Errorf("accounts schema: %w", err)
+	}
 	if _, err := s.db.Exec(inboxDDL); err != nil {
 		return fmt.Errorf("migrate agent_messages: %w", err)
 	}

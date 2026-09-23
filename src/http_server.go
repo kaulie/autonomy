@@ -80,6 +80,15 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
 		{"GET /healthz", s.handleHealthAlias},
+		// The harness account pool (src/accounts.go): what a runtime can run agents on, and
+		// the only place credentials come from. Reads render a masked key; the write side is
+		// the UI's (GET /accounts, src/accounts_page.go).
+		{"GET /api/accounts", s.handleAccountList},
+		{"POST /api/accounts", s.handleAccountCreate},
+		{"PATCH /api/accounts/{accountId}", s.handleAccountUpdate},
+		{"DELETE /api/accounts/{accountId}", s.handleAccountDelete},
+		{"POST /api/accounts/{accountId}/verify", s.handleAccountVerify},
+		{"GET /accounts", s.handleAccountsPage},
 	}
 }
 
@@ -718,6 +727,22 @@ func (s *HTTPServer) handleAgentDashboard(w http.ResponseWriter, _ *http.Request
 	_, _ = io.WriteString(w, agentDashboardHTML)
 }
 
+// handleAccountsPage serves the pool's own UI: the page a human opens to add, edit, verify,
+// disable and delete harness accounts (src/accounts_page.go). It is self-contained for the
+// same reason the dashboard is — no build step, no external asset — and it renders exactly
+// what the endpoints allow, so the page cannot do more than the API does.
+//
+// @Summary  账号池页面（自包含 HTML，调用 /api/accounts）
+// @Tags     accounts
+// @Produce  html
+// @Success  200  {string}  string  "HTML 页面"
+// @Router   /accounts [get]
+func (s *HTTPServer) handleAccountsPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, accountsPageHTML)
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
@@ -726,4 +751,166 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, errResponse{Error: msg})
+}
+
+// ---- 账号池（harness account pool，src/accounts.go）----
+//
+// 一个账号 = 一个 harness（cursor / cline / codex）+ 一个 vendor + 一把凭据。运行时的凭据
+// 只从这里来：不再有 AUTONOMY_*_API_KEY 注入，池子里没有该 harness 的启用账号时，会话构建
+// 会明确报错而不是悄悄用一个环境变量（src/agent_backend.go）。列表接口只回掩码。
+
+// accountsResponse is the pool as the list endpoint renders it.
+type accountsResponse struct {
+	Accounts []AccountView `json:"accounts"`
+}
+
+// handleAccountList reads the pool, masked.
+//
+// @Summary  账号池：列出账号（key 只回掩码）
+// @Tags     accounts
+// @Produce  json
+// @Param    harness  query     string  false  "只看某个 harness（cursor / cline / codex）"
+// @Param    vendor   query     string  false  "只看某个 vendor（cline 的 deepseek / minimax …）"
+// @Param    enabled  query     bool    false  "只看启用或只看停用的"
+// @Success  200      {object}  accountsResponse  "accounts（每个账号的 harness / vendor / label / 掩码 / 是否启用 / 是否默认）"
+// @Failure  500      {object}  errResponse       "store 读不了池子"
+// @Router   /api/accounts [get]
+func (s *HTTPServer) handleAccountList(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	filter := AccountFilter{Harness: req.URL.Query().Get("harness"), Vendor: req.URL.Query().Get("vendor")}
+	if raw := strings.TrimSpace(req.URL.Query().Get("enabled")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "enabled must be true or false")
+			return
+		}
+		filter.Enabled = &enabled
+	}
+	accounts, err := s.Autonomy.AccountViews(filter)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, accountsResponse{Accounts: accounts})
+}
+
+// handleAccountCreate adds one account to the pool.
+//
+// @Summary  账号池：新增账号
+// @Tags     accounts
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.AccountInput  true  "harness + vendor + label + 凭据（apiKey 可省：省了就用 provider 自己保存的 auth）"
+// @Success  201      {object}  autonomy.AccountView    "已写入的账号（key 只回掩码）"
+// @Failure  400      {object}  errResponse             "harness 不认识 / label 为空 / JSON 不合法"
+// @Router   /api/accounts [post]
+func (s *HTTPServer) handleAccountCreate(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	var body AccountInput
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	account, err := s.Autonomy.AddAccount(body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, account)
+}
+
+// handleAccountUpdate patches one account. A field the body leaves out is left alone, so a UI
+// can change a label without restating the account (and without ever holding its key).
+//
+// @Summary  账号池：修改账号（只传要改的字段）
+// @Tags     accounts
+// @Accept   json
+// @Produce  json
+// @Param    accountId  path      string                 true  "账号 id"
+// @Param    request    body      autonomy.AccountInput  true  "要改的字段（未传的字段保持不动）"
+// @Success  200        {object}  autonomy.AccountView    "改完的账号"
+// @Failure  400        {object}  errResponse             "账号不存在 / JSON 不合法 / 改动本身不合法"
+// @Router   /api/accounts/{accountId} [patch]
+func (s *HTTPServer) handleAccountUpdate(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	var body AccountInput
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	account, err := s.Autonomy.EditAccount(req.PathValue("accountId"), body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, account)
+}
+
+// handleAccountDelete removes one account from the pool.
+//
+// @Summary  账号池：删除账号
+// @Tags     accounts
+// @Produce  json
+// @Param    accountId  path      string  true  "账号 id"
+// @Success  200        {object}  deleteAccountResponse  "已删除"
+// @Failure  500        {object}  errResponse            "store 写不了"
+// @Router   /api/accounts/{accountId} [delete]
+func (s *HTTPServer) handleAccountDelete(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	if err := s.Autonomy.RemoveAccount(req.PathValue("accountId")); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, deleteAccountResponse{Deleted: true})
+}
+
+// deleteAccountResponse answers a delete.
+type deleteAccountResponse struct {
+	Deleted bool `json:"deleted"`
+}
+
+// handleAccountVerify probes one account: the bridge handshake for free, and — with
+// ?live=1 — one short turn that the account's own credentials answer.
+//
+// @Summary  账号池：探活一个账号（默认只加载桥，不花额度；live=1 真跑一轮短对话）
+// @Tags     accounts
+// @Produce  json
+// @Param    accountId  path      string  true   "账号 id"
+// @Param    live       query     bool    false  "true 时用这个账号的凭据真跑一轮（会消耗一点额度）"
+// @Success  200        {object}  autonomy.AccountVerification  "ok / load / live / detail（+ live 时的 model 与模型答复）"
+// @Failure  400        {object}  errResponse                   "账号不存在"
+// @Failure  500        {object}  errResponse                   "store 读不了"
+// @Router   /api/accounts/{accountId}/verify [post]
+func (s *HTTPServer) handleAccountVerify(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	live := false
+	if raw := strings.TrimSpace(req.URL.Query().Get("live")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "live must be true or false")
+			return
+		}
+		live = value
+	}
+	verification, err := s.Autonomy.VerifyAccount(req.Context(), req.PathValue("accountId"), live)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, verification)
 }
