@@ -111,9 +111,18 @@ func NormalizeAccount(account Account) (Account, error) {
 	// The workspace root is exclusive: cleaned, so "…/a/" and "…/a" are the same claim, and
 	// empty is itself a claim ("the runtime's default root") that only one account may make
 	// (src/db/sqlite_accounts.go).
+	// The workspace root is required and absolute, and it is exclusive (one account per root,
+	// enforced by the store): an account's agents work under it, so a root that is empty or
+	// relative would put them somewhere nobody chose, and two accounts sharing one would mix
+	// their agents' files. This mirrors web-cursor's pool, where the same field is required and
+	// must be an absolute path.
 	account.WorkspaceRoot = strings.TrimSpace(account.WorkspaceRoot)
-	if account.WorkspaceRoot != "" {
-		account.WorkspaceRoot = filepath.Clean(account.WorkspaceRoot)
+	if account.WorkspaceRoot == "" {
+		return Account{}, fmt.Errorf("agent_root_workspace is required: name the directory this account's agents work under")
+	}
+	account.WorkspaceRoot = filepath.Clean(account.WorkspaceRoot)
+	if !filepath.IsAbs(account.WorkspaceRoot) {
+		return Account{}, fmt.Errorf("agent_root_workspace must be an absolute path (got %q)", account.WorkspaceRoot)
 	}
 	if account.CreatedAt.IsZero() {
 		account.CreatedAt = time.Now()

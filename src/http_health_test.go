@@ -72,7 +72,8 @@ func TestHealthReportsTheAccountItWouldRunOn(t *testing.T) {
 	store := resumeTestStore(t)
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 	account, err := store.CreateAccount(Account{
-		Harness: "cline", Vendor: "minimax", Label: "minimax prod", Model: "minimax-m2", Enabled: true, IsDefault: true,
+		Harness: "cline", Vendor: "minimax", Label: "minimax prod", Model: "minimax-m2",
+		WorkspaceRoot: t.TempDir(), Enabled: true, IsDefault: true,
 	})
 	if err != nil {
 		t.Fatalf("create account: %v", err)

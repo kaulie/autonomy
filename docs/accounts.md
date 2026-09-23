@@ -17,14 +17,20 @@
 | `cline` | `deepseek` / `minimax` / `anthropic` … | Cline 的 key 属于某个 LLM 厂商，离开 vendor 一把 key 没有意义 |
 | `codex` | `openai`（默认） | Codex 走 OpenAI；写了 `baseUrl` 就以它为准 |
 
-### 工作区根目录是**互斥**的
+> **与 web-cursor 的一处差异（如实说明）**：web-cursor 的账号**不带 model** —— 它把 model 放在
+> runtime/project settings 里、再由 task 输入覆盖。autonomy 目前**没有 settings 存储**，所以
+> 「这个账号跑哪个 model」暂时挂在账号上（`model`，可省 = 交给该 harness 自己解析）。要完全对齐
+> 就得先加一层 settings（或把 model 挪到 task 输入上）—— 那是一个独立的改动。
 
-- 每个账号**独占**一个 `agent_root_workspace`；写入时检查、并由唯一索引兜底 —— 两个账号
-  拿到同一个根会被拒绝（错误点名已经占用它的那个账号）；
-- 路径会先归一化（`…/a/` 与 `…/a` 是同一个主张）；
-- **空值也是一个主张**（意思是「运行时默认根」）：只能有一个账号用它，其余账号必须各自命名 ——
-  否则不同账号的 agent 会落在同一棵目录树下；
-- 一个账号的每只 agent 仍然在自己的子目录里：`{agent_root_workspace}/{agent-name}/`。
+### 工作区根目录：**必填、必须是绝对路径、且互斥**
+
+（与 web-cursor 的账号池同一条规则；互斥是它没有、我们要的那一条。）
+
+- `agent_root_workspace` **必填**，且必须是**绝对路径**（相对路径会被拒）；
+- 每个账号**独占**一个根：写入时检查、并由唯一索引兜底 —— 两个账号拿到同一个根会被拒绝
+  （错误点名已经占用它的那个账号）；
+- 路径先归一化（`…/a/` 与 `…/a` 是同一个主张）；
+- 每只 agent 在自己的子目录里：`{agent_root_workspace}/{agent-name}/`。
 
 **凭据可以空着**：那样就跑 provider 自己保存的 auth（`cline auth` / `codex auth`）——「这台
 机器已经登录过」是最常见的用法，账号只要说清 harness/vendor/model 即可。
