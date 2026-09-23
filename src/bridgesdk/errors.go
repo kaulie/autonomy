@@ -1,11 +1,11 @@
-package clinesdk
+package bridgesdk
 
 import "fmt"
 
 // BridgeProcessError reports a failure to spawn or handshake with the bridge.
 type BridgeProcessError struct{ Msg string }
 
-func (e *BridgeProcessError) Error() string { return "cline bridge: " + e.Msg }
+func (e *BridgeProcessError) Error() string { return "bridge: " + e.Msg }
 
 // RPCError is an error returned by the bridge for one command.
 type RPCError struct {
@@ -30,7 +30,7 @@ func (e *RunError) Error() string {
 	if e.Code == "" {
 		return e.Message
 	}
-	return fmt.Sprintf("cline run %s: %s", e.Code, e.Message)
+	return fmt.Sprintf("run %s: %s", e.Code, e.Message)
 }
 
 func bridgeErr(format string, args ...any) error {

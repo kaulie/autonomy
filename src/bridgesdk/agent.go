@@ -1,4 +1,4 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"context"
@@ -27,7 +27,8 @@ type CreateOptions struct {
 	Mode string
 	// ResumeSessionID is a Cline session whose conversation this one continues: the
 	// bridge reads that session's stored transcript and seeds the new session with it
-	// (src/clinesdk/bridge/resume.mjs) — the SDK does not reload a session when it is
+	// (the cline bridge does this in src/clinesdk/bridge/resume.mjs; codex resumes the thread
+	// itself) — a provider SDK does not reload a session when it is
 	// handed its id, and handing back the same id overwrites the stored transcript.
 	// Empty starts a conversation from nothing, which is also what a session with no
 	// transcript left (retention, deletion) falls back to.
@@ -92,7 +93,7 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, bridgeErr("decode createAgent: %v", err)
 	}
-	// The bridge resolves a missing provider/model from the saved cline auth
+	// The bridge resolves a missing provider/model from its own saved auth (cline auth)
 	// config, so adopt what it actually used (this is also what gets recorded on
 	// the agent and in reason_turns.model).
 	return &Agent{
@@ -371,7 +372,7 @@ func (r *Run) decodeResult(raw json.RawMessage) (*RunResult, error) {
 		r.agent.SessionID = res.SessionID
 	}
 	if res.Status == LLMStatusError && res.ErrorMessage == "" {
-		res.ErrorMessage = firstNonEmpty(res.FinishReason, "cline run failed")
+		res.ErrorMessage = firstNonEmpty(res.FinishReason, "run failed")
 	}
 	return res, nil
 }
@@ -563,7 +564,7 @@ type RunResult struct {
 	AgentID   string
 	SessionID string
 	// ResumedFrom is the session this run continued, when it was the first run of a
-	// session seeded with an earlier one's transcript (src/clinesdk/bridge/resume.mjs).
+	// session seeded with an earlier one's transcript (the cline bridge does this).
 	ResumedFrom string
 	Mode        string
 	// Status is finished | error | cancelled.

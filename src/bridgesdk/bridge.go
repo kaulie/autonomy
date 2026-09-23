@@ -1,4 +1,4 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"bufio"
@@ -13,12 +13,11 @@ import (
 	"time"
 )
 
-// Protocol is the bridge protocol version this client speaks.
-const Protocol = "cline-bridge/1"
-
 // BridgeManager owns one `node bridge.mjs` child process and speaks the NDJSON
 // protocol with it over stdio.
 type BridgeManager struct {
+	// Config says which bridge this is (protocol, script, env names, label).
+	Config  Config
 	NodeBin string // node executable (default "node")
 	Script  string // path to bridge.mjs
 	Dir     string // working directory for the child (default: the script's dir)
@@ -42,35 +41,6 @@ type BridgeInfo struct {
 	SDK      string `json:"sdk"`
 }
 
-func defaultNodeBin() string {
-	if v := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_NODE_BIN")); v != "" {
-		return v
-	}
-	return "node"
-}
-
-func defaultBridgeScript() string {
-	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_BRIDGE_SCRIPT")); p != "" {
-		return p
-	}
-	rel := filepath.Join("src", "clinesdk", "bridge", "bridge.mjs")
-	candidates := []string{rel}
-	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(wd, rel),
-			filepath.Join(wd, "..", rel),
-			filepath.Join(wd, "..", "..", rel),
-		)
-	}
-	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			abs, _ := filepath.Abs(c)
-			return abs
-		}
-	}
-	return rel
-}
-
 // Start spawns the bridge (if needed) and blocks until the ready handshake.
 func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 	m.mu.Lock()
@@ -79,13 +49,14 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 		info := m.ready
 		return &info, nil
 	}
+	cfg := m.Config.normalize()
 	nodeBin := m.NodeBin
 	if nodeBin == "" {
-		nodeBin = defaultNodeBin()
+		nodeBin = cfg.nodeBin()
 	}
 	script := m.Script
 	if script == "" {
-		script = defaultBridgeScript()
+		script = cfg.script()
 	}
 	abs, err := filepath.Abs(script)
 	if err != nil {
@@ -93,7 +64,7 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 	}
 	if len(m.Command) == 0 {
 		if _, err := os.Stat(abs); err != nil {
-			return nil, bridgeErr("bridge script not found at %s (set AUTONOMY_CLINE_BRIDGE_SCRIPT; the release package ships the bridge with its dependencies, a dev checkout needs scripts/install-cline-bridge.sh)", abs)
+			return nil, bridgeErr("%s script not found at %s (set %s; %s)", cfg.label(), abs, cfg.ScriptEnv, cfg.InstallHint)
 		}
 	}
 	dir := m.Dir
@@ -120,39 +91,39 @@ func (m *BridgeManager) Start(ctx context.Context) (*BridgeInfo, error) {
 		return nil, bridgeErr("stderr pipe: %v", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, bridgeErr("could not launch %s %s: %v (install deps with scripts/install-cline-bridge.sh)", nodeBin, abs, err)
+		return nil, bridgeErr("could not launch %s %s: %v (%s)", nodeBin, abs, err, cfg.InstallHint)
 	}
 	// One scanner for the whole process lifetime: the ready line and every later
 	// message must come from the same buffered reader.
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	// Keep draining stderr forever so a full pipe cannot block the bridge. The
-	// bridge already tags its own lines ("[cline-bridge] info: …"), so only
+	// bridge already tags its own lines ("[<name>-bridge] info: …"), so only
 	// untagged output (a Node warning, for example) gets the prefix added here —
-	// otherwise every line reads "[cline-bridge] [cline-bridge] …".
+	// otherwise every line reads "[<name>-bridge] [<name>-bridge] …".
 	go func() {
 		stderrScanner := bufio.NewScanner(stderr)
 		stderrScanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for stderrScanner.Scan() {
 			line := stderrScanner.Text()
-			if strings.HasPrefix(line, "[cline-bridge]") {
+			if strings.HasPrefix(line, "["+cfg.Name+"-bridge]") {
 				fmt.Fprintln(os.Stderr, line)
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "[cline-bridge] %s\n", line)
+			fmt.Fprintf(os.Stderr, "[%s-bridge] %s\n", cfg.Name, line)
 		}
 	}()
 
-	info, err := waitReadyLine(sc, 60*time.Second)
+	info, err := waitReadyLine(sc, nodeBin, cfg, 60*time.Second)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		return nil, err
 	}
-	if info.Protocol != Protocol {
+	if cfg.Protocol != "" && info.Protocol != cfg.Protocol {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
-		return nil, bridgeErr("unsupported bridge protocol %q (want %q)", info.Protocol, Protocol)
+		return nil, bridgeErr("unsupported %s protocol %q (want %q)", cfg.label(), info.Protocol, cfg.Protocol)
 	}
 
 	m.cmd = cmd
@@ -196,7 +167,7 @@ func (m *BridgeManager) Stop() {
 	}
 }
 
-func waitReadyLine(sc *bufio.Scanner, timeout time.Duration) (*BridgeInfo, error) {
+func waitReadyLine(sc *bufio.Scanner, nodeBin string, cfg Config, timeout time.Duration) (*BridgeInfo, error) {
 	type result struct {
 		info *BridgeInfo
 		err  error
@@ -227,12 +198,12 @@ func waitReadyLine(sc *bufio.Scanner, timeout time.Duration) (*BridgeInfo, error
 			ch <- result{err: err}
 			return
 		}
-		ch <- result{err: bridgeErr("bridge exited before the ready line (node missing? try `%s --version`)", defaultNodeBin())}
+		ch <- result{err: bridgeErr("%s exited before the ready line (node missing? try `%s --version`)", cfg.label(), nodeBin)}
 	}()
 	select {
 	case res := <-ch:
 		return res.info, res.err
 	case <-time.After(timeout):
-		return nil, bridgeErr("bridge ready timeout after %s", timeout)
+		return nil, bridgeErr("%s ready timeout after %s", cfg.label(), timeout)
 	}
 }

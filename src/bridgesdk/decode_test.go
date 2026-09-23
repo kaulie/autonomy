@@ -1,4 +1,4 @@
-package clinesdk
+package bridgesdk
 
 import (
 	"encoding/json"

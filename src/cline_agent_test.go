@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kaulie/autonomy/src/bridgesdk/fakebridge"
 	"github.com/kaulie/autonomy/src/clinesdk"
-	"github.com/kaulie/autonomy/src/clinesdk/fakebridge"
 )
 
 // TestFakeBridgeProcess re-executes this test binary as the fake cline bridge,
@@ -31,8 +31,11 @@ func installFakeClineClient(t *testing.T) {
 	previousClient := cline.SwapClineClient(nil)
 	previousFactory := cline.ClineClientFactory
 	cline.ClineClientFactory = func(string) *clinesdk.Client {
+		argv, env := fakebridge.Command(os.Args[0])
+		manager := clinesdk.NewBridgeManager()
+		manager.Command, manager.Env = argv, env
 		return clinesdk.NewClient(
-			clinesdk.WithManager(fakebridge.Manager(os.Args[0])),
+			clinesdk.WithManager(manager),
 			clinesdk.WithProvider("deepseek"),
 			clinesdk.WithModel("deepseek-v4-pro"),
 		)
