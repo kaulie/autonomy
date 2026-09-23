@@ -61,6 +61,16 @@ func (r *Autonomy) resumeAgentForTask(task *Task) (*Agent, error) {
 		return nil, err
 	}
 	if stored == nil {
+		// An agent initialized before its task (AgentInitializer) is the agent this
+		// task is paired with: initialization happens first, the task arrives second,
+		// so the agent the caller built is the one the task gets (and only then).
+		if agent := r.AgentFactory.forInitialization(); agent != nil {
+			agent.CurrentTask = task
+			task.AgentID = agent.ID
+			persistTask(task)
+			persistAgent(agent)
+			return agent, nil
+		}
 		return r.AgentFactory.Create(task), nil
 	}
 	// The task keeps the pairing it was found by, in memory as well as in its row:

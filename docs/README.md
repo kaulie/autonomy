@@ -31,6 +31,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 21. [local-replica.md](local-replica.md) — 本地副本（写远端、读本地）：把远端主库的一份 streaming replica 立在本机，观察类的读走本地、写与「读完就写」的读走远端
 22. [graceful-restart.md](graceful-restart.md) — 优雅重启：部署平台重启前先通知（`POST /api/ops/restart-notify`）、再轮询（`GET /api/ops/restart-status`）；不再启动新 run、在途 run 跑完、被 hold 的指令由新进程接着跑，进程收到 `SIGTERM` 也走同一条路
 23. [dashboard.md](dashboard.md) — agent 状态监控页：`GET /api/agents`（所有 agent 的实时状态）与 `GET /dashboard`（轮询它的自刷新表格页）
+24. [agent-initialization.md](agent-initialization.md) — agent 初始化与 task 输入解耦：先初始化、再给 system prompt、之后才接受 task，先出计划、确认后再实现
 
 ## 终局四对象
 

@@ -163,6 +163,12 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 		values[key] = reasoningDeltaMarker
 	}
 	policy := applyPolicyPlaceholders(raw, values)
+	// The agent's own system prompt, given at initialization (before any task, see
+	// AgentInitializer), is part of the stable half: it travels ahead of the policy,
+	// once per session, ahead of the task's own words.
+	if prompt := agentSystemPrompt(ctx.Agent); prompt != "" {
+		policy = "## System Prompt\n\n" + prompt + "\n\n" + policy
+	}
 	if !strings.HasSuffix(policy, "\n") {
 		policy += "\n"
 	}

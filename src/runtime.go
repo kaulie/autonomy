@@ -75,40 +75,91 @@ func (r *Runtime) SetCapabilities(caps ...capability.Capability) {
 // per action and in order, so the next decision sees what actually happened
 // (previous_actions) and can decide for itself which entry matters.
 func (r *Runtime) Execute(decision Decision) (Result, error) {
+	return r.executePlan(decision, 0, nil)
+}
+
+// ExecuteApproved runs a decision whose plan was already written while the run
+// waited for the user to confirm it (RecordPlanOnly / Agent.RequirePlanApproval): the
+// plan row and its steps exist, so this runs the steps and records what each did,
+// without writing the plan again. planID and planned are what RecordPlanOnly returned.
+func (r *Runtime) ExecuteApproved(decision Decision, planID int64, planned []ExecutionStepPlan) (Result, error) {
+	return r.executePlan(decision, planID, planned)
+}
+
+// RecordPlanOnly writes a decision's plan and its steps without running any of them,
+// and returns the plan id with the steps as stored. A run that must wait for the user
+// to confirm a plan (Agent.RequirePlanApproval) pauses through here: the plan is on
+// record — what the user reviews — and no execution_step belongs to it, which is
+// exactly what "planned but never executed" means (src/execution-loop.md).
+func (r *Runtime) RecordPlanOnly(decision Decision) (int64, []ExecutionStepPlan, error) {
+	r.cycle = &decision.Ctx
+	defer func() { r.cycle = nil }()
+
+	if err := validateDecision(decision); err != nil {
+		return 0, nil, err
+	}
+	if err := validatePlanLineage(decision.Actions); err != nil {
+		return 0, nil, err
+	}
+	if decision.Ctx.Cycle == 1 {
+		if err := validateCompletionContract(decision.Contract, decision.Actions); err != nil {
+			return 0, nil, err
+		}
+	}
+	planID, planned, err := r.recordPlan(decision)
+	if err != nil {
+		return planID, nil, err
+	}
+	// Pinned where the first plan is written, whether or not it runs yet: the contract
+	// belongs to the task and the row it came in with is what makes it traceable
+	// (src/completion_contract.go). ExecuteApproved does not pin it again.
+	if decision.Ctx.Cycle == 1 {
+		pinCompletionContract(decision, planID)
+	}
+	return planID, planned, nil
+}
+
+// executePlan is Execute and ExecuteApproved: with planID 0 the decision's plan is
+// validated and written first (the normal path, below); with a planID already
+// recorded, the plan exists and only its steps run.
+func (r *Runtime) executePlan(decision Decision, planID int64, planned []ExecutionStepPlan) (Result, error) {
 	// The cycle's context is what a capability delegating out of this cycle hands
 	// to its worker (see WorkerPlaceholders). It lives only for this call.
 	r.cycle = &decision.Ctx
 	defer func() { r.cycle = nil }()
 
-	// The decision's own contract first (AGENT_V2.md §Type-specific Requirements),
-	// then the plan's data dependencies: a decision that breaks either does not run
-	// at all, so nothing is executed against a plan that was never going to work and
-	// the planner gets the reason to re-plan from (src/decision_rules.go,
-	// src/plan_lineage.go).
-	if err := validateDecision(decision); err != nil {
-		return Result{Err: err, Message: err.Error()}, err
-	}
-	if err := validatePlanLineage(decision.Actions); err != nil {
-		return Result{Err: err, Message: err.Error()}, err
-	}
-	// The contract this run will be judged by arrives with its first answer, and is
-	// checked before it is pinned: a contract the runtime could never evaluate must not
-	// become the standard the task ends up being held to (src/verification.go).
-	if decision.Ctx.Cycle == 1 {
-		if err := validateCompletionContract(decision.Contract, decision.Actions); err != nil {
+	if planID == 0 {
+		// The decision's own contract first (AGENT_V2.md §Type-specific Requirements),
+		// then the plan's data dependencies: a decision that breaks either does not run
+		// at all, so nothing is executed against a plan that was never going to work and
+		// the planner gets the reason to re-plan from (src/decision_rules.go,
+		// src/plan_lineage.go).
+		if err := validateDecision(decision); err != nil {
 			return Result{Err: err, Message: err.Error()}, err
 		}
-	}
+		if err := validatePlanLineage(decision.Actions); err != nil {
+			return Result{Err: err, Message: err.Error()}, err
+		}
+		// The contract this run will be judged by arrives with its first answer, and is
+		// checked before it is pinned: a contract the runtime could never evaluate must not
+		// become the standard the task ends up being held to (src/verification.go).
+		if decision.Ctx.Cycle == 1 {
+			if err := validateCompletionContract(decision.Contract, decision.Actions); err != nil {
+				return Result{Err: err, Message: err.Error()}, err
+			}
+		}
 
-	planID, planned, err := r.recordPlan(decision)
-	if err != nil {
-		return Result{Err: err}, err
-	}
-	// Pinned after the plan row is written — the contract belongs to the task, and the
-	// row it came in with is what makes it traceable. Only the first answer pins one:
-	// a later cycle restating its contract changes nothing (src/completion_contract.go).
-	if decision.Ctx.Cycle == 1 {
-		pinCompletionContract(decision, planID)
+		var err error
+		planID, planned, err = r.recordPlan(decision)
+		if err != nil {
+			return Result{Err: err}, err
+		}
+		// Pinned after the plan row is written — the contract belongs to the task, and the
+		// row it came in with is what makes it traceable. Only the first answer pins one:
+		// a later cycle restating its contract changes nothing (src/completion_contract.go).
+		if decision.Ctx.Cycle == 1 {
+			pinCompletionContract(decision, planID)
+		}
 	}
 	if len(decision.Actions) == 0 {
 		// A `done` is the one decision that claims the task is over, so it is the one
