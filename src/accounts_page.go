@@ -37,7 +37,13 @@ const accountsPageHTML = `<!DOCTYPE html>
   button.primary { background: #1c4ed8; border-color: #1c4ed8; color: #fff; }
   button.danger { color: #b42318; border-color: #fda29b; }
   form { background: #fff; padding: 14px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.06); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  /* One field per row: a form is read top to bottom, and a field the eye can follow
+     end to end is what makes "what am I filling in" obvious at a glance. */
+  .grid { display: block; }
+  .grid > div { padding: 9px 0; border-bottom: 1px dashed #eaecf0; }
+  .grid > div:last-child { border-bottom: none; }
+  .formtitle { font-size: 13px; font-weight: 600; color: #344054; margin-bottom: 2px; }
+  .actions { border-top: 1px solid #eaecf0; padding-top: 12px; margin-top: 4px; }
   label { display: block; font-size: 12px; color: #475467; margin-bottom: 3px; }
   input[type=text], input[type=password], select { width: 100%; padding: 5px 7px; border: 1px solid #d0d5dd; border-radius: 6px; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
@@ -60,6 +66,7 @@ const accountsPageHTML = `<!DOCTYPE html>
 <div id="msg" class="msg"></div>
 
 <form id="editor" autocomplete="off">
+  <div class="formtitle" id="formtitle">New account</div>
   <div class="grid">
     <div>
       <label for="f-harness">harness</label>
@@ -82,7 +89,7 @@ const accountsPageHTML = `<!DOCTYPE html>
       <input type="password" id="f-key" placeholder="sk-…">
     </div>
     <div>
-      <label for="f-base">base url</label>
+      <label for="f-base">base url <span class="hint">(blank = the provider's own endpoint)</span></label>
       <input type="text" id="f-base" placeholder="https://…（可省）">
     </div>
     <div>
@@ -92,10 +99,10 @@ const accountsPageHTML = `<!DOCTYPE html>
     </div>
     <div>
       <label for="f-root">agent root workspace <span class="hint">(exclusive: one account per root)</span></label>
-      <input type="text" id="f-root" placeholder="每个账号独占一个根目录；留空 = 运行时默认根（也只能一个账号用）">
+      <input type="text" id="f-root" placeholder="/Users/me/agent-workspaces/this-account">
     </div>
   </div>
-  <div class="row">
+  <div class="row actions">
     <label class="check"><input type="checkbox" id="f-enabled" checked> enabled</label>
     <label class="check"><input type="checkbox" id="f-default"> default for its harness</label>
     <button class="primary" id="save" type="submit">Add account</button>
@@ -120,6 +127,22 @@ const $ = (id) => document.getElementById(id);
 let accounts = [];
 let editing = null;
 let lastVerify = null;
+
+// setMode says what the form is doing, in the title and beside the buttons: "which account am I
+// editing" should be answerable without reading the table underneath.
+function setMode(state, label) {
+  if (state === "edit") {
+    $("formtitle").textContent = "Edit account";
+    $("mode").textContent = label || "";
+    $("save").textContent = "Save changes";
+    $("cancel").style.display = "";
+    return;
+  }
+  $("formtitle").textContent = "New account";
+  $("mode").textContent = "";
+  $("save").textContent = "Add account";
+  $("cancel").style.display = "none";
+}
 
 function say(text, kind) {
   const box = $("msg");
@@ -263,9 +286,7 @@ $("editor").addEventListener("submit", async (event) => {
       say("added " + body.label);
     }
     editing = null;
-    $("save").textContent = "Add account";
-    $("cancel").style.display = "none";
-    $("mode").textContent = "new account";
+    setMode("new");
     fillForm(null);
     await load();
   } catch (err) {
@@ -283,9 +304,7 @@ $("f-vendor").addEventListener("change", () => {
 
 $("cancel").addEventListener("click", () => {
   editing = null;
-  $("save").textContent = "Add account";
-  $("cancel").style.display = "none";
-  $("mode").textContent = "new account";
+  setMode("new");
   fillForm(null);
 });
 
@@ -299,9 +318,7 @@ $("rows").addEventListener("click", async (event) => {
     if (button.dataset.act === "edit") {
       editing = id;
       fillForm(account);
-      $("save").textContent = "Save changes";
-      $("cancel").style.display = "";
-      $("mode").textContent = "editing " + account.label;
+      setMode("edit", account.label);
       return;
     }
     if (button.dataset.act === "toggle") {
