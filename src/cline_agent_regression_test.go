@@ -31,15 +31,15 @@ func TestEnsureLLMSessionAttachesDefaultBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureLLMSession: %v", err)
 	}
-	if session == "" || agent.clineAgent == nil {
+	if session == "" || agent.llm == nil || agent.llm.ProviderSessionID() == "" {
 		t.Fatal("no session was attached")
 	}
 	if agent.Backend != llmbackend.Cline {
 		t.Fatalf("backend=%q want cline", agent.Backend)
 	}
 	// The Cursor-oriented model must not leak into the Cline session.
-	if agent.Model != "deepseek-v4-pro" || agent.clineAgent.ModelID != "deepseek-v4-pro" {
-		t.Fatalf("model=%q cline=%q want the cline model", agent.Model, agent.clineAgent.ModelID)
+	if agent.Model != "deepseek-v4-pro" {
+		t.Fatalf("model=%q want the cline model", agent.Model)
 	}
 }
 
@@ -68,14 +68,13 @@ func TestEnsureClineSessionAlsoServesReasonerBeforeAgentAttach(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
 	agent := newClineTestAgent(t)
 	// Drop the yolo session, then ask the reasoner path for a plan session.
-	agent.clineAgents = nil
-	agent.clineAgent = nil
+	agent.llm = nil
 	agent.Backend = llmbackend.Local
 	session, err := agent.ensureLLMSession(context.Background(), "composer-2", agent.Workspace, ReasonModePlan)
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if session == "" || agent.clineAgent.Mode != "plan" {
-		t.Fatalf("session=%q mode=%q want a plan session", session, agent.clineAgent.Mode)
+	if session == "" || agent.llm == nil || agent.llm.Mode() != "plan" {
+		t.Fatalf("session=%q mode=%q want a plan session", session, agent.llm.Mode())
 	}
 }

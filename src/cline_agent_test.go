@@ -64,7 +64,7 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 	if agent.Backend != llmbackend.Cline || agent.LLMProvider != llmbackend.ProviderCline {
 		t.Fatalf("backend=%q provider=%q", agent.Backend, agent.LLMProvider)
 	}
-	if agent.clineAgent == nil {
+	if agent.llm == nil || agent.llm.ProviderSessionID() == "" {
 		t.Fatal("no cline session handle was bound")
 	}
 	// The session id itself is only known once a run started: until then the row keeps
@@ -73,12 +73,12 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 		t.Fatalf("LLMAgentID=%q, want empty before the first run", agent.LLMAgentID)
 	}
 	// Attaching twice is a no-op (same handle).
-	handle := agent.clineAgent.ID
+	handle := agent.llm.ProviderSessionID()
 	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("re-attach: %v", err)
 	}
-	if agent.clineAgent.ID != handle {
-		t.Fatalf("handle changed: %q → %q", handle, agent.clineAgent.ID)
+	if agent.llm.ProviderSessionID() != handle {
+		t.Fatalf("handle changed: %q → %q", handle, agent.llm.ProviderSessionID())
 	}
 }
 
@@ -134,24 +134,24 @@ func TestPromptLLMStreamSwitchesSessionMode(t *testing.T) {
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModeAgent, nil); err != nil {
 		t.Fatalf("agent-mode prompt: %v", err)
 	}
-	yoloHandle := agent.clineAgent.ID
-	if agent.clineAgent.Mode != clinesdk.DefaultMode {
-		t.Fatalf("mode=%q want %q", agent.clineAgent.Mode, clinesdk.DefaultMode)
+	yoloHandle := agent.llm.ProviderSessionID()
+	if agent.llm.Mode() != clinesdk.DefaultMode {
+		t.Fatalf("mode=%q want %q", agent.llm.Mode(), clinesdk.DefaultMode)
 	}
 
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModePlan, nil); err != nil {
 		t.Fatalf("plan-mode prompt: %v", err)
 	}
-	if agent.clineAgent.Mode != "plan" {
-		t.Fatalf("mode=%q want plan", agent.clineAgent.Mode)
+	if agent.llm.Mode() != "plan" {
+		t.Fatalf("mode=%q want plan", agent.llm.Mode())
 	}
-	if agent.clineAgent.ID == yoloHandle {
+	if agent.llm.ProviderSessionID() == yoloHandle {
 		t.Fatal("a mode switch must move to a fresh session")
 	}
 	// The id the row keeps is the *plan* session's: that is the task's own conversation,
 	// and the one a later process continues (src/clinesdk/bridge/resume.mjs).
-	if agent.LLMAgentID != agent.clineAgent.SessionID {
-		t.Fatalf("agent id not updated: %q vs %q", agent.LLMAgentID, agent.clineAgent.ID)
+	if agent.LLMAgentID != agent.llm.ProviderSessionID() {
+		t.Fatalf("agent id not updated: %q vs %q", agent.LLMAgentID, agent.llm.ProviderSessionID())
 	}
 }
 
@@ -292,7 +292,7 @@ func TestClineSessionIDIsKeptForTheNextProcess(t *testing.T) {
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModePlan, nil); err != nil {
 		t.Fatalf("plan prompt: %v", err)
 	}
-	sessionID := agent.clineAgent.SessionID
+	sessionID := agent.llm.ProviderSessionID()
 	if sessionID == "" {
 		t.Fatal("the run reported no session id")
 	}
@@ -332,8 +332,8 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := agent.attachClineSession(ctx, clineModeFor(ReasonModePlan), agent.Workspace); err != nil {
 		t.Fatalf("attach plan: %v", err)
 	}
-	if agent.clineAgent.ResumeSessionID != "cls-recorded-session" {
-		t.Fatalf("resume=%q, want the recorded session", agent.clineAgent.ResumeSessionID)
+	if agent.llm.ResumedFrom() != "cls-recorded-session" {
+		t.Fatalf("resume=%q, want the recorded session", agent.llm.ResumedFrom())
 	}
 
 	// A worker's session starts from nothing.
@@ -344,8 +344,8 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := worker.attachClineSession(ctx, clineModeFor(ReasonModeAgent), worker.Workspace); err != nil {
 		t.Fatalf("attach agent mode: %v", err)
 	}
-	if worker.clineAgent.ResumeSessionID != "" {
-		t.Fatalf("worker resume=%q, want none", worker.clineAgent.ResumeSessionID)
+	if worker.llm.ResumedFrom() != "" {
+		t.Fatalf("worker resume=%q, want none", worker.llm.ResumedFrom())
 	}
 
 	// A bridge handle from an older row is not a session to continue.
@@ -356,7 +356,7 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := legacy.attachClineSession(ctx, clineModeFor(ReasonModePlan), legacy.Workspace); err != nil {
 		t.Fatalf("attach legacy: %v", err)
 	}
-	if legacy.clineAgent.ResumeSessionID != "" {
-		t.Fatalf("legacy resume=%q, want none", legacy.clineAgent.ResumeSessionID)
+	if legacy.llm.ResumedFrom() != "" {
+		t.Fatalf("legacy resume=%q, want none", legacy.llm.ResumedFrom())
 	}
 }

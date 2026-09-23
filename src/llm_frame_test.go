@@ -115,7 +115,7 @@ func TestLLMFrameResetsOnNewClineSession(t *testing.T) {
 	if _, err := agent.ensureLLMSession(context.Background(), "composer-2", ws, ReasonModePlan); err != nil {
 		t.Fatalf("ensure session: %v", err)
 	}
-	if agent.clineAgent == nil {
+	if agent.llm == nil || agent.llm.ProviderSessionID() == "" {
 		t.Fatal("no cline session was attached")
 	}
 	if !agent.needsLLMFrame() {

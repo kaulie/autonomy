@@ -481,7 +481,7 @@ func (r *Runtime) releaseRegistered(agent *Agent) {
 	if agent == nil {
 		return
 	}
-	agent.disposeCursorSession(context.Background())
+	agent.disposeLLMSession(context.Background())
 	softDeleteAgent(agent.ID)
 	r.agents.Delete(agent.Name)
 }

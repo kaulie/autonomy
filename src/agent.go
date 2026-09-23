@@ -8,9 +8,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/kaulie/autonomy/src/clinesdk"
-	"github.com/kaulie/autonomy/src/cursorsdk"
 )
 
 // AgentLifecycle controls whether an agent survives past the current task.
@@ -218,21 +215,104 @@ type Agent struct {
 	// second kind of session to pick from.
 	Session *LLMSession
 
-	cursorAgent *cursorsdk.Agent
-	// clineAgent is the Cline session for the mode in use; clineAgents keeps one
-	// session handle per (mode, cwd) for the agent's lifetime, because closing a
-	// session while another one is starting can stall that run.
-	clineAgent  *clinesdk.Agent
-	clineAgents map[string]*clinesdk.Agent
-	// LLMAgentID is retained for persistent agents after Close (Resume later).
+	// llm is this agent's provider session — the whole of what differs between the
+	// backends (src/llmbackend). It is built lazily, on the backend the row names, and
+	// wired to this agent through the Host interface below, so the backend package never
+	// imports this one.
+	llm *llmbackend.Session
+	// LLMAgentID is the provider session this agent was recorded with: the id a later
+	// process re-attaches (Cursor: the agent id; Cline: the plan session `cls-…`), and
+	// what a persistent agent keeps after Close.
 	LLMAgentID string
 	// llmFrameSent records that the AGENT_V2 frame (the instructions that do not
 	// change per cycle) has already been delivered on the current LLM session, so
-	// later decision cycles send only the per-cycle delta. It is reset when a
-	// session is created (or replaced) — see AttachCursor / attachClineSession —
-	// and set only after a run actually succeeded, so a failed first cycle
-	// resends the frame instead of leaving the session without instructions.
+	// later decision cycles send only the per-cycle delta. The backend sets it when it
+	// attaches (false for a fresh session, true for a resumed one) and it is set only
+	// after a run actually succeeded, so a failed first cycle resends the frame instead
+	// of leaving the session without instructions.
 	llmFrameSent bool
+}
+
+// llmSession is this agent's provider session, built on first use and wired to it.
+func (a *Agent) llmSession() *llmbackend.Session {
+	if a == nil {
+		return nil
+	}
+	if a.llm == nil {
+		a.llm = llmbackend.New(a)
+	}
+	return a.llm
+}
+
+// Facts is this agent as the backend sees it (llmbackend.Host).
+func (a *Agent) Facts() llmbackend.Facts {
+	if a == nil {
+		return llmbackend.Facts{}
+	}
+	return llmbackend.Facts{
+		Name:      a.Name,
+		Workspace: a.Workspace,
+		Model:     a.Model,
+		Backend:   a.effectiveBackend(),
+		Provider:  a.LLMProvider,
+		SessionID: a.LLMAgentID,
+		FrameSent: a.llmFrameSent,
+		Ephemeral: a.IsEphemeral(),
+	}
+}
+
+// SetBackend records which backend and provider the session ended up on.
+func (a *Agent) SetBackend(backend llmbackend.Backend, provider llmbackend.Provider) {
+	if a == nil {
+		return
+	}
+	a.Backend = backend
+	a.LLMProvider = provider
+}
+
+// SetWorkspace records the workspace a turn asked for (empty is ignored).
+func (a *Agent) SetWorkspace(workspace string) {
+	if a == nil || workspace == "" {
+		return
+	}
+	a.Workspace = workspace
+}
+
+// SetModel records the model a turn asked for (empty is ignored).
+func (a *Agent) SetModel(model string) {
+	if a == nil || model == "" {
+		return
+	}
+	a.Model = model
+}
+
+// SetSessionID records the provider session id the agent row carries.
+func (a *Agent) SetSessionID(id string) {
+	if a == nil {
+		return
+	}
+	a.LLMAgentID = id
+}
+
+// SetFrameSent records whether the session holds the reasoning frame.
+func (a *Agent) SetFrameSent(sent bool) {
+	if a == nil {
+		return
+	}
+	a.llmFrameSent = sent
+}
+
+// Persist writes this agent's row back.
+func (a *Agent) Persist() { persistAgent(a) }
+
+// disposeLLMSession ends this agent's provider session, if it ever opened one: Close for a
+// resident agent (durable state is kept on the provider's side, which is what a later
+// resume re-attaches), Delete for a one-shot worker. nil-safe.
+func (a *Agent) disposeLLMSession(ctx context.Context) {
+	if a == nil || a.llm == nil {
+		return
+	}
+	a.llm.Dispose(ctx)
 }
 
 // needsLLMFrame reports whether this cycle's message must carry the AGENT_V2
@@ -278,8 +358,7 @@ func closeAgent(agent *Agent, factory *AgentFactory, ctx context.Context) {
 		ctx = context.Background()
 	}
 	agent.Stop()
-	agent.disposeCursorSession(ctx)
-	agent.disposeClineSession(ctx)
+	agent.disposeLLMSession(ctx)
 	if agent.IsEphemeral() {
 		softDeleteAgent(agent.ID)
 		if factory != nil {
