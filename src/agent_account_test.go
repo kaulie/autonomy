@@ -14,9 +14,10 @@ import (
 
 func TestAnAgentResolvesItsHarnessDefaultAccount(t *testing.T) {
 	store := resumeTestStore(t)
+	root := t.TempDir()
 	account, err := store.CreateAccount(Account{
 		Harness: "codex", Vendor: "openai", Label: "codex prod", Model: "gpt-5-codex",
-		APIKey: "sk-codex-secret", BaseURL: "https://api.example.test/", WorkspaceRoot: "/tmp/codex-agents",
+		APIKey: "sk-codex-secret", BaseURL: "https://api.example.test/", WorkspaceRoot: root,
 		Enabled: true, IsDefault: true,
 	})
 	if err != nil {
@@ -40,8 +41,9 @@ func TestAnAgentResolvesItsHarnessDefaultAccount(t *testing.T) {
 	if agent.Model != "gpt-5-codex" {
 		t.Fatalf("model=%q want the account's model", agent.Model)
 	}
-	if agent.Workspace != "/tmp/codex-agents" {
-		t.Fatalf("workspace=%q want the account's workspace root", agent.Workspace)
+	// The account owns its root; the agent works in its own directory under it.
+	if want := AgentWorkspacePathIn(account.WorkspaceRoot, agent.Name); agent.Workspace != want {
+		t.Fatalf("workspace=%q want %q (the account's root plus this agent's own name)", agent.Workspace, want)
 	}
 	// The credential the session is built from is the account's, verbatim: no environment
 	// variable takes part in this.
@@ -53,11 +55,15 @@ func TestAnAgentResolvesItsHarnessDefaultAccount(t *testing.T) {
 
 func TestARecordedAccountWinsOverTheDefault(t *testing.T) {
 	store := resumeTestStore(t)
-	first, err := store.CreateAccount(Account{Harness: "cursor", Label: "cursor default", Enabled: true, IsDefault: true})
+	first, err := store.CreateAccount(Account{
+		Harness: "cursor", Label: "cursor default", WorkspaceRoot: t.TempDir(), Enabled: true, IsDefault: true,
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	second, err := store.CreateAccount(Account{Harness: "cursor", Label: "cursor other", APIKey: "sk-other", Enabled: true})
+	second, err := store.CreateAccount(Account{
+		Harness: "cursor", Label: "cursor other", APIKey: "sk-other", WorkspaceRoot: t.TempDir(), Enabled: true,
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

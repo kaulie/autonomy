@@ -17,6 +17,15 @@
 | `cline` | `deepseek` / `minimax` / `anthropic` … | Cline 的 key 属于某个 LLM 厂商，离开 vendor 一把 key 没有意义 |
 | `codex` | `openai`（默认） | Codex 走 OpenAI；写了 `baseUrl` 就以它为准 |
 
+### 工作区根目录是**互斥**的
+
+- 每个账号**独占**一个 `agent_root_workspace`；写入时检查、并由唯一索引兜底 —— 两个账号
+  拿到同一个根会被拒绝（错误点名已经占用它的那个账号）；
+- 路径会先归一化（`…/a/` 与 `…/a` 是同一个主张）；
+- **空值也是一个主张**（意思是「运行时默认根」）：只能有一个账号用它，其余账号必须各自命名 ——
+  否则不同账号的 agent 会落在同一棵目录树下；
+- 一个账号的每只 agent 仍然在自己的子目录里：`{agent_root_workspace}/{agent-name}/`。
+
 **凭据可以空着**：那样就跑 provider 自己保存的 auth（`cline auth` / `codex auth`）——「这台
 机器已经登录过」是最常见的用法，账号只要说清 harness/vendor/model 即可。
 

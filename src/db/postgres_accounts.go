@@ -32,6 +32,30 @@ CREATE INDEX IF NOT EXISTS idx_provider_accounts_harness
   ON provider_accounts(harness, vendor, enabled);
 `
 
+// ensureAccountsWorkspaceIndex makes "one account per root" a fact of the schema, created
+// separately from the table so a database that predates the rule (and may hold two accounts on
+// one root) still starts: the write-time check below is what keeps new claims exclusive.
+func (s *PostgresStore) ensureAccountsWorkspaceIndex() error {
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_accounts_workspace
+  ON provider_accounts(workspace_root)`)
+	return err
+}
+
+// ensureWorkspaceRootFree rejects a root another account already claims (empty included: it means
+// "the runtime's default root", which belongs to one account).
+func (s *PostgresStore) ensureWorkspaceRootFree(root, accountID string) error {
+	var otherID, otherLabel string
+	err := s.db.QueryRow(`SELECT account_id, label FROM provider_accounts
+WHERE workspace_root = $1 AND account_id <> $2 LIMIT 1`, root, accountID).Scan(&otherID, &otherLabel)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			return nil
+		}
+		return err
+	}
+	return WorkspaceClaimedErr(root, otherID, otherLabel)
+}
+
 func scanPgAccount(sc interface{ Scan(...any) error }) (Account, error) {
 	var (
 		account          Account
@@ -107,6 +131,9 @@ func (s *PostgresStore) CreateAccount(account Account) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
+	if err := s.ensureWorkspaceRootFree(account.WorkspaceRoot, account.ID); err != nil {
+		return Account{}, err
+	}
 	ctx := context.Background()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -179,6 +206,9 @@ func (s *PostgresStore) UpdateAccount(id string, patch AccountPatch) (Account, e
 	}
 	next, err = NormalizeAccount(next)
 	if err != nil {
+		return Account{}, err
+	}
+	if err := s.ensureWorkspaceRootFree(next.WorkspaceRoot, next.ID); err != nil {
 		return Account{}, err
 	}
 	next.CreatedAt = current.CreatedAt

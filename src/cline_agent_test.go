@@ -77,9 +77,14 @@ func clineTestAccount(store Store) (Account, error) {
 	if existing, err := store.GetAccount(testClineAccountID); err == nil && existing != nil {
 		return *existing, nil
 	}
+	root, err := os.MkdirTemp("", "autonomy-test-cline-root-")
+	if err != nil {
+		return Account{}, err
+	}
 	return store.CreateAccount(Account{
 		ID: testClineAccountID, Harness: string(llmbackend.Cline), Vendor: "deepseek",
 		Label: "test cline", Model: "deepseek-v4-pro", Enabled: true, IsDefault: true,
+		WorkspaceRoot: root,
 	})
 }
 
@@ -89,9 +94,11 @@ const testClineAccountID = "acct-test-cline"
 // testClineAccount is that entry as an in-memory value, for a test whose agent never reaches a
 // store (an agent that already carries its account does not need the pool to agree).
 func testClineAccount() *Account {
+	root, _ := os.MkdirTemp("", "autonomy-test-cline-root-")
 	return &Account{
 		ID: testClineAccountID, Harness: string(llmbackend.Cline), Vendor: "deepseek",
 		Label: "test cline", Model: "deepseek-v4-pro", Enabled: true, IsDefault: true,
+		WorkspaceRoot: root,
 	}
 }
 

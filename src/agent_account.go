@@ -85,8 +85,15 @@ func (a *Agent) adoptAccount(account *Account) {
 	if account.Model != "" {
 		a.Model = account.Model
 	}
-	if account.WorkspaceRoot != "" && strings.TrimSpace(a.Workspace) == "" {
-		a.Workspace = account.WorkspaceRoot
+	// An account owns its workspace root exclusively, and each of its agents gets its own
+	// directory under it — the rule the runtime's default root already follows, so two
+	// accounts' agents can never end up in one directory.
+	if root := strings.TrimSpace(account.WorkspaceRoot); root != "" && strings.TrimSpace(a.Name) != "" {
+		if workspace, err := ensureAgentWorkspaceIn(root, a.Name); err == nil {
+			a.Workspace = workspace
+		} else {
+			a.Workspace = AgentWorkspacePathIn(root, a.Name)
+		}
 	}
 }
 

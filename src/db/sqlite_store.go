@@ -427,6 +427,9 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 	if _, err := s.db.Exec(accountsDDL); err != nil {
 		return fmt.Errorf("accounts schema: %w", err)
 	}
+	if err := s.ensureAccountsWorkspaceIndex(); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] accounts workspace index: %v\n", err)
+	}
 	if _, err := s.db.Exec(inboxDDL); err != nil {
 		return fmt.Errorf("migrate agent_messages: %w", err)
 	}

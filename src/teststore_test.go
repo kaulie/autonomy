@@ -93,8 +93,15 @@ func seedPool(store Store) error {
 		if byHarness[harness] {
 			continue
 		}
+		// Each account owns its own root (the pool is exclusive: src/accounts.go), so the fixture
+		// gives every harness one of its own under a temp directory.
+		root, err := os.MkdirTemp("", "autonomy-test-root-"+harness+"-")
+		if err != nil {
+			return fmt.Errorf("seed %s root: %w", harness, err)
+		}
 		if _, err := store.CreateAccount(Account{
 			Harness: harness, Label: "test " + harness, Enabled: true, IsDefault: true,
+			WorkspaceRoot: root,
 		}); err != nil {
 			return fmt.Errorf("seed %s account: %w", harness, err)
 		}
