@@ -13,5 +13,6 @@ func init() {
 		Adapter:      CodexStreamAdapter{},
 		DefaultModel: ResolveCodexModel,
 		CloseClient:  func() error { return CloseCodexClient() },
+		Probe:        probeCodex,
 	})
 }

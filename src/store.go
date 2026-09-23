@@ -383,6 +383,56 @@ const (
 // Store is every port at once: the contract a database engine implements and the
 // handle the runtime's own writers (persistTask, saveExecutionPlan, …) are wired
 // to. A caller that needs less should take the port instead of Store.
+// AccountFilter selects accounts out of the pool. Every field is optional; a zero filter
+// reads the whole pool.
+type AccountFilter struct {
+	Harness string
+	Vendor  string
+	// Enabled only filters when set: a disabled account is still readable by id (a UI shows
+	// it, a task that named it resolves and reports that it is off).
+	Enabled *bool
+}
+
+// AccountPatch is one edit of an account. A nil field means "leave it": that is what makes
+// PATCH a patch, and what lets a caller clear a field it wants gone by passing a pointer to
+// the empty string.
+type AccountPatch struct {
+	Harness       *string
+	Vendor        *string
+	Label         *string
+	APIKey        *string
+	BaseURL       *string
+	Model         *string
+	WorkspaceRoot *string
+	Enabled       *bool
+	IsDefault     *bool
+}
+
+// AccountStore is the harness credential pool (src/accounts.go): the accounts this runtime
+// can run agents on, and the only place credentials come from.
+//
+// It is a port of its own rather than more AgentStore methods because accounts are not
+// per-agent data: they are the pool a session is resolved against, shared by every agent
+// running on that harness, and they hold a secret the rest of the system never renders.
+type AccountStore interface {
+	// ListAccounts reads the pool: filtered, and ordered (harness, vendor, default first,
+	// then creation) — the order a UI shows and a resolution walks.
+	ListAccounts(filter AccountFilter) ([]Account, error)
+	// GetAccount reads one account (nil, nil when there is none).
+	GetAccount(id string) (*Account, error)
+	// CreateAccount writes a new account. Minting a missing id, filling a missing vendor and
+	// making a new account the harness's default when nothing else is are this port's
+	// business, so no caller has to remember the rules.
+	CreateAccount(account Account) (Account, error)
+	// UpdateAccount patches one account; an unknown id is an error. Making an account the
+	// default clears that flag on the others of its harness.
+	UpdateAccount(id string, patch AccountPatch) (Account, error)
+	// DeleteAccount removes an account for good. Agents that recorded it fall back to the
+	// pool for their harness (they are not rewritten).
+	DeleteAccount(id string) error
+}
+
+// Store is everything a runtime needs from a database engine.
 type Store interface {
 	TaskStore
 	AgentStore
@@ -391,6 +441,7 @@ type Store interface {
 	ExecutionStore
 	VerificationStore
 	TurnQueryStore
+	AccountStore
 	// Close releases the engine's connection.
 	Close() error
 }
@@ -535,6 +586,8 @@ func (r *Autonomy) executionStore() ExecutionStore       { return r.Store }
 
 // verificationStore is the same narrowing for the verdict log the read API shows on a
 // task detail: the pinned Completion Contract and the verdicts judged against it.
+func (r *Autonomy) accountStore() AccountStore { return r.Store }
+
 func (r *Autonomy) verificationStore() VerificationStore { return r.Store }
 
 // saveExecutionPlan writes one plan and its steps before any of them runs, and

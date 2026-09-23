@@ -50,6 +50,44 @@ type Harness struct {
 	// CloseClient shuts down this harness's process-wide bridge client (optional: a
 	// harness without one leaves it nil).
 	CloseClient func() error
+	// Probe checks one set of credentials without an agent behind them: the bridge handshake
+	// every time, plus — when live is asked for — one short turn the account itself answers.
+	// It is what lets a UI say "this pool entry is usable" before a task is handed to it
+	// (src/accounts_service.go). nil = this harness has no cheap probe.
+	Probe func(ctx context.Context, creds Creds, live bool) (ProbeResult, error)
+}
+
+// Creds is what a probe (and a session) may need to reach a provider: the credential a pool
+// account carries, not an environment variable.
+type Creds struct {
+	Harness string
+	Vendor  string
+	APIKey  string
+	BaseURL string
+	Model   string
+}
+
+// ProbeResult says what a probe found: what it did (Load: bridge handshaken; Live: a turn was
+// actually run), and — for a live probe — the model's answer.
+type ProbeResult struct {
+	Load   bool
+	Live   bool
+	Model  string
+	Text   string
+	Detail string
+}
+
+// ProbeHarness probes a set of credentials on one backend, reporting a missing harness by
+// name rather than failing silently.
+func ProbeHarness(ctx context.Context, backend Backend, creds Creds, live bool) (ProbeResult, error) {
+	harness, ok := harnessFor(backend)
+	if !ok {
+		return ProbeResult{}, harnessMissingErr(backend)
+	}
+	if harness.Probe == nil {
+		return ProbeResult{}, fmt.Errorf("the %s harness cannot be probed: it has no cheap check without an agent", backend)
+	}
+	return harness.Probe(ctx, creds, live)
 }
 
 var (

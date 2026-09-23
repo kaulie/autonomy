@@ -13,5 +13,6 @@ func init() {
 		Adapter:      ClineStreamAdapter{},
 		DefaultModel: ResolveClineModel,
 		CloseClient:  func() error { return CloseClineClient() },
+		Probe:        probeCline,
 	})
 }

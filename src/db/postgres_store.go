@@ -216,7 +216,7 @@ func (s *PostgresStore) Close() error {
 // this engine has no older schema of its own to carry (the sqlite engine keeps its
 // schema — and its data).
 func (s *PostgresStore) migrate() error {
-	for _, ddl := range []string{postgresSchema, pgExecutionDDL, pgVerificationDDL, pgInboxDDL} {
+	for _, ddl := range []string{postgresSchema, pgExecutionDDL, pgVerificationDDL, pgInboxDDL, pgAccountsDDL} {
 		if _, err := s.db.Exec(ddl); err != nil {
 			return fmt.Errorf("migrate postgres schema: %w", err)
 		}

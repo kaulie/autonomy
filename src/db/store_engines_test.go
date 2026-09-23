@@ -330,6 +330,73 @@ func contractSnapshot(t *testing.T, store Store) []string {
 	must("ClaimNextMessage (empty)", err)
 	add("empty inbox: %t", found)
 
+	// The harness credential pool (src/accounts.go): the same accounts, defaults, ordering,
+	// filters, patch and delete through either engine. Keys are part of what a caller reads
+	// (the API masks them, the store does not); timestamps are not — they are the engine's
+	// own bookkeeping and the snapshot is about the contract.
+	for _, account := range []Account{
+		{ID: "acct-cursor", Harness: "cursor", Label: "cursor main", APIKey: "sk-cursor-abcdefgh", CreatedAt: at},
+		{ID: "acct-ds-1", Harness: "cline", Vendor: "deepseek", Label: "deepseek one", APIKey: "sk-ds-abcdefgh", BaseURL: "https://api.deepseek.test/", Model: "deepseek-v4-pro", WorkspaceRoot: "/tmp/agents", CreatedAt: at},
+		{ID: "acct-mm-1", Harness: "cline", Vendor: "minimax", Label: "minimax one", APIKey: "sk-mm-abcdefgh", Enabled: false, CreatedAt: at},
+		{ID: "acct-codex", Harness: "codex", Label: "codex cli auth", CreatedAt: at},
+	} {
+		created, err := store.CreateAccount(account)
+		must("CreateAccount", err)
+		add("account %s|%s|%s|%s|default=%t|enabled=%t|key=%q|base=%q|model=%q|root=%q|masked=%s",
+			created.ID, created.Harness, created.Vendor, created.Label, created.IsDefault, created.Enabled,
+			created.APIKey, created.BaseURL, created.Model, created.WorkspaceRoot, MaskAPIKey(created.APIKey))
+	}
+	all, err := store.ListAccounts(AccountFilter{})
+	must("ListAccounts", err)
+	for _, account := range all {
+		add("pool order %s|%s|%s|default=%t", account.Harness, account.Vendor, account.ID, account.IsDefault)
+	}
+	enabled := true
+	onlyEnabled, err := store.ListAccounts(AccountFilter{Enabled: &enabled})
+	must("ListAccounts(enabled)", err)
+	for _, account := range onlyEnabled {
+		add("enabled %s", account.ID)
+	}
+	vendorFiltered, err := store.ListAccounts(AccountFilter{Harness: "cline", Vendor: "minimax"})
+	must("ListAccounts(vendor)", err)
+	add("vendor filtered %d|%s", len(vendorFiltered), vendorFiltered[0].ID)
+
+	// Making another account the default moves the flag rather than duplicating it.
+	isDefault := true
+	if _, err := store.UpdateAccount("acct-mm-1", AccountPatch{IsDefault: &isDefault, Label: strPtr("minimax renamed")}); err != nil {
+		must("UpdateAccount", err)
+	}
+	defaults, err := store.ListAccounts(AccountFilter{Harness: "cline"})
+	must("ListAccounts(cline)", err)
+	for _, account := range defaults {
+		add("cline account %s|%s|default=%t|enabled=%t", account.ID, account.Label, account.IsDefault, account.Enabled)
+	}
+	// A patch can clear a value (the key goes, the account keeps working on the provider's
+	// own saved auth).
+	if _, err := store.UpdateAccount("acct-ds-1", AccountPatch{APIKey: strPtr("")}); err != nil {
+		must("UpdateAccount(clear key)", err)
+	}
+	cleared, err := store.GetAccount("acct-ds-1")
+	must("GetAccount", err)
+	add("cleared key %q|masked=%q", cleared.APIKey, MaskAPIKey(cleared.APIKey))
+	if _, err := store.GetAccount("acct-nope"); err != nil {
+		must("GetAccount(missing)", err)
+	}
+	add("missing account is nil: %t", true)
+	if _, err := store.CreateAccount(Account{Harness: "gemini", Label: "nope"}); err == nil {
+		t.Fatalf("CreateAccount accepted an unknown harness")
+	}
+	if _, err := store.UpdateAccount("acct-nope", AccountPatch{Label: strPtr("x")}); err == nil {
+		t.Fatalf("UpdateAccount accepted an unknown account")
+	}
+	add("bad inputs rejected: %t", true)
+	if err := store.DeleteAccount("acct-mm-1"); err != nil {
+		must("DeleteAccount", err)
+	}
+	remaining, err := store.ListAccounts(AccountFilter{Harness: "cline"})
+	must("ListAccounts after delete", err)
+	add("after delete %d|%s", len(remaining), remaining[0].ID)
+
 	return lines
 }
 
@@ -389,3 +456,6 @@ func TestSQLiteEngineDefaultDSNFallsBackToHomeDataDir(t *testing.T) {
 		t.Fatalf("default DSN=%q, want %q", dsn, want)
 	}
 }
+
+// strPtr is the address of a string literal, for the patch fields a test sets.
+func strPtr(value string) *string { return &value }
