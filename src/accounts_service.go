@@ -150,6 +150,65 @@ func (r *Autonomy) RemoveAccount(accountID string) error {
 	return store.DeleteAccount(accountID)
 }
 
+// AccountVendors lists the vendors a harness can be configured with, so a UI offers them as a
+// list instead of asking a human to type one. An accountId optionally supplies the credentials
+// the catalogue is read with (a provider may need a key to answer).
+func (r *Autonomy) AccountVendors(ctx context.Context, harness, accountID string) ([]string, error) {
+	backend := llmbackend.Backend(normalizeHarness(harness))
+	if backend == "" {
+		return nil, fmt.Errorf("unknown account harness %q (supported: %s)", strings.TrimSpace(harness), strings.Join(AccountHarnesses(), ", "))
+	}
+	creds, err := r.catalogCreds(harness, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return llmbackend.VendorsFor(ctx, backend, creds)
+}
+
+// AccountModels is AccountVendors' other half: the models one vendor exposes for this harness.
+// An empty list is an answer — that harness resolves the model itself.
+func (r *Autonomy) AccountModels(ctx context.Context, harness, vendor, accountID string) ([]string, error) {
+	backend := llmbackend.Backend(normalizeHarness(harness))
+	if backend == "" {
+		return nil, fmt.Errorf("unknown account harness %q (supported: %s)", strings.TrimSpace(harness), strings.Join(AccountHarnesses(), ", "))
+	}
+	creds, err := r.catalogCreds(harness, accountID)
+	if err != nil {
+		return nil, err
+	}
+	creds.Vendor = strings.TrimSpace(vendor)
+	if creds.Vendor == "" {
+		creds.Vendor = DefaultVendorFor(harness)
+	}
+	return llmbackend.ModelsFor(ctx, backend, creds)
+}
+
+// catalogCreds is the credential a catalogue read uses: the named account's, or nothing (the
+// provider then falls back to whatever its own CLI saved).
+func (r *Autonomy) catalogCreds(harness, accountID string) (llmbackend.Creds, error) {
+	creds := llmbackend.Creds{Harness: strings.TrimSpace(harness), Vendor: DefaultVendorFor(harness)}
+	id := strings.TrimSpace(accountID)
+	if id == "" {
+		return creds, nil
+	}
+	store, err := r.accountStoreOrErr()
+	if err != nil {
+		return creds, err
+	}
+	account, err := store.GetAccount(id)
+	if err != nil {
+		return creds, err
+	}
+	if account == nil {
+		return creds, nil
+	}
+	creds.Vendor = account.Vendor
+	creds.APIKey = account.APIKey
+	creds.BaseURL = account.BaseURL
+	creds.Model = account.Model
+	return creds, nil
+}
+
 // DefaultAccount is the account a harness would resolve to right now: its default, else the
 // first enabled one. nil when the pool has nothing for that harness — which is exactly the
 // state /health should be able to show, together with the model a run would use.

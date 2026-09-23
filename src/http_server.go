@@ -84,6 +84,8 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// the only place credentials come from. Reads render a masked key; the write side is
 		// the UI's (GET /accounts, src/accounts_page.go).
 		{"GET /api/accounts", s.handleAccountList},
+		{"GET /api/accounts/vendors", s.handleAccountVendors},
+		{"GET /api/accounts/models", s.handleAccountModels},
 		{"POST /api/accounts", s.handleAccountCreate},
 		{"PATCH /api/accounts/{accountId}", s.handleAccountUpdate},
 		{"DELETE /api/accounts/{accountId}", s.handleAccountDelete},
@@ -934,4 +936,73 @@ func (s *HTTPServer) handleAccountVerify(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, verification)
+}
+
+// accountCatalogueResponse is what the two catalogue endpoints answer.
+type accountCatalogueResponse struct {
+	Harness string   `json:"harness"`
+	Vendor  string   `json:"vendor,omitempty"`
+	Vendors []string `json:"vendors,omitempty"`
+	Models  []string `json:"models,omitempty"`
+	// Default is the value this runtime would use when nothing is named, so a UI can preselect it.
+	Default string `json:"default,omitempty"`
+}
+
+// handleAccountVendors lists the vendors one harness can be configured with. A page offers them
+// as a list instead of asking a human to type an identifier — the same answer web-cursor serves
+// from its provider registry.
+//
+// @Summary  账号池：某个 harness 可选的 vendor（模型供应商）列表
+// @Tags     accounts
+// @Produce  json
+// @Param    harness    query     string  true   "cursor / cline / codex"
+// @Param    accountId  query     string  false  "用这个账号的凭据去读目录（有些不给 key 不回答）"
+// @Success  200        {object}  accountCatalogueResponse  "vendors（+ default：不指定时运行时用哪个）"
+// @Failure  400        {object}  errResponse               "harness 不认识"
+// @Router   /api/accounts/vendors [get]
+func (s *HTTPServer) handleAccountVendors(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	harness := req.URL.Query().Get("harness")
+	vendors, err := s.Autonomy.AccountVendors(req.Context(), harness, req.URL.Query().Get("accountId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, accountCatalogueResponse{
+		Harness: harness, Vendors: vendors, Default: DefaultVendorFor(harness),
+	})
+}
+
+// handleAccountModels lists one vendor's models for a harness: the list a UI shows beside a
+// vendor it just offered. An empty list is an answer — that harness resolves the model itself —
+// so the field stays typeable.
+//
+// @Summary  账号池：某个 harness + vendor 可选的模型列表
+// @Tags     accounts
+// @Produce  json
+// @Param    harness    query     string  true   "cursor / cline / codex"
+// @Param    vendor     query     string  false  "模型供应商（省略 = 该 harness 的默认 vendor）"
+// @Param    accountId  query     string  false  "用这个账号的凭据去读目录"
+// @Success  200        {object}  accountCatalogueResponse  "models（可能为空：由 harness 自己解析）"
+// @Failure  400        {object}  errResponse               "harness 不认识"
+// @Router   /api/accounts/models [get]
+func (s *HTTPServer) handleAccountModels(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	harness := req.URL.Query().Get("harness")
+	vendor := req.URL.Query().Get("vendor")
+	models, err := s.Autonomy.AccountModels(req.Context(), harness, vendor, req.URL.Query().Get("accountId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if vendor == "" {
+		vendor = DefaultVendorFor(harness)
+	}
+	writeJSON(w, http.StatusOK, accountCatalogueResponse{Harness: harness, Vendor: vendor, Models: models})
 }

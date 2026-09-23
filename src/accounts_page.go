@@ -70,8 +70,8 @@ const accountsPageHTML = `<!DOCTYPE html>
       </select>
     </div>
     <div>
-      <label for="f-vendor">vendor</label>
-      <input type="text" id="f-vendor" placeholder="cursor / deepseek / openai …">
+      <label for="f-vendor">vendor <span class="hint" id="vendorhint">(the model supplier)</span></label>
+      <select id="f-vendor"></select>
     </div>
     <div>
       <label for="f-label">label</label>
@@ -86,8 +86,9 @@ const accountsPageHTML = `<!DOCTYPE html>
       <input type="text" id="f-base" placeholder="https://…（可省）">
     </div>
     <div>
-      <label for="f-model">model</label>
-      <input type="text" id="f-model" placeholder="可省：用该 harness 的默认">
+      <label for="f-model">model <span class="hint">(optional: what the harness defaults to)</span></label>
+      <input type="text" id="f-model" list="model-options" placeholder="">
+      <datalist id="model-options"></datalist>
     </div>
     <div>
       <label for="f-root">agent root workspace <span class="hint">(exclusive: one account per root)</span></label>
@@ -190,9 +191,46 @@ async function load() {
   }
 }
 
+// The vendor list comes from the runtime (GET /api/accounts/vendors): it asks the harness itself,
+// so a human picks from what that harness can actually talk to instead of typing an identifier.
+// The model list is the same idea one level down (GET /api/accounts/models) — and it may be
+// empty, because some harnesses resolve the model by themselves, which is why the field stays
+// typeable.
+async function loadVendors(harness, accountId, keep) {
+  const select = $("f-vendor");
+  try {
+    const query = "?harness=" + encodeURIComponent(harness) + (accountId ? "&accountId=" + encodeURIComponent(accountId) : "");
+    const data = await api("GET", "/api/accounts/vendors" + query);
+    let vendors = (data && data.vendors) || [];
+    const current = keep || select.value;
+    if (current && !vendors.includes(current)) vendors = [current].concat(vendors);
+    select.innerHTML = vendors.map((v) => '<option value="' + esc(v) + '">' + esc(v) + "</option>").join("");
+    select.value = current || (data && data.default) || (vendors[0] || "");
+    $("vendorhint").textContent = "(" + vendors.length + " for " + harness + ")";
+  } catch (err) {
+    $("vendorhint").textContent = "(could not read the vendor list: " + err.message + ")";
+  }
+  await loadModels();
+}
+
+async function loadModels() {
+  const harness = $("f-harness").value;
+  const vendor = $("f-vendor").value;
+  const list = $("model-options");
+  list.innerHTML = "";
+  if (!vendor) return;
+  try {
+    const data = await api("GET", "/api/accounts/models?harness=" + encodeURIComponent(harness) + "&vendor=" + encodeURIComponent(vendor));
+    const models = (data && data.models) || [];
+    list.innerHTML = models.map((m) => '<option value="' + esc(m) + '"></option>').join("");
+  } catch (err) {
+    /* suggestions are a convenience: a broken catalogue must not break the form */
+  }
+}
+
 function fillForm(a) {
   $("f-harness").value = a ? a.harness : "cursor";
-  $("f-vendor").value = a ? (a.vendor || "") : "";
+  loadVendors($("f-harness").value, a ? a.accountId : "", a ? (a.vendor || "") : "");
   $("f-label").value = a ? a.label : "";
   $("f-key").value = "";
   $("f-base").value = a ? (a.baseUrl || "") : "";
@@ -233,6 +271,14 @@ $("editor").addEventListener("submit", async (event) => {
   } catch (err) {
     say("save failed: " + err.message, "err");
   }
+});
+
+$("f-harness").addEventListener("change", () => {
+  loadVendors($("f-harness").value, editing || "", "");
+});
+
+$("f-vendor").addEventListener("change", () => {
+  loadModels();
 });
 
 $("cancel").addEventListener("click", () => {
@@ -284,6 +330,7 @@ $("rows").addEventListener("click", async (event) => {
   }
 });
 
+loadVendors("cursor", "", "");
 load();
 </script>
 </body>
