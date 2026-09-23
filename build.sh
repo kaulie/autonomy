@@ -46,16 +46,35 @@ cp "${ROOT}/scripts/start.sh" "${ROOT}/scripts/stop.sh" "${ROOT}/scripts/restart
   "${OUT}/scripts/"
 cp -R "${ROOT}/src/agent_policy/." "${OUT}/src/agent_policy/"
 
-# cursor bridge: the runtime spawns it (src/cursorsdk), so the release package
-# carries it — scripts/start.sh then points CURSOR_SDK_BRIDGE_BIN at
-# ${RUNTIME_DIR}/bin/cursor-sdk-bridge. Without it a deployed runtime fails every
-# task at the decision that pings the bridge.
+# cursor bridge: the runtime spawns it (src/cursorsdk), so the release package carries it
+# — scripts/start.sh then points CURSOR_SDK_BRIDGE_BIN at ${RUNTIME_DIR}/bin/cursor-sdk-bridge.
+# The binary is a pinned download (gitignored), so a build without it fetches it: from the
+# build-machine cache first — keyed by the pinned version, so a bump cannot pick up a stale
+# binary — then by running scripts/fetch-bridge.sh. Failing both is a warning, not an
+# error: which bridge a deployment needs is decided by its *selected* backend, and
+# scripts/start.sh's pre-start self-check refuses a deploy whose backend has no bridge —
+# loudly, at deploy time, instead of every task failing at run time.
 BRIDGE="${ROOT}/third_party/bin/cursor-sdk-bridge"
+if [ ! -x "${BRIDGE}" ]; then
+  CURSOR_BRIDGE_VERSION="$(bash "${ROOT}/scripts/fetch-bridge.sh" --print-version 2>/dev/null || echo unknown)"
+  BRIDGE_CACHE="${AUTONOMY_CACHE_DIR:-${HOME}/.cache/autonomy}/cursor-sdk-bridge/${CURSOR_BRIDGE_VERSION}"
+  if [ ! -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ] && [ "${AUTONOMY_SKIP_FETCH_CURSOR_BRIDGE:-0}" != "1" ]; then
+    echo "[build] checkout 里没有 cursor bridge，取 v${CURSOR_BRIDGE_VERSION} 到构建机缓存"
+    bash "${ROOT}/scripts/fetch-bridge.sh" --dest "${BRIDGE_CACHE}" || true
+  fi
+  if [ -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ]; then
+    mkdir -p "${ROOT}/third_party/bin"
+    # Also leave it where a dev run and the tests look for it (third_party/bin), which is
+    # what src/cursorsdk's default bridge path resolves to.
+    cp "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" "${BRIDGE}"
+  fi
+fi
 if [ -x "${BRIDGE}" ]; then
   cp "${BRIDGE}" "${OUT}/bin/cursor-sdk-bridge"
+  echo "[build] cursor bridge 随包发出：$(du -h "${OUT}/bin/cursor-sdk-bridge" | cut -f1)"
 else
-  echo "[build][警告] 没有 ${BRIDGE}（先跑 scripts/fetch-bridge.sh）；发版包不自带 cursor bridge，" >&2
-  echo "[build][警告] 部署上的 llm 任务会失败在 cursor bridge ping 处。" >&2
+  echo "[build][警告] 没有 ${BRIDGE}（scripts/fetch-bridge.sh 也没取到）；发版包不自带 cursor bridge，" >&2
+  echo "[build][警告] 用 cursor 后端部署时 scripts/start.sh 的启动自检会拒绝启动（用 cline 后端不受影响）。" >&2
 fi
 
 # cline bridge: same idea, but it is a Node script with a dependency tree
