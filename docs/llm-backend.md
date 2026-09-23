@@ -101,6 +101,8 @@ src/llmbackend/                    核心：词表 + Session 门面 + 事件词�
 
 **依赖只朝一个方向**：runtime → 模块 → harness；harness **不** import runtime（它用 `Host` 接口拿事实、写回它拥有的东西），核心也**不** import harness（它通过注册表拿实现）。这也是为什么**中性事件词表必须留在核心**：适配器产出它、并注册进核心的注册表 —— 只搬「客户端 + 会话」会让依赖成环。
 
+**上层只依赖接口**：runtime（以及 store / prompt / 一切消费者）编译期只认 **`llmbackend.Session` 这个接口** —— `Agent.llm` 就是它，类型里没有 `cursor`/`cline` 的任何东西。「按所选 provider 调不同实现」发生在**运行时**：`llmbackend.New(host)` 用 `host.Facts().Backend` 去注册表取那个 harness，用它的 `New` 造出实现并包在接口后面。加一个 harness，上层一行不用改、也不需要重新编译出分支。
+
 **runtime 侧**只剩它自己知道的事：agent **是**哪个后端（行）、身份/生命周期/工作区、`llm_agent_id`、frame 记账；一轮 turn 走 `Agent.llmSession()` 一扇门，关桥走 `llmbackend.CloseClients()`（不点名任何 harness）。
 
 **接入一个新 harness（例如 deepseek / codex）**——四步，核心与 runtime 一行不用改：
