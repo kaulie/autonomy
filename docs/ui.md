@@ -18,12 +18,28 @@ runtime/agent/task/账号这些页面都在解一个具体问题，谁也不需�
 - 每个模块**仍然可以单独打开**（`/dashboard`、`/accounts`，老链接不会失效，也方便单独截图/调试）；
 - 壳里的「open in a tab」把当前模块另开一个标签页。
 
+## 顶栏：刷新周期
+
+三个按钮 **5s / 10s / 15s** + 一个 **auto-refresh 开关**（关了就不轮询，只看手动刷新）。
+它只对**会轮询的视图**显示（agent 状态、事件流、消息流），值通过 `every=<秒>` 传给模块
+（0 = 不自动刷新）—— 所以周期只在这一处设置，模块自己不再提供输入框。
+
+## 路由：模块名，或任意路径
+
+壳的 hash 支持两种形式：
+
+- `#dashboard` / `#accounts` —— 模块名（`MODULES` 表里的名字）；
+- `#/agents/12/events?task=t1` —— **任意路径**（连查询串一起），原样嵌进 iframe，
+  所以 agent 状态里的一行可以「点进去看这只 agent 的事件流」，而壳不必为每个视图写一条规则。
+
 ## 现有模块
 
 | 模块 | 路径 | 文档 |
 |---|---|---|
 | Agent status | `GET /dashboard`（数据 `GET /api/agents`） | [dashboard.md](dashboard.md) |
 | Harness accounts | `GET /accounts`（数据 `/api/accounts`） | [accounts.md](accounts.md) |
+| Agent events | `GET /agents/{agentID}/events?task=…`（数据 `GET /api/tasks/{taskID}/agents/{agentID}/events`） | 本文 |
+| Agent messages | `GET /agents/{agentID}/messages`（数据 `GET /api/agents/{agentID}/messages`） | 本文 |
 
 ## 加一个模块
 

@@ -9,6 +9,23 @@ feed，渲染成一张会自己刷新的表。
 agent 行（[store.md](store.md) 的 `AgentStore`）合并进程内活的 agent 句柄（`role` / `purpose` 是运行时
 状态，行里不持久化）。
 
+## 一条 agent 一行，行上有两个入口
+
+- **一行一只 agent**：单元格不换行，表宽超出窗口就横向滚动 —— 「这只是谁、在做什么」一眼一行；
+- **events**：点进去看这只 agent 的**实时事件流**（一行一条事件，按 `next_poll_after_seq` 增量 tail，
+  不会重复渲染；`GET /agents/{agentID}/events?task=…`）；
+- **messages**：点进去看**发给它的消息**（inbox：用户指令 / 别的 agent 委托 / runtime 停）与
+  **它自己的回复**（每轮 turn 的 input/output，一行一条；`GET /agents/{agentID}/messages`，
+  数据来自 `GET /api/agents/{agentID}/messages`）。
+
+两个入口在壳里打开时导航壳（顶部与左栏都在），单独打开则跳到各自路径。
+
+## 刷新周期：只有 5 / 10 / 15，且可关
+
+自动刷新的控制在**壳的顶栏**（[ui.md](ui.md)）：三个按钮 5s / 10s / 15s + 一个 auto-refresh 开关；
+本页只显示当前生效的值（`every`，0 = 关闭），另留一个「Refresh now」手动刷新。**不再自由填秒数** ——
+轮询频率是运维参数，不该在页面里随手改。
+
 ## 两个端点
 
 | 端点 | 是什么 |

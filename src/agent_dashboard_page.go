@@ -34,7 +34,11 @@ const agentDashboardHTML = `<!DOCTYPE html>
   .work-yes { color: #1a7f37; font-weight: 600; }
   .work-no { color: #98a2b3; }
   table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.06); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eaecf0; vertical-align: top; }
+  /* One agent per row: a row never wraps, so "who is this agent" reads in one line; a table wider
+     than the window scrolls sideways rather than folding cells onto extra lines. */
+  .tablewrap { overflow-x: auto; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eaecf0; vertical-align: middle; white-space: nowrap; }
+  td.ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   th { background: #fafbfc; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #667085; }
   tr:last-child td { border-bottom: 0; }
   .muted { color: #98a2b3; }
@@ -42,6 +46,8 @@ const agentDashboardHTML = `<!DOCTYPE html>
   #status { color: #667085; }
   #status.err { color: #b42318; font-weight: 600; }
   .empty { padding: 18px; color: #667085; }
+  button.link { font: inherit; padding: 1px 7px; margin-right: 4px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; color: #1c4ed8; }
+  button.link:disabled { color: #98a2b3; border-color: #eaecf0; cursor: default; }
 </style>
 </head>
 <body>
@@ -49,26 +55,31 @@ const agentDashboardHTML = `<!DOCTYPE html>
 <div class="sub">Live status of the agents this runtime knows about, polled from <code>/api/agents</code>.</div>
 <div class="bar">
   <span id="status">loading…</span>
-  <label>auto-refresh <input id="interval" type="number" min="1" max="120" value="3"> s</label>
+  <span id="every">auto-refresh: …</span>
+  <span class="muted" id="everyhint">(interval and on/off are in the top bar)</span>
   <label><input id="includeDeleted" type="checkbox"> include deleted</label>
   <button id="refresh">Refresh now</button>
 </div>
+<div class="tablewrap">
 <table>
   <thead>
     <tr>
       <th>ID</th><th>Name</th><th>Role</th><th>Lifecycle</th><th>State</th>
-      <th>Health</th><th>Current task</th><th>Working</th><th>Provider / model</th><th>Account</th><th>Run id</th>
+      <th>Health</th><th>Current task</th><th>Working</th><th>Provider / model</th><th>Account</th><th>Run id</th><th>Actions</th>
     </tr>
   </thead>
-  <tbody id="rows"><tr><td class="empty" colspan="10">loading…</td></tr></tbody>
+  <tbody id="rows"><tr><td class="empty" colspan="12">loading…</td></tr></tbody>
 </table>
+</div>
 <script>
 // A module embedded in the UI shell drops its own title (?embed=1).
 if (new URLSearchParams(location.search).has("embed")) document.body.classList.add("embedded");
 (function () {
   var rows = document.getElementById('rows');
   var status = document.getElementById('status');
-  var intervalInput = document.getElementById('interval');
+  // The refresh control lives in the shell's top bar, which passes what it chose: every=<seconds>,
+  // 0 meaning "no auto-refresh". Opened on its own, the page polls every 5s.
+  var every = new URLSearchParams(location.search).has('every') ? Number(new URLSearchParams(location.search).get('every')) : 5;
   var includeDeleted = document.getElementById('includeDeleted');
   var timer = null;
 
@@ -80,7 +91,7 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
 
   function render(agents) {
     if (!agents || !agents.length) {
-      rows.innerHTML = '<tr><td class="empty" colspan="10">no agents</td></tr>';
+      rows.innerHTML = '<tr><td class="empty" colspan="12">no agents</td></tr>';
       return;
     }
     rows.innerHTML = agents.map(function (a) {
@@ -102,7 +113,12 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
         '<td>' + working + '</td>' +
         '<td>' + dash(provider) + '</td>' +
         '<td>' + dash(account) + '</td>' +
-        '<td class="run">' + dash(a.agent_run_id) + '</td>' +
+        '<td class="run ellipsis">' + dash(a.agent_run_id) + '</td>' +
+        '<td>' +
+          '<button class="link" data-agent="' + esc(a.agent_id) + '" data-task="' + esc(a.current_task || '') + '" data-view="events"' +
+            ((a.current_task || '') ? '' : ' disabled title="no current task: an event stream belongs to a task"') + '>events</button>' +
+          '<button class="link" data-agent="' + esc(a.agent_id) + '" data-task="' + esc(a.current_task || '') + '" data-view="messages">messages</button>' +
+        '</td>' +
       '</tr>';
     }).join('');
   }
@@ -128,12 +144,25 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
 
   function schedule() {
     if (timer) { clearInterval(timer); }
-    var secs = parseInt(intervalInput.value, 10);
-    if (isNaN(secs) || secs < 1) { secs = 3; }
-    timer = setInterval(tick, secs * 1000);
+    timer = null;
+    document.getElementById('every').textContent = every > 0 ? 'auto-refresh: ' + every + 's' : 'auto-refresh: off';
+    if (every > 0) { timer = setInterval(tick, every * 1000); }
   }
 
-  intervalInput.addEventListener('change', schedule);
+  // A row's entries open one agent's views. Embedded in the shell they navigate it (so the nav and
+  // the header stay); opened on their own the page goes to the view's own path.
+  function openAgentView(agentId, taskId, view) {
+    var path = '/agents/' + encodeURIComponent(agentId) + '/' + view;
+    if (view === 'events' && taskId) { path += '?task=' + encodeURIComponent(taskId); }
+    if (window.top && window.top !== window) { window.top.location.hash = '#' + path; return; }
+    location.href = path;
+  }
+
+  document.getElementById('rows').addEventListener('click', function (event) {
+    var button = event.target.closest('button[data-view]');
+    if (!button || button.disabled) { return; }
+    openAgentView(button.dataset.agent, button.dataset.task, button.dataset.view);
+  });
   includeDeleted.addEventListener('change', tick);
   document.getElementById('refresh').addEventListener('click', tick);
 

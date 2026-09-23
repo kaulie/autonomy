@@ -68,6 +68,7 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// the page a human opens that polls it and renders a table with auto-refresh
 		// (src/agent_dashboard.go). Both are read-only.
 		{"GET /api/agents", s.handleAgentStatusList},
+		{"GET /api/agents/{agentID}/messages", s.handleAgentMessages},
 		// The UI itself: GET / is the shell a human opens, and the modules below it are pages
 		// it embeds (src/ui_home_page.go). Both spellings stay: a module is reachable directly.
 		{"GET /", s.handleUIHome},
@@ -94,6 +95,10 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"DELETE /api/accounts/{accountId}", s.handleAccountDelete},
 		{"POST /api/accounts/{accountId}/verify", s.handleAccountVerify},
 		{"GET /accounts", s.handleAccountsPage},
+		// The agent views a dashboard row opens: its live event stream, and its messages
+		// (src/agent_events_page.go, src/agent_messages_page.go).
+		{"GET /agents/{agentID}/events", s.handleAgentEventsPage},
+		{"GET /agents/{agentID}/messages", s.handleAgentMessagesPage},
 	}
 }
 
@@ -1024,4 +1029,77 @@ func (s *HTTPServer) handleAccountModels(w http.ResponseWriter, req *http.Reques
 		vendor = DefaultVendorFor(harness)
 	}
 	writeJSON(w, http.StatusOK, accountCatalogueResponse{Harness: harness, Vendor: vendor, Models: models})
+}
+
+// handleAgentMessages reads one agent's message log: what was addressed to it (its inbox: a user
+// instruction, a delegated prompt, a runtime stop) and what it answered (its turns, each with the
+// input it was given and its output). It is the data behind the UI's message view.
+//
+// @Summary  一只 agent 的消息：收到的（inbox 队列）与自己的回复（每轮 turn 的 input/output）
+// @Tags     agents
+// @Produce  json
+// @Param    agentID  path      integer  true   "agent id"
+// @Param    limit    query     integer  false  "每侧最多几条（<=0 = 全部；turn 侧按最新优先）"
+// @Success  200      {object}  autonomy.AgentMessages  "received（到达顺序）+ sent（最新在前，带 input/output）"
+// @Failure  400      {object}  errResponse             "agent id 不合法"
+// @Failure  404      {object}  errResponse             "没有这只 agent"
+// @Router   /api/agents/{agentID}/messages [get]
+func (s *HTTPServer) handleAgentMessages(w http.ResponseWriter, req *http.Request) {
+	agentID, err := strconv.ParseInt(req.PathValue("agentID"), 10, 64)
+	if err != nil || agentID == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid agent_id")
+		return
+	}
+	limit := 0
+	if raw := strings.TrimSpace(req.URL.Query().Get("limit")); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 0 {
+			writeErr(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+	}
+	messages, err := s.Autonomy.AgentMessages(agentID, limit)
+	switch {
+	case errors.Is(err, errAgentNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	case err != nil:
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, messages)
+}
+
+// handleAgentEventsPage serves one agent's live event stream (src/agent_events_page.go). The task
+// and the poll interval come from the page's own URL, so the shell can point it anywhere.
+//
+// @Summary  某只 agent 的实时事件流页面（一行一条，自动增量）
+// @Tags     agents
+// @Produce  html
+// @Param    agentID  path   integer  true   "agent id"
+// @Param    task     query  string   false  "要 tail 的 task（缺省 = 页面提示从 agent 状态进入）"
+// @Param    every    query  integer  false  "轮询间隔秒数（0 = 不自动刷新；缺省 5）"
+// @Success  200      {string}  string  "HTML 页面"
+// @Router   /agents/{agentID}/events [get]
+func (s *HTTPServer) handleAgentEventsPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, agentEventsHTML)
+}
+
+// handleAgentMessagesPage serves one agent's message view: what was sent to it and what it
+// answered, one line per message (src/agent_messages_page.go).
+//
+// @Summary  某只 agent 的消息页面（收到的 + 自己回复的，一行一条）
+// @Tags     agents
+// @Produce  html
+// @Param    agentID  path   integer  true   "agent id"
+// @Param    every    query  integer  false  "轮询间隔秒数（0 = 不自动刷新；缺省 5）"
+// @Param    limit    query  integer  false  "每侧最多几条（缺省 200）"
+// @Success  200      {string}  string  "HTML 页面"
+// @Router   /agents/{agentID}/messages [get]
+func (s *HTTPServer) handleAgentMessagesPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, agentMessagesHTML)
 }
