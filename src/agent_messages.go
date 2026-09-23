@@ -3,6 +3,7 @@ package autonomy
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // One agent's message log, as the UI renders it: what was addressed to it and what it answered.
@@ -16,9 +17,45 @@ type AgentMessages struct {
 	AgentID int64  `json:"agent_id"`
 	Agent   string `json:"agent,omitempty"`
 	// Received is the inbox in arrival order (oldest first): the order the agent processed it.
-	Received []AgentMessage `json:"received"`
+	Received []AgentInboxMessage `json:"received"`
 	// Sent is the agent's turns, newest first, each with the input it answered and its output.
 	Sent []AgentTurnMessage `json:"sent"`
+}
+
+// AgentInboxMessage is one message addressed to an agent, in the shape a message view wants: the
+// domain row with its field names spelled for JSON (the store's AgentMessage has none, so
+// serializing it directly would hand a page PascalCase keys nobody asked for).
+type AgentInboxMessage struct {
+	ID        int64  `json:"id"`
+	TaskID    string `json:"task_id,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	SenderID  string `json:"sender_id,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Error     string `json:"error,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	EndedAt   string `json:"ended_at,omitempty"`
+}
+
+// viewInboxMessage renders one inbox row for the API.
+func viewInboxMessage(msg AgentMessage) AgentInboxMessage {
+	return AgentInboxMessage{
+		ID: msg.ID, TaskID: msg.TaskID, Sender: string(msg.Sender), SenderID: msg.SenderID,
+		Kind: string(msg.Kind), Content: msg.Content, Status: string(msg.Status), Error: msg.Error,
+		CreatedAt: msg.CreatedAt.Format(time.RFC3339), StartedAt: formatMaybeTime(msg.StartedAt),
+		EndedAt: formatMaybeTime(msg.EndedAt),
+	}
+}
+
+// formatMaybeTime renders a timestamp that may not be set (an untouched row) as empty rather than
+// as the zero year.
+func formatMaybeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // AgentTurnMessage is one of an agent's answers, in the shape a message view wants: one line per
@@ -50,9 +87,11 @@ func (r *Autonomy) AgentMessages(agentID int64, limit int) (*AgentMessages, erro
 	if agent == nil {
 		return nil, errAgentNotFound
 	}
-	out := &AgentMessages{AgentID: agentID, Agent: agent.Name, Received: []AgentMessage{}, Sent: []AgentTurnMessage{}}
+	out := &AgentMessages{AgentID: agentID, Agent: agent.Name, Received: []AgentInboxMessage{}, Sent: []AgentTurnMessage{}}
 	if received, err := r.Store.ListAgentMessages(agentID, limit); err == nil {
-		out.Received = received
+		for _, msg := range received {
+			out.Received = append(out.Received, viewInboxMessage(msg))
+		}
 	}
 	// Turns are filtered by agent *name* (TurnQuery.Agent matches agents.name, which is what a
 	// facet offers a human) — the row's name, not the id this call was given.
