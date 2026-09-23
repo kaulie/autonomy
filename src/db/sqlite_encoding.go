@@ -1,6 +1,6 @@
 package db
 
-import . "github.com/kaulie/autonomy/src"
+import "github.com/kaulie/autonomy/src/llmbackend"
 
 import "time"
 
@@ -36,7 +36,7 @@ func nullFloatArg(f *float64) any {
 
 // usageCostArg renders usage cost as a nullable column value, keeping unknown
 // cost distinct from a genuine zero.
-func usageCostArg(u LLMUsage) any {
+func usageCostArg(u llmbackend.Usage) any {
 	if !u.CostKnown {
 		return nil
 	}

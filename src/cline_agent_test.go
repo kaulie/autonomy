@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"os"
@@ -25,24 +27,18 @@ func TestFakeBridgeProcess(t *testing.T) {
 // and resets it afterwards.
 func installFakeClineClient(t *testing.T) {
 	t.Helper()
-	sharedClineMu.Lock()
-	previousClient := sharedClineClnt
-	previousFactory := clineClientFactory
-	sharedClineClnt = nil
-	clineClientFactory = func(string) *clinesdk.Client {
+	previousClient := llmbackend.SwapClineClient(nil)
+	previousFactory := llmbackend.ClineClientFactory
+	llmbackend.ClineClientFactory = func(string) *clinesdk.Client {
 		return clinesdk.NewClient(
 			clinesdk.WithManager(fakebridge.Manager(os.Args[0])),
 			clinesdk.WithProvider("deepseek"),
 			clinesdk.WithModel("deepseek-v4-pro"),
 		)
 	}
-	sharedClineMu.Unlock()
 	t.Cleanup(func() {
-		sharedClineMu.Lock()
-		client := sharedClineClnt
-		sharedClineClnt = previousClient
-		clineClientFactory = previousFactory
-		sharedClineMu.Unlock()
+		client := llmbackend.SwapClineClient(previousClient)
+		llmbackend.ClineClientFactory = previousFactory
 		if client != nil {
 			_ = client.Close()
 		}
@@ -65,10 +61,10 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if agent.Backend != AgentBackendCline || agent.LLMProvider != LLMProviderCline {
+	if agent.Backend != llmbackend.Cline || agent.LLMProvider != llmbackend.ProviderCline {
 		t.Fatalf("backend=%q provider=%q", agent.Backend, agent.LLMProvider)
 	}
-	if agent.clineAgent == nil {
+	if agent.llm == nil || agent.llm.ProviderSessionID() == "" {
 		t.Fatal("no cline session handle was bound")
 	}
 	// The session id itself is only known once a run started: until then the row keeps
@@ -77,12 +73,12 @@ func TestAttachClineCreatesResidentSession(t *testing.T) {
 		t.Fatalf("LLMAgentID=%q, want empty before the first run", agent.LLMAgentID)
 	}
 	// Attaching twice is a no-op (same handle).
-	handle := agent.clineAgent.ID
+	handle := agent.llm.ProviderSessionID()
 	if err := agent.AttachCline(context.Background()); err != nil {
 		t.Fatalf("re-attach: %v", err)
 	}
-	if agent.clineAgent.ID != handle {
-		t.Fatalf("handle changed: %q → %q", handle, agent.clineAgent.ID)
+	if agent.llm.ProviderSessionID() != handle {
+		t.Fatalf("handle changed: %q → %q", handle, agent.llm.ProviderSessionID())
 	}
 }
 
@@ -90,8 +86,8 @@ func TestPromptLLMStreamMapsClineEventsAndUsage(t *testing.T) {
 	installFakeClineClient(t)
 	agent := newClineTestAgent(t)
 
-	var events []LLMEvent
-	text, meta, err := agent.PromptLLMStream(context.Background(), "say pong", ReasonModeAgent, func(ev LLMEvent) {
+	var events []llmbackend.Event
+	text, meta, err := agent.PromptLLMStream(context.Background(), "say pong", ReasonModeAgent, func(ev llmbackend.Event) {
 		events = append(events, ev)
 	})
 	if err != nil {
@@ -100,7 +96,7 @@ func TestPromptLLMStreamMapsClineEventsAndUsage(t *testing.T) {
 	if text != "pong" {
 		t.Fatalf("text=%q want pong", text)
 	}
-	if meta.Status != LLMStatusFinished {
+	if meta.Status != llmbackend.StatusFinished {
 		t.Fatalf("status=%q", meta.Status)
 	}
 	if meta.Usage.InputTokens != 11 || meta.Usage.OutputTokens != 2 || !meta.Usage.CostKnown {
@@ -110,11 +106,11 @@ func TestPromptLLMStreamMapsClineEventsAndUsage(t *testing.T) {
 		t.Fatalf("meta=%+v", meta)
 	}
 
-	channels := map[LLMEventChannel]int{}
+	channels := map[llmbackend.EventChannel]int{}
 	for _, ev := range events {
 		channels[ev.Channel]++
 	}
-	for _, want := range []LLMEventChannel{LLMChannelAssistant, LLMChannelThought, LLMChannelStatus, LLMChannelMeta, LLMChannelResult} {
+	for _, want := range []llmbackend.EventChannel{llmbackend.ChannelAssistant, llmbackend.ChannelThought, llmbackend.ChannelStatus, llmbackend.ChannelMeta, llmbackend.ChannelResult} {
 		if channels[want] == 0 {
 			t.Fatalf("no %q event in %v", want, channels)
 		}
@@ -138,24 +134,24 @@ func TestPromptLLMStreamSwitchesSessionMode(t *testing.T) {
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModeAgent, nil); err != nil {
 		t.Fatalf("agent-mode prompt: %v", err)
 	}
-	yoloHandle := agent.clineAgent.ID
-	if agent.clineAgent.Mode != clinesdk.DefaultMode {
-		t.Fatalf("mode=%q want %q", agent.clineAgent.Mode, clinesdk.DefaultMode)
+	yoloHandle := agent.llm.ProviderSessionID()
+	if agent.llm.Mode() != clinesdk.DefaultMode {
+		t.Fatalf("mode=%q want %q", agent.llm.Mode(), clinesdk.DefaultMode)
 	}
 
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModePlan, nil); err != nil {
 		t.Fatalf("plan-mode prompt: %v", err)
 	}
-	if agent.clineAgent.Mode != "plan" {
-		t.Fatalf("mode=%q want plan", agent.clineAgent.Mode)
+	if agent.llm.Mode() != "plan" {
+		t.Fatalf("mode=%q want plan", agent.llm.Mode())
 	}
-	if agent.clineAgent.ID == yoloHandle {
+	if agent.llm.ProviderSessionID() == yoloHandle {
 		t.Fatal("a mode switch must move to a fresh session")
 	}
 	// The id the row keeps is the *plan* session's: that is the task's own conversation,
 	// and the one a later process continues (src/clinesdk/bridge/resume.mjs).
-	if agent.LLMAgentID != agent.clineAgent.SessionID {
-		t.Fatalf("agent id not updated: %q vs %q", agent.LLMAgentID, agent.clineAgent.ID)
+	if agent.LLMAgentID != agent.llm.ProviderSessionID() {
+		t.Fatalf("agent id not updated: %q vs %q", agent.LLMAgentID, agent.llm.ProviderSessionID())
 	}
 }
 
@@ -171,8 +167,8 @@ func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 	installFakeClineClient(t)
 	agent := newClineTestAgent(t)
 
-	var events []LLMEvent
-	text, meta, err := agent.PromptLLMStream(context.Background(), "out of balance", ReasonModeAgent, func(ev LLMEvent) {
+	var events []llmbackend.Event
+	text, meta, err := agent.PromptLLMStream(context.Background(), "out of balance", ReasonModeAgent, func(ev llmbackend.Event) {
 		events = append(events, ev)
 	})
 	if err == nil {
@@ -189,7 +185,7 @@ func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "AUTONOMY_LLM_BACKEND") {
 		t.Errorf("error %q does not name the backend setting", err.Error())
 	}
-	if meta.Status != LLMStatusError {
+	if meta.Status != llmbackend.StatusError {
 		t.Errorf("status=%q want error: an empty answer is not a finished run", meta.Status)
 	}
 	// What the provider said is kept: it is the only reason there is.
@@ -200,13 +196,13 @@ func TestPromptLLMStreamTreatsAnEmptyAnswerAsAFailure(t *testing.T) {
 	// And it is in the stream, as an error event the run result sourced.
 	var carried bool
 	for _, ev := range events {
-		if ev.Channel != LLMChannelError {
+		if ev.Channel != llmbackend.ChannelError {
 			continue
 		}
-		if payloadString(payloadMap(ev.Payload, "error"), "message") != "Insufficient Balance" {
+		if llmbackend.PayloadString(llmbackend.PayloadMap(ev.Payload, "error"), "message") != "Insufficient Balance" {
 			continue
 		}
-		if payloadString(ev.Payload, "source") != "run_result" {
+		if llmbackend.PayloadString(ev.Payload, "source") != "run_result" {
 			t.Errorf("event=%+v, want it marked as sourced from the run result", ev.Payload)
 		}
 		carried = true
@@ -224,7 +220,7 @@ func TestPromptLLMStreamReportsProviderErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the provider error to surface")
 	}
-	if meta.Status != LLMStatusError {
+	if meta.Status != llmbackend.StatusError {
 		t.Fatalf("status=%q want error", meta.Status)
 	}
 	if !strings.Contains(meta.ErrorMessage, "provider exploded") {
@@ -245,16 +241,16 @@ func TestPromptLLMStreamFlowsThroughPromptLLMText(t *testing.T) {
 }
 
 func TestDefaultAgentBackendFromEnv(t *testing.T) {
-	cases := map[string]AgentBackend{
-		"":        AgentBackendCursor,
-		"cursor":  AgentBackendCursor,
-		"cline":   AgentBackendCline,
-		"CLINE":   AgentBackendCline,
-		"unknown": AgentBackendCursor,
+	cases := map[string]llmbackend.Backend{
+		"":        llmbackend.Cursor,
+		"cursor":  llmbackend.Cursor,
+		"cline":   llmbackend.Cline,
+		"CLINE":   llmbackend.Cline,
+		"unknown": llmbackend.Cursor,
 	}
 	for env, want := range cases {
 		t.Setenv("AUTONOMY_LLM_BACKEND", env)
-		if got := defaultAgentBackend(); got != want {
+		if got := llmbackend.DefaultBackend(); got != want {
 			t.Fatalf("AUTONOMY_LLM_BACKEND=%q → %q want %q", env, got, want)
 		}
 	}
@@ -296,7 +292,7 @@ func TestClineSessionIDIsKeptForTheNextProcess(t *testing.T) {
 	if _, _, err := agent.PromptLLMStream(ctx, "plan something", ReasonModePlan, nil); err != nil {
 		t.Fatalf("plan prompt: %v", err)
 	}
-	sessionID := agent.clineAgent.SessionID
+	sessionID := agent.llm.ProviderSessionID()
 	if sessionID == "" {
 		t.Fatal("the run reported no session id")
 	}
@@ -336,8 +332,8 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := agent.attachClineSession(ctx, clineModeFor(ReasonModePlan), agent.Workspace); err != nil {
 		t.Fatalf("attach plan: %v", err)
 	}
-	if agent.clineAgent.ResumeSessionID != "cls-recorded-session" {
-		t.Fatalf("resume=%q, want the recorded session", agent.clineAgent.ResumeSessionID)
+	if agent.llm.ResumedFrom() != "cls-recorded-session" {
+		t.Fatalf("resume=%q, want the recorded session", agent.llm.ResumedFrom())
 	}
 
 	// A worker's session starts from nothing.
@@ -348,8 +344,8 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := worker.attachClineSession(ctx, clineModeFor(ReasonModeAgent), worker.Workspace); err != nil {
 		t.Fatalf("attach agent mode: %v", err)
 	}
-	if worker.clineAgent.ResumeSessionID != "" {
-		t.Fatalf("worker resume=%q, want none", worker.clineAgent.ResumeSessionID)
+	if worker.llm.ResumedFrom() != "" {
+		t.Fatalf("worker resume=%q, want none", worker.llm.ResumedFrom())
 	}
 
 	// A bridge handle from an older row is not a session to continue.
@@ -360,7 +356,7 @@ func TestClineSessionContinuesTheRecordedSession(t *testing.T) {
 	if err := legacy.attachClineSession(ctx, clineModeFor(ReasonModePlan), legacy.Workspace); err != nil {
 		t.Fatalf("attach legacy: %v", err)
 	}
-	if legacy.clineAgent.ResumeSessionID != "" {
-		t.Fatalf("legacy resume=%q, want none", legacy.clineAgent.ResumeSessionID)
+	if legacy.llm.ResumedFrom() != "" {
+		t.Fatalf("legacy resume=%q, want none", legacy.llm.ResumedFrom())
 	}
 }

@@ -1,32 +1,32 @@
-package autonomy
+package llmbackend
 
-// LLMEventKind is the provider-neutral, fine-grained classification of one
+// EventKind is the provider-neutral, fine-grained classification of one
 // event: consumers (UI, analytics) switch on Kind and read the neutral payload
 // keys below, so cursor / cline / future providers look the same. Channel stays
 // the coarse bucket, and the provider's own discriminator is still kept verbatim
 // in EventType for full fidelity.
-type LLMEventKind string
+type EventKind string
 
 const (
 	// Assistant text: deltas while streaming, a whole block when the provider
 	// returns one message (Cursor).
-	LLMKindAssistantDelta LLMEventKind = "assistant_delta"
-	LLMKindAssistant      LLMEventKind = "assistant"
+	KindAssistantDelta EventKind = "assistant_delta"
+	KindAssistant      EventKind = "assistant"
 	// Thinking: deltas while streaming (Cline), a whole block when reported as one
 	// message (Cursor), and a terminator where a streamed block ends.
-	LLMKindThoughtDelta LLMEventKind = "thought_delta"
-	LLMKindThought      LLMEventKind = "thought"
-	LLMKindThoughtEnd   LLMEventKind = "thought_end"
+	KindThoughtDelta EventKind = "thought_delta"
+	KindThought      EventKind = "thought"
+	KindThoughtEnd   EventKind = "thought_end"
 	// Tool calls: started -> optional output deltas -> completed.
-	LLMKindToolCallStarted   LLMEventKind = "tool_call_started"
-	LLMKindToolCallDelta     LLMEventKind = "tool_call_delta"
-	LLMKindToolCallCompleted LLMEventKind = "tool_call_completed"
+	KindToolCallStarted   EventKind = "tool_call_started"
+	KindToolCallDelta     EventKind = "tool_call_delta"
+	KindToolCallCompleted EventKind = "tool_call_completed"
 	// Run-level events.
-	LLMKindStatus    LLMEventKind = "status"
-	LLMKindUsage     LLMEventKind = "usage"
-	LLMKindRunResult LLMEventKind = "run_result"
-	LLMKindError     LLMEventKind = "error"
-	LLMKindMeta      LLMEventKind = "meta"
+	KindStatus    EventKind = "status"
+	KindUsage     EventKind = "usage"
+	KindRunResult EventKind = "run_result"
+	KindError     EventKind = "error"
+	KindMeta      EventKind = "meta"
 )
 
 // Neutral payload keys. Adapters copy the provider's own payload and add these
@@ -34,30 +34,30 @@ const (
 // has to know that Cursor says call_id/args/thinking_duration_ms while Cline
 // says toolCallId/input/durationMs.
 const (
-	// LLMKeyText is the event's own text: an increment for *_delta kinds, the
+	// KeyText is the event's own text: an increment for *_delta kinds, the
 	// whole block for assistant/thought.
-	LLMKeyText = "text"
-	// LLMKeyDurationMS is how long the event took (a thinking block, a tool call).
-	LLMKeyDurationMS = "duration_ms"
+	KeyText = "text"
+	// KeyDurationMS is how long the event took (a thinking block, a tool call).
+	KeyDurationMS = "duration_ms"
 	// Tool call identity and payload.
-	LLMKeyCallID = "call_id"
-	LLMKeyName   = "name"
-	LLMKeyArgs   = "args"
-	LLMKeyResult = "result"
-	// LLMKeyStream / LLMKeyChunk describe one chunk of streamed tool output
+	KeyCallID = "call_id"
+	KeyName   = "name"
+	KeyArgs   = "args"
+	KeyResult = "result"
+	// KeyStream / KeyChunk describe one chunk of streamed tool output
 	// (stdout/stderr).
-	LLMKeyStream = "stream"
-	LLMKeyChunk  = "chunk"
+	KeyStream = "stream"
+	KeyChunk  = "chunk"
 	// Run status; for tool events the same key holds running | completed | failed.
-	LLMKeyStatus  = "status"
-	LLMKeyMessage = "message"
+	KeyStatus  = "status"
+	KeyMessage = "message"
 	// Token usage and cost (USD), so usage reads the same from every provider.
-	LLMKeyInputTokens      = "input_tokens"
-	LLMKeyOutputTokens     = "output_tokens"
-	LLMKeyCacheReadTokens  = "cache_read_tokens"
-	LLMKeyCacheWriteTokens = "cache_write_tokens"
-	LLMKeyTotalTokens      = "total_tokens"
-	LLMKeyCostUSD          = "cost_usd"
+	KeyInputTokens      = "input_tokens"
+	KeyOutputTokens     = "output_tokens"
+	KeyCacheReadTokens  = "cache_read_tokens"
+	KeyCacheWriteTokens = "cache_write_tokens"
+	KeyTotalTokens      = "total_tokens"
+	KeyCostUSD          = "cost_usd"
 )
 
 // Family groups the granularity variants of one semantic, so a consumer that
@@ -70,13 +70,13 @@ const (
 // The granularity difference is a provider capability, not a semantic one:
 // Cursor reports thinking/assistant as whole blocks, Cline streams them as
 // deltas (with a block-end marker).
-func (k LLMEventKind) Family() string {
+func (k EventKind) Family() string {
 	switch k {
-	case LLMKindAssistant, LLMKindAssistantDelta:
+	case KindAssistant, KindAssistantDelta:
 		return "assistant"
-	case LLMKindThought, LLMKindThoughtDelta, LLMKindThoughtEnd:
+	case KindThought, KindThoughtDelta, KindThoughtEnd:
 		return "thought"
-	case LLMKindToolCallStarted, LLMKindToolCallDelta, LLMKindToolCallCompleted:
+	case KindToolCallStarted, KindToolCallDelta, KindToolCallCompleted:
 		return "tool_call"
 	default:
 		return string(k)
@@ -99,7 +99,7 @@ func withNeutralText(payload map[string]any, text string) map[string]any {
 		return payload
 	}
 	out := neutralPayload(payload)
-	out[LLMKeyText] = text
+	out[KeyText] = text
 	return out
 }
 
@@ -141,8 +141,8 @@ func payloadNumber(payload map[string]any, keys ...string) (float64, bool) {
 	return 0, false
 }
 
-// payloadMap returns a nested payload object when present.
-func payloadMap(payload map[string]any, key string) map[string]any {
+// PayloadMap returns a nested payload object when present.
+func PayloadMap(payload map[string]any, key string) map[string]any {
 	m, _ := payload[key].(map[string]any)
 	return m
 }

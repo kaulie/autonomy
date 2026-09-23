@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"net/url"
 	"os"
 	"regexp"
@@ -167,7 +168,7 @@ func TestPostgresStoreTaskAndAgent(t *testing.T) {
 		t.Fatalf("status did not follow the write: %+v", read)
 	}
 
-	agent := &Agent{State: "idle", LLMProvider: LLMProvider("cline"), Model: "m", CurrentTask: task}
+	agent := &Agent{State: "idle", LLMProvider: llmbackend.Provider("cline"), Model: "m", CurrentTask: task}
 	if err := store.UpsertAgent(agent); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
@@ -254,8 +255,8 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	done := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "task-1", AgentID: 10001, Cycle: 1, Mode: ReasonModePlan,
-		LLMProvider: LLMProvider("cline"), Model: "m", Input: "do it", RawOutput: `{"type":"done"}`,
-		Status: string(LLMStatusFinished), CreatedAt: done, StartedAt: done, EndedAt: done,
+		LLMProvider: llmbackend.Provider("cline"), Model: "m", Input: "do it", RawOutput: `{"type":"done"}`,
+		Status: string(llmbackend.StatusFinished), CreatedAt: done, StartedAt: done, EndedAt: done,
 	}); err != nil {
 		t.Fatalf("InsertReasonTurn: %v", err)
 	}
@@ -291,7 +292,7 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	// append the aggregated messages while it streams, then finish.
 	h, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "task-2", AgentID: 10002, Cycle: 1, Mode: ReasonModeAgent,
-		LLMProvider: LLMProvider("cursor"), Model: "composer", Input: "ask",
+		LLMProvider: llmbackend.Provider("cursor"), Model: "composer", Input: "ask",
 	})
 	if err != nil {
 		t.Fatalf("BeginReasonTurn: %v", err)
@@ -300,9 +301,9 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	if err != nil || active == nil || active.ID != h.TurnID {
 		t.Fatalf("ActiveReasonTurn = %+v, %v", active, err)
 	}
-	events := []LLMEvent{
-		{Seq: 1, Channel: LLMChannelAssistant, Kind: LLMKindAssistantDelta, EventType: "assistant_delta", TextDelta: "hel", CreatedAt: done},
-		{Seq: 2, Channel: LLMChannelAssistant, Kind: LLMKindAssistantDelta, EventType: "assistant_delta", TextDelta: "lo", CreatedAt: done},
+	events := []llmbackend.Event{
+		{Seq: 1, Channel: llmbackend.ChannelAssistant, Kind: llmbackend.KindAssistantDelta, EventType: "assistant_delta", TextDelta: "hel", CreatedAt: done},
+		{Seq: 2, Channel: llmbackend.ChannelAssistant, Kind: llmbackend.KindAssistantDelta, EventType: "assistant_delta", TextDelta: "lo", CreatedAt: done},
 	}
 	for i := 0; i < 2; i++ {
 		if err := store.AppendLLMEvents(h.TurnID, "run-1", events); err != nil {
@@ -324,16 +325,16 @@ func TestPostgresStoreConversationRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendLLMMessages (second): %v", err)
 	}
-	if err := store.FinishReasonTurn(h, LLMRunResult{
-		RawOutput: "hello", Status: LLMStatusFinished, ProviderRunID: "run-1", LLMAgentID: "bc-1",
+	if err := store.FinishReasonTurn(h, llmbackend.RunResult{
+		RawOutput: "hello", Status: llmbackend.StatusFinished, ProviderRunID: "run-1", LLMAgentID: "bc-1",
 		DurationMS: 1200, EventCount: 2, EndedAt: done.Add(2 * time.Second),
-		Usage: LLMUsage{InputTokens: 10, OutputTokens: 3, TotalTokens: 13, CostCents: 0.5, CostKnown: true},
+		Usage: llmbackend.Usage{InputTokens: 10, OutputTokens: 3, TotalTokens: 13, CostCents: 0.5, CostKnown: true},
 	}); err != nil {
 		t.Fatalf("FinishReasonTurn: %v", err)
 	}
 	// A replayed finish changes nothing.
-	if err := store.FinishReasonTurn(h, LLMRunResult{
-		RawOutput: "hello", Status: LLMStatusFinished, ProviderRunID: "run-1", EndedAt: done.Add(2 * time.Second),
+	if err := store.FinishReasonTurn(h, llmbackend.RunResult{
+		RawOutput: "hello", Status: llmbackend.StatusFinished, ProviderRunID: "run-1", EndedAt: done.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatalf("FinishReasonTurn (replay): %v", err)
 	}
@@ -490,13 +491,13 @@ func TestPostgresStoreExecutionAndVerification(t *testing.T) {
 
 	turn, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "task-1", AgentID: 10001, Cycle: 1, Mode: ReasonModePlan,
-		LLMProvider: LLMProvider("cline"), Model: "m", Input: "build the thing",
+		LLMProvider: llmbackend.Provider("cline"), Model: "m", Input: "build the thing",
 	})
 	if err != nil {
 		t.Fatalf("BeginReasonTurn: %v", err)
 	}
-	if err := store.FinishReasonTurn(turn, LLMRunResult{
-		RawOutput: `{"type":"plan"}`, Status: LLMStatusFinished, ProviderRunID: "run-9",
+	if err := store.FinishReasonTurn(turn, llmbackend.RunResult{
+		RawOutput: `{"type":"plan"}`, Status: llmbackend.StatusFinished, ProviderRunID: "run-9",
 	}); err != nil {
 		t.Fatalf("FinishReasonTurn: %v", err)
 	}
@@ -622,11 +623,11 @@ func TestPostgresStoreExecutionAndVerification(t *testing.T) {
 func TestPostgresStoreTurnQueries(t *testing.T) {
 	store := newPostgresStore(t)
 
-	planner := &Agent{LLMProvider: LLMProvider("cline"), Model: "m"}
+	planner := &Agent{LLMProvider: llmbackend.Provider("cline"), Model: "m"}
 	if err := store.UpsertAgent(planner); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	worker := &Agent{LLMProvider: LLMProvider("cursor"), Model: "composer"}
+	worker := &Agent{LLMProvider: llmbackend.Provider("cursor"), Model: "composer"}
 	if err := store.UpsertAgent(worker); err != nil {
 		t.Fatalf("UpsertAgent (worker): %v", err)
 	}
@@ -658,12 +659,12 @@ func TestPostgresStoreTurnQueries(t *testing.T) {
 		t.Fatalf("UpsertTask (c): %v", err)
 	}
 
-	first := seed("task-a", planner, 1, base, ReasonModePlan, string(LLMStatusFinished), "wire up the deploy 100%", "planned")
-	seed("task-a", planner, 2, base.Add(time.Minute), ReasonModePlan, string(LLMStatusError), "it failed", "Insufficient Balance")
-	seed("task-a", worker, 1, base.Add(2*time.Minute), ReasonModeAgent, string(LLMStatusFinished), "delegated the deploy", "done")
-	seed("task-b", worker, 1, base.Add(3*time.Minute), ReasonModeAgent, string(LLMStatusFinished), "another task", "ok")
+	first := seed("task-a", planner, 1, base, ReasonModePlan, string(llmbackend.StatusFinished), "wire up the deploy 100%", "planned")
+	seed("task-a", planner, 2, base.Add(time.Minute), ReasonModePlan, string(llmbackend.StatusError), "it failed", "Insufficient Balance")
+	seed("task-a", worker, 1, base.Add(2*time.Minute), ReasonModeAgent, string(llmbackend.StatusFinished), "delegated the deploy", "done")
+	seed("task-b", worker, 1, base.Add(3*time.Minute), ReasonModeAgent, string(llmbackend.StatusFinished), "another task", "ok")
 	// A task nobody ever wrote a row for: it only exists in the log.
-	seed("task-ghost", planner, 1, base.Add(4*time.Minute), ReasonModePlan, string(LLMStatusFinished), "ghost", "gone")
+	seed("task-ghost", planner, 1, base.Add(4*time.Minute), ReasonModePlan, string(llmbackend.StatusFinished), "ghost", "gone")
 
 	if n, err := store.CountTurns(); err != nil || n != 5 {
 		t.Fatalf("CountTurns = %d, %v", n, err)
@@ -681,7 +682,7 @@ func TestPostgresStoreTurnQueries(t *testing.T) {
 	if !(page[0].CreatedAt > page[2].CreatedAt) {
 		t.Fatalf("default order is not newest first: %+v", page)
 	}
-	if _, total, err := store.QueryTurns(TurnQuery{Status: string(LLMStatusError)}); err != nil || total != 1 {
+	if _, total, err := store.QueryTurns(TurnQuery{Status: string(llmbackend.StatusError)}); err != nil || total != 1 {
 		t.Fatalf("QueryTurns(status=error) total = %d, %v", total, err)
 	}
 	if _, total, err := store.QueryTurns(TurnQuery{Model: "composer"}); err != nil || total != 2 {
@@ -738,7 +739,7 @@ func TestPostgresStoreTurnQueries(t *testing.T) {
 	if err != nil || rec == nil || rec.Input != "wire up the deploy 100%" || rec.Agent != planner.Name {
 		t.Fatalf("GetTurn = %+v, %v", rec, err)
 	}
-	if rec.Status != string(LLMStatusFinished) || rec.Provider != LLMProvider("cline") || rec.Mode != ReasonModePlan {
+	if rec.Status != string(llmbackend.StatusFinished) || rec.Provider != llmbackend.Provider("cline") || rec.Mode != ReasonModePlan {
 		t.Fatalf("GetTurn lost fields: %+v", rec)
 	}
 	if rec.StartedAt != "2026-09-20T08:00:00Z" || rec.CreatedAt != "2026-09-20T08:00:00Z" {
@@ -763,7 +764,7 @@ func TestPostgresStoreTurnQueries(t *testing.T) {
 	if len(facets.Agents) != 2 || facets.Agents[0].Value != planner.Name || facets.Agents[0].Count != 3 {
 		t.Fatalf("agent facet = %+v", facets.Agents)
 	}
-	if len(facets.Statuses) != 2 || facets.Statuses[0].Value != string(LLMStatusFinished) || facets.Statuses[0].Count != 4 {
+	if len(facets.Statuses) != 2 || facets.Statuses[0].Value != string(llmbackend.StatusFinished) || facets.Statuses[0].Count != 4 {
 		t.Fatalf("status facet = %+v", facets.Statuses)
 	}
 	if len(facets.Models) != 2 || len(facets.Modes) != 2 || len(facets.Providers) != 2 {
@@ -826,7 +827,7 @@ func TestPostgresStoreServesTheRuntimesWriters(t *testing.T) {
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "task-1", AgentID: 10050, Cycle: 1, Mode: ReasonModePlan,
-		LLMProvider: LLMProvider("cline"), Model: "m", Input: "ask", RawOutput: `{"type":"plan"}`,
+		LLMProvider: llmbackend.Provider("cline"), Model: "m", Input: "ask", RawOutput: `{"type":"plan"}`,
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

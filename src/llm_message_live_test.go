@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"path/filepath"
 	"testing"
@@ -19,19 +21,19 @@ func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
 	_store = store
 	t.Cleanup(func() { _store = prev })
 
-	agent := &Agent{ID: 77, LLMProvider: LLMProviderCline, Model: "deepseek-v4-pro"}
+	agent := &Agent{ID: 77, LLMProvider: llmbackend.ProviderCline, Model: "deepseek-v4-pro"}
 	trace := BeginLLMTrace(agent, "task-live", 1, ReasonModeAgent, "list the bridge dir")
 	turnID := trace.handle.TurnID
 
 	// Thinking streams as deltas (one event per chunk); nothing is complete yet.
-	trace.Emit(LLMEvent{Channel: LLMChannelThought, EventType: "agent_event:content_start:reasoning", TextDelta: "Let me"})
-	trace.Emit(LLMEvent{Channel: LLMChannelThought, EventType: "agent_event:content_start:reasoning", TextDelta: " check the code"})
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelThought, EventType: "agent_event:content_start:reasoning", TextDelta: "Let me"})
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelThought, EventType: "agent_event:content_start:reasoning", TextDelta: " check the code"})
 	if got := mustListMessages(t, store, turnID); len(got) != 1 {
 		t.Fatalf("mid-thought messages=%d, want 1 (just the user input): %+v", len(got), got)
 	}
 
 	// The tool call starting is what closes the thinking block.
-	trace.Emit(LLMEvent{Channel: LLMChannelTool, EventType: "agent_event:content_start:tool", Name: "execute_command",
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelTool, EventType: "agent_event:content_start:tool", Name: "execute_command",
 		Payload: map[string]any{"call_id": "call-1", "args": map[string]any{"command": "ls"}}})
 	msgs := mustListMessages(t, store, turnID)
 	if len(msgs) != 2 {
@@ -42,7 +44,7 @@ func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
 	}
 
 	// The tool's return completes the tool message.
-	trace.Emit(LLMEvent{Channel: LLMChannelTool, EventType: "agent_event:content_end:tool", Name: "execute_command",
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelTool, EventType: "agent_event:content_end:tool", Name: "execute_command",
 		Payload: map[string]any{"call_id": "call-1", "result": map[string]any{"exit": 0, "stdout": "bridge\n"}}})
 	msgs = mustListMessages(t, store, turnID)
 	if len(msgs) != 3 {
@@ -56,7 +58,7 @@ func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
 	}
 
 	// Finish adds only the trailing assistant row, one past everything written.
-	trace.Finish(LLMRunResult{ProviderRunID: "run-live", Status: LLMStatusFinished, RawOutput: "found it"})
+	trace.Finish(llmbackend.RunResult{ProviderRunID: "run-live", Status: llmbackend.StatusFinished, RawOutput: "found it"})
 	msgs = mustListMessages(t, store, turnID)
 	if len(msgs) != 4 {
 		t.Fatalf("after finish messages=%d, want 4: %+v", len(msgs), msgs)
@@ -70,7 +72,7 @@ func TestLLMTraceWritesMessagesWhileStreaming(t *testing.T) {
 	}
 
 	// Re-finishing stays idempotent: the same four rows, no second assistant row.
-	trace.Finish(LLMRunResult{ProviderRunID: "run-live", Status: LLMStatusFinished, RawOutput: "found it"})
+	trace.Finish(llmbackend.RunResult{ProviderRunID: "run-live", Status: llmbackend.StatusFinished, RawOutput: "found it"})
 	if got := mustListMessages(t, store, turnID); len(got) != 4 {
 		t.Fatalf("messages after re-finish=%d, want 4: %+v", len(got), got)
 	}
@@ -100,10 +102,10 @@ func TestLLMTraceWritesMessagesWithRawStreamDisabled(t *testing.T) {
 	t.Cleanup(func() { _store = prev })
 
 	trace := BeginLLMTrace(&Agent{ID: 78}, "task-nostream", 1, ReasonModeAgent, "do it")
-	trace.Emit(LLMEvent{Channel: LLMChannelThought, EventType: "thinking", TextDelta: "because"})
-	trace.Emit(LLMEvent{Channel: LLMChannelTool, EventType: "tool_call", Name: "shell",
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelThought, EventType: "thinking", TextDelta: "because"})
+	trace.Emit(llmbackend.Event{Channel: llmbackend.ChannelTool, EventType: "tool_call", Name: "shell",
 		Payload: map[string]any{"call_id": "c9", "args": map[string]any{"command": "ls"}, "result": "ok"}})
-	trace.Finish(LLMRunResult{Status: LLMStatusFinished, RawOutput: "done"})
+	trace.Finish(llmbackend.RunResult{Status: llmbackend.StatusFinished, RawOutput: "done"})
 
 	msgs := mustListMessages(t, store, trace.handle.TurnID)
 	if len(msgs) != 4 {
@@ -124,16 +126,16 @@ func TestLLMTraceWritesMessagesWithRawStreamDisabled(t *testing.T) {
 // run ends up with exactly the messages (and seqs) the whole-stream derivation
 // produces, even when a tool call returns only after other groups were emitted.
 func TestChatAggregatorEmitsEveryMessageOnce(t *testing.T) {
-	events := []LLMEvent{
-		{Channel: LLMChannelThought, TextDelta: "first "},
-		{Channel: LLMChannelThought, TextDelta: "block"},
-		{Channel: LLMChannelTool, Name: "shell", Payload: map[string]any{"call_id": "c1", "args": map[string]any{"command": "ls"}}},
-		{Channel: LLMChannelTool, Name: "read", Payload: map[string]any{"call_id": "c2", "result": "file body"}},
-		{Channel: LLMChannelAssistant, TextDelta: "nope"},
-		{Channel: LLMChannelThought, TextDelta: "second block"},
+	events := []llmbackend.Event{
+		{Channel: llmbackend.ChannelThought, TextDelta: "first "},
+		{Channel: llmbackend.ChannelThought, TextDelta: "block"},
+		{Channel: llmbackend.ChannelTool, Name: "shell", Payload: map[string]any{"call_id": "c1", "args": map[string]any{"command": "ls"}}},
+		{Channel: llmbackend.ChannelTool, Name: "read", Payload: map[string]any{"call_id": "c2", "result": "file body"}},
+		{Channel: llmbackend.ChannelAssistant, TextDelta: "nope"},
+		{Channel: llmbackend.ChannelThought, TextDelta: "second block"},
 		// c1 returns only now: its message was never emitted before, and the merge
 		// re-emits the (still correct) row it now has.
-		{Channel: LLMChannelTool, Name: "shell", Payload: map[string]any{"call_id": "c1", "result": "listing"}},
+		{Channel: llmbackend.ChannelTool, Name: "shell", Payload: map[string]any{"call_id": "c1", "result": "listing"}},
 	}
 
 	agg := newChatAggregator()

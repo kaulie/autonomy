@@ -5,6 +5,7 @@ import . "github.com/kaulie/autonomy/src"
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	agent := &Agent{
 		ID: 1, Name: "agent-1", State: "running", Lifecycle: AgentLifecycleEphemeral,
-		CurrentTask: task, LLMAgentID: "cursor-1", LLMProvider: LLMProviderCursor,
+		CurrentTask: task, LLMAgentID: "cursor-1", LLMProvider: llmbackend.ProviderCursor,
 		Model: "composer-2",
 	}
 	if err := store.UpsertAgent(agent); err != nil {
@@ -48,8 +49,8 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if llmProvider != string(LLMProviderCursor) {
-		t.Fatalf("llm_provider=%q, want %q", llmProvider, LLMProviderCursor)
+	if llmProvider != string(llmbackend.ProviderCursor) {
+		t.Fatalf("llm_provider=%q, want %q", llmProvider, llmbackend.ProviderCursor)
 	}
 	var llmAgentID string
 	err = store.db.QueryRow(`SELECT llm_agent_id FROM agents WHERE id = ?`, 1).Scan(&llmAgentID)
@@ -69,7 +70,7 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	}
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "t1", AgentID: 1, Cycle: 1, Mode: ReasonModeAgent,
-		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "in", RawOutput: "out",
+		LLMProvider: llmbackend.ProviderCursor, Model: "composer-2", Input: "in", RawOutput: "out",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +112,8 @@ func TestSQLiteStoreTaskAgentReasonTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reasonLLMProvider != string(LLMProviderCursor) {
-		t.Fatalf("reason llm_provider=%q, want %q", reasonLLMProvider, LLMProviderCursor)
+	if reasonLLMProvider != string(llmbackend.ProviderCursor) {
+		t.Fatalf("reason llm_provider=%q, want %q", reasonLLMProvider, llmbackend.ProviderCursor)
 	}
 	if reasonModel != "composer-2" {
 		t.Fatalf("reason model=%q, want %q", reasonModel, "composer-2")
@@ -440,8 +441,8 @@ func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
 	if len(events) != 1 || events[0].EventType != "thinking" || events[0].Kind != "" {
 		t.Fatalf("legacy events=%+v want the old row with an empty kind", events)
 	}
-	if err := store.AppendLLMEvents(1, "run-new", []LLMEvent{{
-		Seq: 1, Channel: LLMChannelTool, Kind: LLMKindToolCallCompleted,
+	if err := store.AppendLLMEvents(1, "run-new", []llmbackend.Event{{
+		Seq: 1, Channel: llmbackend.ChannelTool, Kind: llmbackend.KindToolCallCompleted,
 		EventType: "tool_call", Role: "tool", CreatedAt: time.Now(),
 		Payload: map[string]any{"call_id": "c1"},
 	}}); err != nil {
@@ -451,7 +452,7 @@ func TestSQLiteStoreMigratesLLMEventsKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[1].Kind != LLMKindToolCallCompleted {
+	if len(events) != 2 || events[1].Kind != llmbackend.KindToolCallCompleted {
 		t.Fatalf("events=%+v want the kind to round-trip", events)
 	}
 }

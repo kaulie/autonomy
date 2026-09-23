@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"testing"
 	"time"
@@ -20,8 +22,8 @@ type contractSample struct {
 	clineInner map[string]any
 	clineCore  string
 
-	wantKind    LLMEventKind
-	wantChannel LLMEventChannel
+	wantKind    llmbackend.EventKind
+	wantChannel llmbackend.EventChannel
 	// wantKeys are the neutral keys both providers must fill.
 	wantKeys map[string]any
 	// wantCursorKeys / wantClineKeys are neutral keys only that provider can fill
@@ -49,12 +51,12 @@ func contractSamples() []contractSample {
 				"text": "let me think", "thinking_duration_ms": float64(2500),
 			}},
 			clineInner:  map[string]any{"type": "content_start", "contentType": "reasoning", "reasoning": "let me think", "redacted": false},
-			wantKind:    LLMKindThought,
-			wantChannel: LLMChannelThought,
-			wantKeys:    map[string]any{LLMKeyText: "let me think"},
+			wantKind:    llmbackend.KindThought,
+			wantChannel: llmbackend.ChannelThought,
+			wantKeys:    map[string]any{llmbackend.KeyText: "let me think"},
 			// Cursor reports the thinking duration on the message; Cline has no
 			// such field (the aggregation derives it from the event span).
-			wantCursorKeys: map[string]any{LLMKeyDurationMS: int64(2500)},
+			wantCursorKeys: map[string]any{llmbackend.KeyDurationMS: int64(2500)},
 			wantNoDuration: true,
 			wantText:       "let me think",
 		},
@@ -64,9 +66,9 @@ func contractSamples() []contractSample {
 			clineInner: map[string]any{
 				"type": "content_end", "contentType": "reasoning", "reasoning": "let me think",
 			},
-			wantKind:           LLMKindThoughtEnd,
-			wantChannel:        LLMChannelThought,
-			wantKeys:           map[string]any{LLMKeyText: "let me think"},
+			wantKind:           llmbackend.KindThoughtEnd,
+			wantChannel:        llmbackend.ChannelThought,
+			wantKeys:           map[string]any{llmbackend.KeyText: "let me think"},
 			wantText:           "let me think",
 			wantEmptyTextDelta: true,
 		},
@@ -76,8 +78,8 @@ func contractSamples() []contractSample {
 				"message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "the answer"}}},
 			}},
 			clineInner:  map[string]any{"type": "content_start", "contentType": "text", "text": "the answer", "accumulated": "the answer"},
-			wantKind:    LLMKindAssistant,
-			wantChannel: LLMChannelAssistant,
+			wantKind:    llmbackend.KindAssistant,
+			wantChannel: llmbackend.ChannelAssistant,
 			wantText:    "the answer",
 		},
 		{
@@ -87,9 +89,9 @@ func contractSamples() []contractSample {
 			}},
 			clineInner: map[string]any{"type": "content_start", "contentType": "tool", "toolName": "shell",
 				"toolCallId": "c1", "input": map[string]any{"command": "ls"}},
-			wantKind:    LLMKindToolCallStarted,
-			wantChannel: LLMChannelTool,
-			wantKeys:    map[string]any{LLMKeyCallID: "c1", LLMKeyName: "shell", LLMKeyStatus: "running"},
+			wantKind:    llmbackend.KindToolCallStarted,
+			wantChannel: llmbackend.ChannelTool,
+			wantKeys:    map[string]any{llmbackend.KeyCallID: "c1", llmbackend.KeyName: "shell", llmbackend.KeyStatus: "running"},
 		},
 		{
 			semantic: "tool call completed",
@@ -99,9 +101,9 @@ func contractSamples() []contractSample {
 			}},
 			clineInner: map[string]any{"type": "content_end", "contentType": "tool", "toolName": "shell",
 				"toolCallId": "c1", "output": "a.go\n", "durationMs": float64(12)},
-			wantKind:    LLMKindToolCallCompleted,
-			wantChannel: LLMChannelTool,
-			wantKeys:    map[string]any{LLMKeyCallID: "c1", LLMKeyStatus: "completed"},
+			wantKind:    llmbackend.KindToolCallCompleted,
+			wantChannel: llmbackend.ChannelTool,
+			wantKeys:    map[string]any{llmbackend.KeyCallID: "c1", llmbackend.KeyStatus: "completed"},
 		},
 		{
 			semantic: "run status",
@@ -110,9 +112,9 @@ func contractSamples() []contractSample {
 			}},
 			clineCore:   "status",
 			clineInner:  map[string]any{"status": "running"},
-			wantKind:    LLMKindStatus,
-			wantChannel: LLMChannelStatus,
-			wantKeys:    map[string]any{LLMKeyStatus: "running"},
+			wantKind:    llmbackend.KindStatus,
+			wantChannel: llmbackend.ChannelStatus,
+			wantKeys:    map[string]any{llmbackend.KeyStatus: "running"},
 		},
 		{
 			semantic: "token usage",
@@ -121,9 +123,9 @@ func contractSamples() []contractSample {
 			}},
 			clineInner: map[string]any{"type": "usage", "inputTokens": float64(100), "outputTokens": float64(7),
 				"cacheReadTokens": float64(50), "totalCost": 0.0001},
-			wantKind:    LLMKindUsage,
-			wantChannel: LLMChannelMeta,
-			wantKeys:    map[string]any{LLMKeyInputTokens: int64(100), LLMKeyOutputTokens: int64(7)},
+			wantKind:    llmbackend.KindUsage,
+			wantChannel: llmbackend.ChannelMeta,
+			wantKeys:    map[string]any{llmbackend.KeyInputTokens: int64(100), llmbackend.KeyOutputTokens: int64(7)},
 		},
 	}
 }
@@ -133,7 +135,7 @@ func TestProviderEventContract(t *testing.T) {
 		t.Run(tc.semantic, func(t *testing.T) {
 			if !tc.clineOnly {
 				t.Run("cursor", func(t *testing.T) {
-					ev, ok := MapNativeLLMEvent(LLMProviderCursor, tc.cursor, time.Now())
+					ev, ok := llmbackend.MapNativeLLMEvent(llmbackend.ProviderCursor, tc.cursor, time.Now())
 					if !ok {
 						t.Fatal("cursor event dropped")
 					}
@@ -141,7 +143,7 @@ func TestProviderEventContract(t *testing.T) {
 				})
 			}
 			t.Run("cline", func(t *testing.T) {
-				cline := clineStreamAdapter{}
+				cline := llmbackend.ClineStreamAdapter{}
 				var native any
 				if tc.clineCore != "" {
 					native = clineEvent(tc.clineCore, tc.clineInner)
@@ -158,7 +160,7 @@ func TestProviderEventContract(t *testing.T) {
 	}
 }
 
-func assertContract(t *testing.T, ev LLMEvent, tc contractSample, extraKeys map[string]any, leg string) {
+func assertContract(t *testing.T, ev llmbackend.Event, tc contractSample, extraKeys map[string]any, leg string) {
 	t.Helper()
 	// Same semantic, same neutral keys; granularity may differ (Cursor blocks vs
 	// Cline deltas), so compare the kind family.
@@ -190,8 +192,8 @@ func assertContract(t *testing.T, ev LLMEvent, tc contractSample, extraKeys map[
 		}
 	}
 	if tc.wantNoDuration && leg == "cline" {
-		if _, present := ev.Payload[LLMKeyDurationMS]; present {
-			t.Fatalf("unexpected %s in payload %v", LLMKeyDurationMS, ev.Payload)
+		if _, present := ev.Payload[llmbackend.KeyDurationMS]; present {
+			t.Fatalf("unexpected %s in payload %v", llmbackend.KeyDurationMS, ev.Payload)
 		}
 	}
 	if tc.wantEmptyTextDelta && ev.TextDelta != "" {
@@ -200,7 +202,7 @@ func assertContract(t *testing.T, ev LLMEvent, tc contractSample, extraKeys map[
 	if tc.wantText != "" {
 		text := ev.TextDelta
 		if text == "" {
-			text, _ = ev.Payload[LLMKeyText].(string)
+			text, _ = ev.Payload[llmbackend.KeyText].(string)
 		}
 		if text != tc.wantText {
 			t.Fatalf("text=%q want %q", text, tc.wantText)
@@ -211,7 +213,7 @@ func assertContract(t *testing.T, ev LLMEvent, tc contractSample, extraKeys map[
 // TestProviderEventContractKeepsNativePayload guards the fidelity rule: neutral
 // keys are added next to the provider's own fields, never instead of them.
 func TestProviderEventContractKeepsNativePayload(t *testing.T) {
-	cursor, ok := MapNativeLLMEvent(LLMProviderCursor, cursorsdk.RunEvent{
+	cursor, ok := llmbackend.MapNativeLLMEvent(llmbackend.ProviderCursor, cursorsdk.RunEvent{
 		Type: "tool_call",
 		Payload: map[string]any{
 			"call_id": "c1", "name": "shell", "status": "completed", "args": map[string]any{"command": "ls"},
@@ -226,7 +228,7 @@ func TestProviderEventContractKeepsNativePayload(t *testing.T) {
 		}
 	}
 
-	cline, ok := clineStreamAdapter{}.MapEvent(clineAgentEvent(map[string]any{
+	cline, ok := llmbackend.ClineStreamAdapter{}.MapEvent(clineAgentEvent(map[string]any{
 		"type": "content_end", "contentType": "tool", "toolName": "run_commands",
 		"toolCallId": "c9", "output": "hi\n", "durationMs": float64(7),
 	}), time.Now())

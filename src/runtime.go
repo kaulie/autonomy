@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -420,24 +422,24 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		agent.Workspace = ws
 	}
 	backend := strings.ToLower(strings.TrimSpace(opts.Backend))
-	if backend == "" || backend == string(AgentBackendCursor) {
+	if backend == "" || backend == string(llmbackend.Cursor) {
 		// Capabilities name a purpose ("an autonomous coding agent"), not a
 		// vendor: the legacy "cursor" label means "the host default backend",
 		// which AUTONOMY_LLM_BACKEND selects at runtime.
-		backend = string(defaultAgentBackend())
+		backend = string(llmbackend.DefaultBackend())
 	}
-	switch AgentBackend(backend) {
-	case AgentBackendCursor:
+	switch llmbackend.Backend(backend) {
+	case llmbackend.Cursor:
 		if err := agent.AttachCursor(ctx, opts.Model); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
-	case AgentBackendCline:
+	case llmbackend.Cline:
 		if err := agent.AttachCline(ctx); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
-	case AgentBackendLocal:
+	case llmbackend.Local:
 		// Local-only session: no LLM attach; Prompt is unsupported.
 	default:
 		r.releaseRegistered(agent)
@@ -479,7 +481,7 @@ func (r *Runtime) releaseRegistered(agent *Agent) {
 	if agent == nil {
 		return
 	}
-	agent.disposeCursorSession(context.Background())
+	agent.disposeLLMSession(context.Background())
 	softDeleteAgent(agent.ID)
 	r.agents.Delete(agent.Name)
 }

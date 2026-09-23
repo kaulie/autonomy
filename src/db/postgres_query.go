@@ -5,6 +5,7 @@ import . "github.com/kaulie/autonomy/src"
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"time"
 )
 
@@ -126,7 +127,7 @@ func pgScanAgent(row pgAgentRow) (*Agent, error) {
 		return nil, err
 	}
 	a.Lifecycle = AgentLifecycle(lifecycle)
-	a.LLMProvider = LLMProvider(provider)
+	a.LLMProvider = llmbackend.Provider(provider)
 	a.DeletedAt = pgScanTime(deletedAt)
 	if taskID != "" {
 		a.CurrentTask = &Task{ID: taskID}
@@ -193,7 +194,7 @@ SELECT id, task_id, agent_id, cycle, mode, llm_provider, model, llm_agent_id,
        started_at, ended_at, created_at
 FROM reason_turns
 WHERE task_id = $1 AND agent_id = $2 AND status = $3
-ORDER BY id DESC LIMIT 1`, taskID, agentID, string(LLMStatusRunning)).Scan(
+ORDER BY id DESC LIMIT 1`, taskID, agentID, string(llmbackend.StatusRunning)).Scan(
 		&turn.ID, &turn.TaskID, &turn.AgentID, &turn.Cycle, &mode, &provider, &turn.Model, &turn.LLMAgentID,
 		&turn.Input, &turn.RawOutput, &turn.NormalizedOutput, &turn.RunID, &turn.Status, &turn.ErrorCode, &turn.ErrorMessage,
 		&turn.DurationMS, &turn.EventCount, &turn.InputTokens, &turn.OutputTokens, &turn.CacheReadTokens,
@@ -207,7 +208,7 @@ ORDER BY id DESC LIMIT 1`, taskID, agentID, string(LLMStatusRunning)).Scan(
 		return nil, fmt.Errorf("active reason turn: %w", err)
 	}
 	turn.Mode = ReasonMode(mode)
-	turn.LLMProvider = LLMProvider(provider)
+	turn.LLMProvider = llmbackend.Provider(provider)
 	turn.CreatedAt = createdAt.UTC()
 	turn.StartedAt = pgScanTime(startedAt)
 	turn.EndedAt = pgScanTime(endedAt)
@@ -253,7 +254,7 @@ LIMIT $4`, taskID, agentID, afterID, limit)
 			return nil, fmt.Errorf("scan llm message: %w", err)
 		}
 		m.Role = LLMMessageRole(role)
-		m.LLMProvider = LLMProvider(provider)
+		m.LLMProvider = llmbackend.Provider(provider)
 		if parentID.Valid {
 			m.ParentID = parentID.Int64
 		}

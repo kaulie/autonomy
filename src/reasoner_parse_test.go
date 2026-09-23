@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -41,7 +43,7 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	}
 	agent := &Agent{
 		ID: 10001, Name: "agent-10001", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral,
-		Backend: AgentBackendCursor, Workspace: "/tmp/ws/",
+		Backend: llmbackend.Cursor, Workspace: "/tmp/ws/",
 	}
 	ctx := DecisionContext{Task: task, Agent: agent, Cycle: 2}
 	prompt, err := buildReasoningPrompt(ctx, ReasoningInput{Text: "extra"})

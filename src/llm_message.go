@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"sort"
@@ -32,7 +34,7 @@ import (
 // It is a thin wrapper over chatAggregator — the very accumulator a live run
 // feeds event by event — so a stream derived at the end and a stream derived
 // while it runs can never disagree.
-func AggregateChatMessages(events []LLMEvent) []LLMMessage {
+func AggregateChatMessages(events []llmbackend.Event) []LLMMessage {
 	agg := newChatAggregator()
 	bySeq := map[int]LLMMessage{}
 	for _, ev := range events {
@@ -73,9 +75,9 @@ func newChatAggregator() *chatAggregator {
 }
 
 // add folds one event in and returns the messages it completed, in seq order.
-func (a *chatAggregator) add(ev LLMEvent) []LLMMessage {
+func (a *chatAggregator) add(ev llmbackend.Event) []LLMMessage {
 	switch ev.Channel {
-	case LLMChannelThought:
+	case llmbackend.ChannelThought:
 		if n := len(a.groups); n > 0 && a.groups[n-1].role == LLMMessageRoleThinking {
 			a.groups[n-1].appendText(ev)
 			return nil
@@ -84,8 +86,8 @@ func (a *chatAggregator) add(ev LLMEvent) []LLMMessage {
 		g.appendText(ev)
 		a.groups = append(a.groups, g)
 		return nil
-	case LLMChannelTool:
-		callID := payloadString(ev.Payload, "call_id")
+	case llmbackend.ChannelTool:
+		callID := llmbackend.PayloadString(ev.Payload, "call_id")
 		if callID != "" {
 			if g, ok := a.byCallID[callID]; ok {
 				g.mergeTool(ev)
@@ -164,7 +166,7 @@ type chatGroup struct {
 	reportedMS *int64
 }
 
-func (g *chatGroup) appendText(ev LLMEvent) {
+func (g *chatGroup) appendText(ev llmbackend.Event) {
 	g.text.WriteString(ev.TextDelta)
 	if g.createdAt.IsZero() {
 		g.createdAt = ev.CreatedAt
@@ -208,7 +210,7 @@ func numberPayload(payload map[string]any, key string) (int64, bool) {
 	}
 }
 
-func (g *chatGroup) mergeTool(ev LLMEvent) {
+func (g *chatGroup) mergeTool(ev llmbackend.Event) {
 	if g.createdAt.IsZero() {
 		g.createdAt = ev.CreatedAt
 	}

@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"path/filepath"
@@ -142,7 +144,7 @@ func TestAPlannerTurnIsRetriedWhenTheTurnWasCutOff(t *testing.T) {
 	if cycles[0] != 2 || cycles[1] != 2 {
 		t.Fatalf("cycles=%v, want both attempts recorded as the decision cycle they are", cycles)
 	}
-	if statuses[0] != string(LLMStatusError) || inputs[0] != "truncate my turn" {
+	if statuses[0] != string(llmbackend.StatusError) || inputs[0] != "truncate my turn" {
 		t.Errorf("first turn = %q/%q, want the failure the provider reported on the original prompt", statuses[0], inputs[0])
 	}
 	if !strings.Contains(inputs[1], "Your turn was cut off") {

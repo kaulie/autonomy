@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"path/filepath"
 	"strings"
@@ -924,7 +925,7 @@ func (s *SQLiteStore) InsertReasonTurn(turn ReasonTurn) error {
 		turn.NormalizedOutput = NormalizeReasonOutput(turn.RawOutput)
 	}
 	if turn.Status == "" {
-		turn.Status = string(LLMStatusFinished)
+		turn.Status = string(llmbackend.StatusFinished)
 	}
 	if turn.StartedAt.IsZero() {
 		turn.StartedAt = turn.CreatedAt
@@ -980,7 +981,7 @@ func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 		turn.CreatedAt = time.Now()
 	}
 	if turn.Status == "" {
-		turn.Status = string(LLMStatusRunning)
+		turn.Status = string(llmbackend.StatusRunning)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1005,7 +1006,7 @@ func (s *SQLiteStore) BeginReasonTurn(turn ReasonTurn) (ReasonTurnHandle, error)
 // AppendLLMEvents appends a batch of stream events to a run in one transaction.
 // INSERT OR IGNORE keeps appends idempotent on the UNIQUE(turn_id, seq) key, so
 // a replayed stream (WaitLiveRun fallback) cannot double-write the same seq.
-func (s *SQLiteStore) AppendLLMEvents(turnID int64, runID string, events []LLMEvent) error {
+func (s *SQLiteStore) AppendLLMEvents(turnID int64, runID string, events []llmbackend.Event) error {
 	if turnID == 0 || len(events) == 0 {
 		return nil
 	}
@@ -1039,7 +1040,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 // FinishReasonTurn finalizes the run header (status, usage, timing, outputs),
 // records the assistant message linked to the user input, and backfills the run
 // id onto events written before it was known.
-func (s *SQLiteStore) FinishReasonTurn(h ReasonTurnHandle, res LLMRunResult) error {
+func (s *SQLiteStore) FinishReasonTurn(h ReasonTurnHandle, res llmbackend.RunResult) error {
 	if h.TurnID == 0 {
 		return nil
 	}
@@ -1101,7 +1102,7 @@ WHERE id = ?
 // aggregated thinking/tool rows, so the return stays the run's final message. It
 // is idempotent: the UNIQUE(turn_id, seq) key plus INSERT OR IGNORE keeps one
 // assistant row per run.
-func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res LLMRunResult, seq int) error {
+func (s *SQLiteStore) recordAssistantMessage(h ReasonTurnHandle, res llmbackend.RunResult, seq int) error {
 	ended := res.EndedAt
 	if ended.IsZero() {
 		ended = time.Now()
@@ -1129,7 +1130,7 @@ FROM reason_turns WHERE id = ?
 // assistant row takes is read back from the table (nextMessageSeq) rather than
 // assumed here, because the same rows may already have been written while the run
 // was streaming. Re-writing a row is an upsert, so a replayed finish is a no-op.
-func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []LLMEvent) error {
+func (s *SQLiteStore) recordAggregatedMessages(turnID, parentID int64, events []llmbackend.Event) error {
 	for _, m := range AggregateChatMessages(events) {
 		m.TurnID = turnID
 		m.ParentID = parentID
@@ -1234,17 +1235,17 @@ func (s *SQLiteStore) nextMessageSeq(turnID int64) (int, error) {
 }
 
 // ListLLMEvents returns a run's stream events in Seq order for replay/analysis.
-func (s *SQLiteStore) ListLLMEvents(turnID int64) ([]LLMEvent, error) {
+func (s *SQLiteStore) ListLLMEvents(turnID int64) ([]llmbackend.Event, error) {
 	rows, err := s.db.Query(`SELECT seq, offset_token, channel, kind, event_type, role, name, text_delta, payload, elapsed_ms, created_at
 FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 	if err != nil {
 		return nil, fmt.Errorf("query llm events: %w", err)
 	}
 	defer rows.Close()
-	var out []LLMEvent
+	var out []llmbackend.Event
 	for rows.Next() {
 		var (
-			ev        LLMEvent
+			ev        llmbackend.Event
 			channel   string
 			kind      string
 			payload   string
@@ -1254,8 +1255,8 @@ FROM llm_events WHERE turn_id = ? ORDER BY seq`, turnID)
 			&ev.TextDelta, &payload, &ev.ElapsedMS, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan llm event: %w", err)
 		}
-		ev.Channel = LLMEventChannel(channel)
-		ev.Kind = LLMEventKind(kind)
+		ev.Channel = llmbackend.EventChannel(channel)
+		ev.Kind = llmbackend.EventKind(kind)
 		ev.CreatedAt = parseTime(createdAt)
 		if payload != "" {
 			var m map[string]any
@@ -1297,7 +1298,7 @@ FROM llm_messages WHERE turn_id = ? ORDER BY seq, id`, turnID)
 			return nil, fmt.Errorf("scan llm message: %w", err)
 		}
 		m.Role = LLMMessageRole(role)
-		m.LLMProvider = LLMProvider(provider)
+		m.LLMProvider = llmbackend.Provider(provider)
 		if parentID.Valid {
 			m.ParentID = parentID.Int64
 		}
@@ -1347,7 +1348,7 @@ WHERE (t.input <> '' OR t.raw_output <> '')
 			normalized = NormalizeReasonOutput(raw)
 		}
 		pending = append(pending, pendingTurn{id: id, turn: ReasonTurn{
-			TaskID: taskID, AgentID: agentID, Cycle: cycle, LLMProvider: LLMProvider(provider), Model: model,
+			TaskID: taskID, AgentID: agentID, Cycle: cycle, LLMProvider: llmbackend.Provider(provider), Model: model,
 			Input: input, RawOutput: raw, NormalizedOutput: normalized, RunID: runID, Status: status,
 			CreatedAt: parseTime(createdAt),
 		}})

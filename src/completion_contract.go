@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -167,7 +169,7 @@ func parseCriterion(raw string) (Criterion, error) {
 	}
 	criterion := Criterion{
 		Name:        strings.TrimSpace(c.Name),
-		Requirement: strings.TrimSpace(firstNonEmptyString(c.Requirement, c.Criterion)),
+		Requirement: strings.TrimSpace(llmbackend.FirstNonEmptyString(c.Requirement, c.Criterion)),
 		Raw:         trimmed,
 	}
 	source, err := criterionEvidenceSource(c.Evidence)

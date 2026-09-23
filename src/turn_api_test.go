@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -64,35 +66,35 @@ func seedTurnLog(t *testing.T) (rawStore, map[string]int64) {
 	turns := []ReasonTurn{
 		{ // A: a plan turn with cost, and the literal % and _ the search must respect
 			TaskID: "task-29", AgentID: 10001, Cycle: 1, Mode: ReasonModePlan,
-			LLMProvider: LLMProviderCline, Model: "deepseek-v4-flash",
+			LLMProvider: llmbackend.ProviderCline, Model: "deepseek-v4-flash",
 			Input: "plan this: 100% done, 50_50 path", RawOutput: "```json\n{\"type\":\"plan\"}\n```",
-			Status: string(LLMStatusFinished), DurationMS: 445086, CostCents: &cost,
+			Status: string(llmbackend.StatusFinished), DurationMS: 445086, CostCents: &cost,
 			CreatedAt: turnLogAt.Add(time.Minute),
 		},
 		{ // B: the same agent one cycle later, one of the two "agent" turns
 			TaskID: "task-29", AgentID: 10001, Cycle: 2, Mode: ReasonModeAgent,
-			LLMProvider: LLMProviderCline, Model: "deepseek-v4-flash",
-			Input: "do the thing", RawOutput: "done", Status: string(LLMStatusFinished),
+			LLMProvider: llmbackend.ProviderCline, Model: "deepseek-v4-flash",
+			Input: "do the thing", RawOutput: "done", Status: string(llmbackend.StatusFinished),
 			DurationMS: 1200, TotalTokens: 3000, CreatedAt: turnLogAt.Add(2 * time.Minute),
 		},
 		{ // C: another agent, a failure, and a provider that is not the default
 			TaskID: "task-29", AgentID: 10002, Cycle: 1, Mode: ReasonModePlan,
-			LLMProvider: LLMProviderCursor, Model: "composer-2",
-			Input: "re-plan", RawOutput: "", Status: string(LLMStatusError),
+			LLMProvider: llmbackend.ProviderCursor, Model: "composer-2",
+			Input: "re-plan", RawOutput: "", Status: string(llmbackend.StatusError),
 			ErrorMessage: "upstream said no", DurationMS: 300, InputTokens: 10, CostCents: &half,
 			CreatedAt: turnLogAt.Add(3 * time.Minute),
 		},
 		{ // D: a task with no row of its own; a cost of zero is zero, not unknown
 			TaskID: "task-27", AgentID: 10001, Cycle: 1, Mode: ReasonModePlan,
-			LLMProvider: LLMProviderCline, Model: "deepseek-v4-flash",
+			LLMProvider: llmbackend.ProviderCline, Model: "deepseek-v4-flash",
 			Input: "这是中文提示词：unrelated prompt", RawOutput: "ok",
-			Status: string(LLMStatusFinished), DurationMS: 60, TotalTokens: 5, CostCents: &zero,
+			Status: string(llmbackend.StatusFinished), DurationMS: 60, TotalTokens: 5, CostCents: &zero,
 			CreatedAt: turnLogAt.Add(4 * time.Minute),
 		},
 		{ // E: an agent id no agent row answers, and no cost at all
 			TaskID: "task-28", AgentID: 10099, Cycle: 1, Mode: ReasonModeAgent,
-			LLMProvider: LLMProviderCursor, Model: "composer-2",
-			Input: "orphan agent", RawOutput: "ok", Status: string(LLMStatusFinished),
+			LLMProvider: llmbackend.ProviderCursor, Model: "composer-2",
+			Input: "orphan agent", RawOutput: "ok", Status: string(llmbackend.StatusFinished),
 			DurationMS: 90, TotalTokens: 7, CreatedAt: turnLogAt.Add(5 * time.Minute),
 		},
 	}
@@ -117,7 +119,7 @@ SELECT id FROM reason_turns WHERE task_id = ? AND agent_id = ? AND cycle = ? AND
 	res, err := store.RawDB().Exec(`
 INSERT INTO reason_turns (task_id, agent_id, cycle, mode, input, raw_output, normalized_output, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"task-28", "a-old", 1, "plan", "legacy row", "legacy", "legacy", string(LLMStatusFinished),
+		"task-28", "a-old", 1, "plan", "legacy row", "legacy", "legacy", string(llmbackend.StatusFinished),
 		turnLogAt.Add(-time.Hour).UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +154,7 @@ func TestTurnQueryStoreFiltersOrdersAndPages(t *testing.T) {
 		{"task_id", TurnQuery{TaskID: "task-29"}, 3},
 		{"mode", TurnQuery{Mode: ReasonModeAgent}, 2},
 		{"model", TurnQuery{Model: "composer-2"}, 2},
-		{"status", TurnQuery{Status: string(LLMStatusError)}, 1},
+		{"status", TurnQuery{Status: string(llmbackend.StatusError)}, 1},
 		{"agent name", TurnQuery{Agent: "agent-10001"}, 3},
 		{"agent nobody answers", TurnQuery{Agent: "agent-10099"}, 0},
 		{"search, literal percent", TurnQuery{Search: "100%"}, 1},
@@ -256,7 +258,7 @@ func TestTurnQueryStoreReadsTheContractShape(t *testing.T) {
 	if first.AgentID != 10001 || first.Agent != "agent-10001" {
 		t.Fatalf("agent = %d / %q, want 10001 / agent-10001", first.AgentID, first.Agent)
 	}
-	if first.Provider != LLMProviderCline || first.Model != "deepseek-v4-flash" {
+	if first.Provider != llmbackend.ProviderCline || first.Model != "deepseek-v4-flash" {
 		t.Fatalf("provider/model = %q / %q", first.Provider, first.Model)
 	}
 	if !strings.Contains(first.Output, "```json") {

@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"errors"
@@ -49,14 +51,9 @@ func pointSharedCursorClientAt(t *testing.T, handler http.Handler) {
 	t.Setenv("CURSOR_SDK_BRIDGE_URL", srv.URL)
 	t.Setenv("CURSOR_SDK_BRIDGE_TOKEN", "test-token")
 
-	sharedCursorMu.Lock()
-	previous := sharedCursorClnt
-	sharedCursorClnt = nil
-	sharedCursorMu.Unlock()
+	previous := llmbackend.SwapCursorClient(nil)
 	t.Cleanup(func() {
-		sharedCursorMu.Lock()
-		sharedCursorClnt = previous
-		sharedCursorMu.Unlock()
+		llmbackend.SwapCursorClient(previous)
 	})
 }
 
@@ -123,8 +120,8 @@ func TestAcceptingAnInstructionOpensNoProviderSession(t *testing.T) {
 	agent := &Agent{
 		State:       "idle",
 		Lifecycle:   AgentLifecyclePersistent,
-		Backend:     AgentBackendCursor,
-		LLMProvider: LLMProviderCursor,
+		Backend:     llmbackend.Cursor,
+		LLMProvider: llmbackend.ProviderCursor,
 		Model:       "composer-2",
 		LLMAgentID:  "cursor-session-from-before",
 		CurrentTask: task,

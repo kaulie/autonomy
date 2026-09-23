@@ -169,9 +169,9 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 
 | 关注点 | 文件 |
 |--------|------|
-| 中立事件模型 / provider 适配器注册 | `src/llm_event.go` |
-| Cursor 事件映射 | `src/llm_event_cursor.go` |
-| Cline 事件映射 | `src/llm_event_cline.go`（见 [cline-reasoner.md](cline-reasoner.md)） |
+| 中立事件模型 / provider 适配器注册 | `src/llmbackend/events.go` |
+| Cursor 事件映射 | `src/llmbackend/events_cursor.go` |
+| Cline 事件映射 | `src/llmbackend/events_cline.go`（见 [cline-reasoner.md](cline-reasoner.md)） |
 | header + 事件写入 / 边跑边写的消息编排 | `src/llm_trace.go` |
 | 事件流 → 消息聚合 | `src/llm_message.go`（见 [llm-message.md](llm-message.md)） |
 | 每行消息 → 日志 | `src/llm_message_log.go` |
@@ -182,7 +182,7 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 
 持久化层只认识 `LLMEvent`。接入新 provider 只需三步：
 
-1. 实现 `LLMStreamAdapter`（`src/llm_event.go`）：把它自己的 native 事件映射成 `LLMEvent`。
+1. 实现 `llmbackend.streamAdapter`（`src/llmbackend/events.go`）：把它自己的 native 事件映射成 `LLMEvent`。
 
    ```go
    type LLMStreamAdapter interface {

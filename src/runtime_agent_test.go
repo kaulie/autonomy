@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"path/filepath"
@@ -17,7 +19,7 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
 		Purpose:   "test",
 		Workspace: requested,
-		Backend:   string(AgentBackendLocal),
+		Backend:   string(llmbackend.Local),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +53,7 @@ func TestAcquiredWorkerIsKeptUnlessAskedToBeThrowaway(t *testing.T) {
 	f := NewAgentFactory()
 	rt := NewRuntime(f)
 
-	kept, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{Purpose: "code_edit", Backend: string(AgentBackendLocal)})
+	kept, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{Purpose: "code_edit", Backend: string(llmbackend.Local)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestAcquiredWorkerIsKeptUnlessAskedToBeThrowaway(t *testing.T) {
 	}
 
 	throwaway, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{
-		Purpose: "one_shot", Backend: string(AgentBackendLocal), Ephemeral: true,
+		Purpose: "one_shot", Backend: string(llmbackend.Local), Ephemeral: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +165,7 @@ func TestRuntimeAcquireAgentKnowsWhatItIsFor(t *testing.T) {
 	rt := NewRuntime(f)
 	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
 		Purpose: "code_edit",
-		Backend: string(AgentBackendLocal),
+		Backend: string(llmbackend.Local),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +195,7 @@ func TestRuntimeAcquireAgentWithoutWorkspaceUsesItsOwn(t *testing.T) {
 	rt := NewRuntime(f)
 	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
 		Purpose: "code_edit",
-		Backend: string(AgentBackendLocal),
+		Backend: string(llmbackend.Local),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +228,7 @@ func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
 	sess, err := rt.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
 		Purpose: "code_edit",
 		TaskID:  "task-9",
-		Backend: string(AgentBackendLocal),
+		Backend: string(llmbackend.Local),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +251,7 @@ func TestRuntimeAcquireAgentRecordsTheDelegatedTask(t *testing.T) {
 func TestNewCursorClientIsSingleEntry(t *testing.T) {
 	t.Parallel()
 	// Smoke: constructor returns a client; real bridge not required.
-	c := newCursorClient(t.TempDir())
+	c := llmbackend.NewCursorClient(t.TempDir())
 	if c == nil {
 		t.Fatal("nil client")
 	}

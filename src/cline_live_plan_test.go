@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"os"
@@ -42,7 +44,7 @@ func TestLLMTraceLivePlanTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan turn 1: %v", err)
 	}
-	if runRes.Status != LLMStatusFinished || !strings.Contains(strings.ToLower(text), "plan-ack") {
+	if runRes.Status != llmbackend.StatusFinished || !strings.Contains(strings.ToLower(text), "plan-ack") {
 		t.Fatalf("plan turn 1: status=%s text=%q", runRes.Status, text)
 	}
 	session := trace.runID
@@ -59,7 +61,7 @@ func TestLLMTraceLivePlanTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan turn 2 (resident session): %v", err)
 	}
-	t.Logf("plan turn 2: status=%s text=%q (session %s)", runRes2.Status, text2, firstNonEmptyString(runRes2.ProviderRunID, session))
+	t.Logf("plan turn 2: status=%s text=%q (session %s)", runRes2.Status, text2, llmbackend.FirstNonEmptyString(runRes2.ProviderRunID, session))
 	if !strings.Contains(strings.ToLower(text2), "plan-ack") {
 		t.Fatalf("plan turn 2 did not remember turn 1: %q", text2)
 	}

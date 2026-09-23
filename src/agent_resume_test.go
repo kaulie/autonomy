@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"context"
 	"fmt"
@@ -38,7 +40,7 @@ func pairedTask(t *testing.T, store rawStore, taskID string) (*Task, *Agent) {
 	agent := &Agent{
 		State:       "idle",
 		Lifecycle:   AgentLifecyclePersistent,
-		LLMProvider: LLMProviderCline,
+		LLMProvider: llmbackend.ProviderCline,
 		Model:       "deepseek-v4-pro",
 		LLMAgentID:  "cls-before-the-restart",
 		CurrentTask: task,
@@ -111,7 +113,7 @@ func TestAfterARestartATaskResumesTheAgentItsRowNames(t *testing.T) {
 		t.Fatalf("LLMAgentID=%q, want the recorded session %q: accepting an instruction opens no session",
 			got.LLMAgentID, agent.LLMAgentID)
 	}
-	if got.cursorAgent != nil || got.clineAgent != nil || got.Session != nil {
+	if got.llm != nil || got.Session != nil {
 		t.Fatal("the accept path attached a provider session: it belongs to the turn")
 	}
 	stored, err := store.GetAgent(agent.ID)
@@ -145,13 +147,13 @@ func TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone(t *testing.T) {
 	if _, err := got.ensureLLMSession(context.Background(), "", got.Workspace, ReasonModePlan); err != nil {
 		t.Fatalf("the first turn could not open the session the accept left alone: %v", err)
 	}
-	if got.clineAgent == nil {
-		t.Fatal("the turn ran without attaching the agent's session")
+	if got.llm == nil || got.LLMProvider != llmbackend.ProviderCline {
+		t.Fatalf("provider=%q, want the turn to have attached the agent's Cline session", got.LLMProvider)
 	}
 	// Opening the session asks the bridge to continue the recorded one, and records
 	// nothing yet: the live session id exists only once a run started.
-	if got.clineAgent.ResumeSessionID != agent.LLMAgentID {
-		t.Fatalf("resume=%q, want the recorded session %q", got.clineAgent.ResumeSessionID, agent.LLMAgentID)
+	if !got.llm.Resumed() {
+		t.Fatalf("the attach did not continue the recorded session %q", agent.LLMAgentID)
 	}
 	if got.LLMAgentID != agent.LLMAgentID {
 		t.Fatalf("LLMAgentID=%q, want the recorded session %q until a run starts",
@@ -166,9 +168,9 @@ func TestTheFirstTurnOpensTheSessionAnAcceptLeftAlone(t *testing.T) {
 	if _, _, err := got.PromptLLMStream(context.Background(), "plan something", ReasonModePlan, nil); err != nil {
 		t.Fatalf("the turn's prompt: %v", err)
 	}
-	if got.LLMAgentID == agent.LLMAgentID || got.LLMAgentID != got.clineAgent.SessionID {
+	if got.LLMAgentID == agent.LLMAgentID || got.LLMAgentID != got.llm.ProviderSessionID() {
 		t.Fatalf("LLMAgentID=%q, want this process's live session %q, not the recorded one (%q)",
-			got.LLMAgentID, got.clineAgent.SessionID, agent.LLMAgentID)
+			got.LLMAgentID, got.llm.ProviderSessionID(), agent.LLMAgentID)
 	}
 	stored, err := store.GetAgent(agent.ID)
 	if err != nil {
@@ -406,7 +408,7 @@ func TestARunLeavesTheAgentResident(t *testing.T) {
 		if agent.State != "idle" {
 			t.Fatalf("after instruction %d state=%q, want idle (a finished run does not leave it running)", i, agent.State)
 		}
-		if agent.clineAgent == nil || agent.LLMAgentID == "" {
+		if agent.llm == nil || agent.LLMAgentID == "" {
 			t.Fatalf("after instruction %d the agent holds no session (%q): a resident agent keeps it", i, agent.LLMAgentID)
 		}
 		if agent.needsLLMFrame() {

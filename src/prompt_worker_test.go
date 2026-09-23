@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"strings"
@@ -20,7 +22,7 @@ import (
 func TestIdentityIsWhatTheAgentIsNotItsSituation(t *testing.T) {
 	worker := &Agent{
 		ID: 10126, Name: "agent-10126", Role: AgentRoleWorker, Purpose: "code_edit",
-		Model: "composer-2", LLMProvider: LLMProviderCline, Backend: AgentBackendCline,
+		Model: "composer-2", LLMProvider: llmbackend.ProviderCline, Backend: llmbackend.Cline,
 		Workspace: "/sandbox/10126/",
 	}
 	got := string(formatAgentIdentityJSON(worker))
@@ -94,10 +96,10 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 	capability.RegisterDefaults(f, capability.Deps{})
 	_autonomy = &Autonomy{CapabilityFactory: f}
 
-	planner := &Agent{ID: 10095, Name: "agent-10095", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCursor, Workspace: "/sandbox/10095/"}
+	planner := &Agent{ID: 10095, Name: "agent-10095", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral, Backend: llmbackend.Cursor, Workspace: "/sandbox/10095/"}
 	worker := &Agent{
 		ID: 10099, Name: "agent-code_edit-1", Role: AgentRoleWorker, Purpose: "code_edit", Model: "composer-2",
-		Lifecycle: AgentLifecycleEphemeral, Backend: AgentBackendCline, Workspace: "/sandbox/10099/",
+		Lifecycle: AgentLifecycleEphemeral, Backend: llmbackend.Cline, Workspace: "/sandbox/10099/",
 	}
 	task := &Task{ID: "task-9", Description: "add a /healthz endpoint", GoalType: GoalType_FEATURE}
 	ctx := DecisionContext{

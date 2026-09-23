@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"errors"
 	"path/filepath"
@@ -532,7 +534,7 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 		t.Fatalf("interactions=%v err=%v, want the worker run recorded on the step", interactions, err)
 	}
 	got := interactions[0]
-	if got.Kind != InteractionLLM || got.Provider != string(AgentBackendCline) || got.ReasonTurnID == 0 {
+	if got.Kind != InteractionLLM || got.Provider != string(llmbackend.Cline) || got.ReasonTurnID == 0 {
 		t.Fatalf("interaction=%+v, want the LLM run this step talked to", got)
 	}
 	// The run it points at is the worker's own, not the planner's.

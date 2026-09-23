@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"path/filepath"
 	"testing"
@@ -17,7 +19,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 
 	handle, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "t-msg", AgentID: 11, Cycle: 2, Mode: ReasonModeAgent,
-		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "what is 2+2?",
+		LLMProvider: llmbackend.ProviderCursor, Model: "composer-2", Input: "what is 2+2?",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -25,8 +27,8 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	if handle.TurnID == 0 || handle.InputMessageID == 0 {
 		t.Fatalf("handle=%+v, want non-zero turn and input message ids", handle)
 	}
-	if err := store.FinishReasonTurn(handle, LLMRunResult{
-		ProviderRunID: "run-9", Status: LLMStatusFinished, RawOutput: "4",
+	if err := store.FinishReasonTurn(handle, llmbackend.RunResult{
+		ProviderRunID: "run-9", Status: llmbackend.StatusFinished, RawOutput: "4",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +44,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	if in.Role != LLMMessageRoleUser || in.Content != "what is 2+2?" || in.Seq != LLMMessageSeqUser {
 		t.Fatalf("input message=%+v", in)
 	}
-	if in.AgentID != 11 || in.TaskID != "t-msg" || in.Cycle != 2 || in.LLMProvider != LLMProviderCursor {
+	if in.AgentID != 11 || in.TaskID != "t-msg" || in.Cycle != 2 || in.LLMProvider != llmbackend.ProviderCursor {
 		t.Fatalf("input message metadata=%+v", in)
 	}
 	if in.ParentID != 0 {
@@ -51,7 +53,7 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	if out.Role != LLMMessageRoleAssistant || out.Content != "4" || out.Seq != LLMMessageSeqAssistant {
 		t.Fatalf("output message=%+v", out)
 	}
-	if out.RunID != "run-9" || out.Status != string(LLMStatusFinished) {
+	if out.RunID != "run-9" || out.Status != string(llmbackend.StatusFinished) {
 		t.Fatalf("output run/status=%q/%q", out.RunID, out.Status)
 	}
 	// The return traces back to the specific input record.
@@ -71,8 +73,8 @@ func TestLLMMessagesSeparateRecordsLinked(t *testing.T) {
 	}
 
 	// Finishing again must not duplicate the assistant message.
-	if err := store.FinishReasonTurn(handle, LLMRunResult{
-		ProviderRunID: "run-9", Status: LLMStatusFinished, RawOutput: "4",
+	if err := store.FinishReasonTurn(handle, llmbackend.RunResult{
+		ProviderRunID: "run-9", Status: llmbackend.StatusFinished, RawOutput: "4",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func TestInsertReasonTurnWritesLinkedMessages(t *testing.T) {
 	fenced := "```json\n{\"a\":1}\n```"
 	if err := store.InsertReasonTurn(ReasonTurn{
 		TaskID: "t-one", AgentID: 12, Cycle: 1, Mode: ReasonModePlan,
-		LLMProvider: LLMProviderCursor, Model: "composer-2",
+		LLMProvider: llmbackend.ProviderCursor, Model: "composer-2",
 		Input: "plan it", RawOutput: fenced,
 	}); err != nil {
 		t.Fatal(err)
@@ -141,9 +143,9 @@ func TestLLMTraceRecordsLinkedMessages(t *testing.T) {
 	_store = store
 	t.Cleanup(func() { _store = prev })
 
-	agent := &Agent{ID: 55, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+	agent := &Agent{ID: 55, LLMProvider: llmbackend.ProviderCursor, Model: "composer-2"}
 	trace := BeginLLMTrace(agent, "task-m", 4, ReasonModePlan, "prompt text")
-	trace.Finish(LLMRunResult{ProviderRunID: "run-m", Status: LLMStatusFinished, RawOutput: "answer"})
+	trace.Finish(llmbackend.RunResult{ProviderRunID: "run-m", Status: llmbackend.StatusFinished, RawOutput: "answer"})
 
 	var turnID int64
 	if err := store.RawDB().QueryRow(`SELECT id FROM reason_turns WHERE agent_id = ?`, 55).Scan(&turnID); err != nil {
@@ -179,8 +181,8 @@ func TestBackfillLLMMessagesFromExistingTurns(t *testing.T) {
 	if _, err := store.RawDB().Exec(`INSERT INTO reason_turns
 (task_id, agent_id, cycle, mode, llm_provider, model, input, raw_output, normalized_output, run_id, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"t-old", 3, 2, string(ReasonModeAgent), string(LLMProviderCursor), "composer-2",
-		"legacy in", "legacy out", "", "run-old", string(LLMStatusFinished), "2026-01-01T00:00:00Z"); err != nil {
+		"t-old", 3, 2, string(ReasonModeAgent), string(llmbackend.ProviderCursor), "composer-2",
+		"legacy in", "legacy out", "", "run-old", string(llmbackend.StatusFinished), "2026-01-01T00:00:00Z"); err != nil {
 		store.Close()
 		t.Fatal(err)
 	}
@@ -247,7 +249,7 @@ func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
 
 	handle, err := store.BeginReasonTurn(ReasonTurn{
 		TaskID: "t-agg", AgentID: 7, Cycle: 1, Mode: ReasonModeAgent,
-		LLMProvider: LLMProviderCursor, Model: "composer-2", Input: "do it",
+		LLMProvider: llmbackend.ProviderCursor, Model: "composer-2", Input: "do it",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -255,24 +257,24 @@ func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
 	// A realistic stream: thinking arrives as token deltas, the tool call and its
 	// result are two separate events sharing a call_id, and the assistant text is
 	// streamed in chunks too (its deltas must NOT become their own rows).
-	events := []LLMEvent{
-		{Seq: 0, Channel: LLMChannelThought, EventType: "thinking", TextDelta: "Let"},
-		{Seq: 1, Channel: LLMChannelThought, EventType: "thinking", TextDelta: " me think"},
-		{Seq: 2, Channel: LLMChannelAssistant, EventType: "assistant", TextDelta: "Hel"},
-		{Seq: 3, Channel: LLMChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
+	events := []llmbackend.Event{
+		{Seq: 0, Channel: llmbackend.ChannelThought, EventType: "thinking", TextDelta: "Let"},
+		{Seq: 1, Channel: llmbackend.ChannelThought, EventType: "thinking", TextDelta: " me think"},
+		{Seq: 2, Channel: llmbackend.ChannelAssistant, EventType: "assistant", TextDelta: "Hel"},
+		{Seq: 3, Channel: llmbackend.ChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
 			"call_id": "c1", "name": "shell", "status": "running", "args": map[string]any{"command": "ls"},
 		}},
-		{Seq: 4, Channel: LLMChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
+		{Seq: 4, Channel: llmbackend.ChannelTool, EventType: "tool_call", Name: "shell", Payload: map[string]any{
 			"call_id": "c1", "name": "shell", "status": "completed", "args": map[string]any{"command": "ls"},
 			"result": map[string]any{"exit": 0, "stdout": "a\nb"},
 		}},
-		{Seq: 5, Channel: LLMChannelAssistant, EventType: "assistant", TextDelta: "lo"},
+		{Seq: 5, Channel: llmbackend.ChannelAssistant, EventType: "assistant", TextDelta: "lo"},
 	}
 	if err := store.AppendLLMEvents(handle.TurnID, "run-agg", events); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.FinishReasonTurn(handle, LLMRunResult{
-		ProviderRunID: "run-agg", Status: LLMStatusFinished, RawOutput: "Hello",
+	if err := store.FinishReasonTurn(handle, llmbackend.RunResult{
+		ProviderRunID: "run-agg", Status: llmbackend.StatusFinished, RawOutput: "Hello",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -320,8 +322,8 @@ func TestLLMMessagesAggregateThinkingAndTools(t *testing.T) {
 	}
 
 	// Finishing again must be idempotent: same rows, no duplicates.
-	if err := store.FinishReasonTurn(handle, LLMRunResult{
-		ProviderRunID: "run-agg", Status: LLMStatusFinished, RawOutput: "Hello",
+	if err := store.FinishReasonTurn(handle, llmbackend.RunResult{
+		ProviderRunID: "run-agg", Status: llmbackend.StatusFinished, RawOutput: "Hello",
 	}); err != nil {
 		t.Fatal(err)
 	}

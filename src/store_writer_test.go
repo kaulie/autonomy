@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"path/filepath"
 	"testing"
@@ -53,7 +55,7 @@ func TestRecordReasonIOCursorBackendUsesPlanMode(t *testing.T) {
 	_store = store
 	t.Cleanup(func() { _store = prev })
 
-	agent := &Agent{ID: 9, Backend: AgentBackendCursor, LLMProvider: LLMProviderCursor, Model: "composer-2"}
+	agent := &Agent{ID: 9, Backend: llmbackend.Cursor, LLMProvider: llmbackend.ProviderCursor, Model: "composer-2"}
 	recordReasonIO(DecisionContext{Agent: agent, Task: &Task{ID: "t-cursor"}, Cycle: 1}, "in", "out")
 
 	turns, _, err := store.ListTurnsByTask("t-cursor", 0)
@@ -76,7 +78,7 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	t.Cleanup(func() { _store = prev })
 
 	agent := &Agent{
-		ID: 7, LLMProvider: LLMProviderCursor, Model: "composer-2",
+		ID: 7, LLMProvider: llmbackend.ProviderCursor, Model: "composer-2",
 	}
 	recordAgentPrompt(agent, "task-1", "please edit code", "changed files: a.go")
 
@@ -97,7 +99,7 @@ func TestRecordAgentPromptPersistsTurn(t *testing.T) {
 	if turn.Mode != ReasonModeAgent {
 		t.Fatalf("mode=%q, want %q", turn.Mode, ReasonModeAgent)
 	}
-	if turn.Provider != LLMProviderCursor || turn.Model != "composer-2" {
+	if turn.Provider != llmbackend.ProviderCursor || turn.Model != "composer-2" {
 		t.Fatalf("provider=%q model=%q", turn.Provider, turn.Model)
 	}
 }

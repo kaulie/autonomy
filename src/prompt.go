@@ -1,5 +1,7 @@
 package autonomy
 
+import "github.com/kaulie/autonomy/src/llmbackend"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -113,12 +115,10 @@ func applyPolicyPlaceholders(policy string, values map[string]string) string {
 }
 
 // projectRoot returns PROJECT_ROOT; empty or unset is an error for callers that need it.
+// The variable is read by the backend package too (it looks for its own assets under it);
+// one reader keeps the two from drifting.
 func projectRoot() (string, error) {
-	root := strings.TrimSpace(os.Getenv("PROJECT_ROOT"))
-	if root == "" {
-		return "", fmt.Errorf("PROJECT_ROOT is required")
-	}
-	return root, nil
+	return llmbackend.ProjectRoot()
 }
 
 // loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V2.md at runtime.
@@ -258,7 +258,7 @@ func agentIdentityMap(agent *Agent) map[string]any {
 	}
 	backend := string(agent.Backend)
 	if backend == "" {
-		backend = string(AgentBackendLocal)
+		backend = string(llmbackend.Local)
 	}
 	m := map[string]any{
 		"id":        agent.ID,
@@ -661,7 +661,7 @@ func parseDecision(text string) (Decision, error) {
 	}
 	decision := Decision{
 		Type:         typ,
-		Reason:       firstNonEmptyString(strings.TrimSpace(d.Reason), typ),
+		Reason:       llmbackend.FirstNonEmptyString(strings.TrimSpace(d.Reason), typ),
 		Evidence:     d.Evidence,
 		Contract:     contract,
 		Need:         d.Need,

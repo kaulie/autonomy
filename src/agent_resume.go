@@ -1,7 +1,6 @@
 package autonomy
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -41,7 +40,7 @@ import (
 // broadcast fans out) wait on the bridge. The first cycle of the run attaches,
 // on the run's own context, where a bridge that cannot be reached is the run's
 // failure and a session that has since expired becomes a fresh one
-// (resumeCursorSession, attachClineMode).
+// (the llmbackend Session: src/llmbackend/session.go).
 func (r *Autonomy) resumeAgentForTask(task *Task) (*Agent, error) {
 	if r == nil || r.AgentFactory == nil {
 		return nil, fmt.Errorf("agent factory not ready")
@@ -122,7 +121,7 @@ func storedAgentForTask(store Store, task *Task) (*Agent, error) {
 // name, provider, model, the provider session it was recorded with) with the
 // runtime state a process has to make for itself left to be made — the provider
 // handle and the live session are exactly what a restart has to re-establish, and
-// the turn that needs them does (resumeCursorSession / attachClineMode), not the
+// the turn that needs them does (llmbackend.Session.Attach), not the
 // accept that read this row.
 //
 // The lifecycle is this runtime's policy rather than the row's: an agent is kept,
@@ -141,28 +140,4 @@ func restoredAgent(stored *Agent, task *Task) *Agent {
 		CurrentTask: task,
 		Role:        AgentRolePlanner,
 	}
-}
-
-// resumeCursorSession opens this agent's Cursor session for the turn that needs it:
-// re-attaching the provider agent it was recorded with, and — when the provider no
-// longer has it — continuing on a fresh session instead of failing, because a
-// session that expired while the runtime was down is a reason to start talking
-// again, not a reason to give up the task it is here to continue.
-func (a *Agent) resumeCursorSession(ctx context.Context) (bool, error) {
-	model := a.Model
-	if model == "" {
-		model = defaultCursorModel()
-	}
-	resumed := a.LLMAgentID != "" && !a.IsEphemeral()
-	err := a.AttachCursor(ctx, model)
-	if err == nil {
-		return resumed, nil
-	}
-	if !resumed {
-		return false, err
-	}
-	fmt.Fprintf(os.Stderr, "[autonomy] cursor session %s of agent %s is gone (%v); starting a new one\n",
-		a.LLMAgentID, a.Name, err)
-	a.LLMAgentID = ""
-	return false, a.AttachCursor(ctx, model)
 }

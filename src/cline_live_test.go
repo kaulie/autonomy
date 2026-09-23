@@ -2,6 +2,7 @@ package autonomy_test
 
 import (
 	"context"
+	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"testing"
@@ -37,13 +38,13 @@ func TestClineAgentLive(t *testing.T) {
 	if err := agent.AttachCline(ctx); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if agent.LLMProvider != autonomy.LLMProviderCline || agent.LLMAgentID == "" {
+	if agent.LLMProvider != llmbackend.ProviderCline || agent.LLMAgentID == "" {
 		t.Fatalf("agent not bound to cline: provider=%q id=%q", agent.LLMProvider, agent.LLMAgentID)
 	}
 
-	channels := map[autonomy.LLMEventChannel]int{}
+	channels := map[llmbackend.EventChannel]int{}
 	text, meta, err := agent.PromptLLMStream(ctx, "Reply with exactly: pong. Do not use any tools.", autonomy.ReasonModeAgent,
-		func(ev autonomy.LLMEvent) { channels[ev.Channel]++ })
+		func(ev llmbackend.Event) { channels[ev.Channel]++ })
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
@@ -51,13 +52,13 @@ func TestClineAgentLive(t *testing.T) {
 	if !strings.Contains(strings.ToLower(text), "pong") {
 		t.Fatalf("unexpected text: %q", text)
 	}
-	if meta.Status != autonomy.LLMStatusFinished {
+	if meta.Status != llmbackend.StatusFinished {
 		t.Fatalf("status=%q", meta.Status)
 	}
 	if meta.Usage.InputTokens <= 0 || meta.Usage.OutputTokens <= 0 {
 		t.Fatalf("usage not reported: %+v", meta.Usage)
 	}
-	if channels[autonomy.LLMChannelAssistant] == 0 {
+	if channels[llmbackend.ChannelAssistant] == 0 {
 		t.Fatalf("no assistant events streamed: %v", channels)
 	}
 	if meta.ProviderRunID == "" {
