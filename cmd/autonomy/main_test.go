@@ -52,6 +52,51 @@ func TestSubmitPostsTheDocumentedRequest(t *testing.T) {
 	}
 }
 
+// -account is how a caller says which pool entry pays for a task (src/accounts.go): the id goes
+// into the documented request, and leaving it out is the request that lets the pool decide — not
+// a request that sends an empty choice.
+func TestAccountNamesThePoolEntryATaskRunsOn(t *testing.T) {
+	var got acceptRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"task_id":"task-1","agent_id":10001,"status":"pending","message_id":7}`)
+	}))
+	defer srv.Close()
+
+	var out, errOut bytes.Buffer
+	code := cli([]string{
+		"-server", srv.URL, "-task", "task-1", "-wait=false",
+		"-account", "acct-f26e65bd7a4a21f7", "-description", "跑在这条账号上",
+	}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, errOut.String())
+	}
+	if got.AccountID != "acct-f26e65bd7a4a21f7" {
+		t.Errorf("account_id = %q, want the named account", got.AccountID)
+	}
+
+	got = acceptRequest{}
+	if code := cli([]string{
+		"-server", srv.URL, "-task", "task-1", "-wait=false", "-description", "让池子决定",
+	}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, errOut.String())
+	}
+	if got.AccountID != "" {
+		t.Errorf("account_id = %q, want it left to the pool", got.AccountID)
+	}
+
+	// A broadcast has no task to point at an account, so naming one is refused rather than
+	// silently ignored.
+	if code := cli([]string{
+		"-server", srv.URL, "-broadcast", "all", "-account", "acct-1", "-description", "…",
+	}, &out, &errOut); code != 2 {
+		t.Errorf("broadcast with -account should be refused, exit = %d", code)
+	}
+}
+
 func TestWaitFollowsTheTaskAndItsConversation(t *testing.T) {
 	var polls int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

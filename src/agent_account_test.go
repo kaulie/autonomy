@@ -168,6 +168,34 @@ func TestATaskCanNameTheAccountItRunsOn(t *testing.T) {
 	}
 }
 
+// A refused account must leave nothing behind: no task row, and no agent paired with it. The
+// caller was told the instruction was refused, so finding a task that claims to exist is a lie
+// — and a later run of it would be the "quietly run on another key" this refuses to do.
+func TestARefusedAccountLeavesNoTaskBehind(t *testing.T) {
+	store := resumeTestStore(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	f := NewAgentFactory()
+	runtime := &Autonomy{AgentFactory: f, Runtime: NewRuntime(f), Store: store}
+
+	if _, err := runtime.AcceptTask(AcceptTaskRequest{
+		ID: "t-ghost", Description: "x", AccountID: "acct-nope",
+	}); err == nil {
+		t.Fatal("an account that is not in the pool must refuse the instruction")
+	}
+	task, err := store.GetTask("t-ghost")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task != nil {
+		t.Fatalf("the refused instruction left %+v behind", task)
+	}
+	if agent, err := store.GetAgent(10000); err != nil {
+		t.Fatalf("get agent: %v", err)
+	} else if agent != nil && agent.CurrentTask != nil && agent.CurrentTask.ID == "t-ghost" {
+		t.Fatalf("an agent was paired with the refused task: %+v", agent)
+	}
+}
+
 var _ = context.Background
 
 // An account must own a real directory: the root is required and absolute, the same rule

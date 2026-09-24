@@ -2,11 +2,12 @@ package autonomy
 
 // uiHomeHTML is autonomy's own UI, served at GET / : one shell that hosts the modules.
 //
-// The modules are the pages this runtime already serves (GET /dashboard, GET /accounts) — each
-// one a self-contained page that talks to its own JSON API — and the shell embeds the selected
-// one with ?embed=1, which tells a module to drop its own title because the shell owns it. That
-// keeps one rule from the rest of this UI: a page is the string it is, no build step, no asset
-// pipeline, and adding a module is adding a page plus one entry in the nav below.
+// The modules are the pages this runtime already serves (GET /tasks, GET /dashboard,
+// GET /accounts) — each one a self-contained page that talks to its own JSON API — and the shell
+// embeds the selected one with ?embed=1, which tells a module to drop its own title because the
+// shell owns it. That keeps one rule from the rest of this UI: a page is the string it is, no
+// build step, no asset pipeline, and adding a module is adding a page plus one entry in the nav
+// below.
 //
 // The header carries what a person wants before choosing a module at all: which LLM backend this
 // runtime runs on, which pool account pays for it, and how many turns the store holds (/health).
@@ -53,6 +54,7 @@ const uiHomeHTML = `<!DOCTYPE html>
 </header>
 <div class="main">
   <nav id="nav">
+    <button data-module="tasks">Tasks</button>
     <button data-module="dashboard">Agent status</button>
     <button data-module="accounts">Harness accounts</button>
     <div class="note">Modules are pages of this runtime; each opens on its own path too.</div>
@@ -68,12 +70,12 @@ const uiHomeHTML = `<!DOCTYPE html>
 <script>
 // The modules this shell hosts: the path each one is served at. Adding a module is adding a page
 // and a line here (and a button above).
-const MODULES = { dashboard: "/dashboard", accounts: "/accounts" };
+const MODULES = { tasks: "/tasks", dashboard: "/dashboard", accounts: "/accounts" };
 
 // Views that poll, and so are the ones the refresh control applies to. A detail view
 // (#/agents/12/events) is a path rather than a module, which is how a row in agent status opens
 // one without the shell having to know every view by name.
-function polls(path) { return path.indexOf("/dashboard") === 0 || path.indexOf("/agents/") === 0; }
+function polls(path) { return path.indexOf("/tasks") === 0 || path.indexOf("/dashboard") === 0 || path.indexOf("/agents/") === 0; }
 
 let every = 10;
 let lastEvery = 10;

@@ -356,6 +356,14 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	for k, v := range req.ContextRef {
 		contextRef[ContextContainerType(k)] = v
 	}
+	// A request may name the account this task runs on, and it is settled *here*: before
+	// anything is written, because an instruction that cannot be honoured is a refused
+	// request, not a task row (and an agent paired with it) that claims otherwise
+	// (src/accounts.go).
+	account, err := r.requestedAccount(req.AccountID)
+	if err != nil {
+		return nil, nil, AgentMessage{}, err
+	}
 
 	// A second instruction for a task the store already knows continues that task
 	// rather than starting a new one: it keeps the row's own identity (when the task
@@ -427,43 +435,45 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
 	}
-	// A request may name the account this task runs on. It is validated *here* so a typo is a
-	// refused instruction rather than a task that dies at its first cycle, and recorded on the
-	// agent row so the run resolves that account (src/agent_account.go).
-	if err := r.assignAccount(agent, req.AccountID); err != nil {
-		return nil, nil, AgentMessage{}, err
-	}
+	// The account the request named (already validated above) is what this task's runs resolve:
+	// it is recorded on the agent row, so the choice survives a restart (src/agent_account.go).
+	r.applyAccount(agent, account)
 	return task, agent, msg, nil
 }
 
-// assignAccount points an agent — and with it every run of that task — at one pool account.
+// requestedAccount is the account a request named, checked before the request writes anything.
 // An empty id changes nothing; a named one must exist and be enabled, because a requested
 // account that cannot be honoured is an error, not a reason to quietly run elsewhere and bill
 // a different key.
-func (r *Autonomy) assignAccount(agent *Agent, accountID string) error {
+func (r *Autonomy) requestedAccount(accountID string) (*Account, error) {
 	id := strings.TrimSpace(accountID)
-	if id == "" || agent == nil {
-		return nil
+	if id == "" {
+		return nil, nil
 	}
 	store, err := r.accountStoreOrErr()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	account, err := store.GetAccount(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if account == nil {
-		return fmt.Errorf("account %s is not in the pool: add it at /accounts", id)
+		return nil, fmt.Errorf("account %s is not in the pool: add it at /accounts", id)
 	}
 	if !account.Enabled {
-		return fmt.Errorf("account %s (%s) is disabled", account.ID, account.Label)
+		return nil, fmt.Errorf("account %s (%s) is disabled", account.ID, account.Label)
 	}
-	if agent.AccountID != account.ID {
-		agent.adoptAccount(account)
-		agent.Persist()
+	return account, nil
+}
+
+// applyAccount points an agent — and with it every run of that task — at one pool account.
+func (r *Autonomy) applyAccount(agent *Agent, account *Account) {
+	if agent == nil || account == nil || agent.AccountID == account.ID {
+		return
 	}
-	return nil
+	agent.adoptAccount(account)
+	agent.Persist()
 }
 
 func newTaskID() string {

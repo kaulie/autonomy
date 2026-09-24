@@ -26,14 +26,14 @@ func TestTheUIHomeHostsTheModules(t *testing.T) {
 	body := home.Body.String()
 	// The skill is hosting the modules, so the shell has to name them and embed them, and it reads
 	// the runtime's own status line.
-	for _, want := range []string{"/dashboard", "/accounts", "?embed=1", "/health", "data-every=\"5\""} {
+	for _, want := range []string{"/tasks", "/dashboard", "/accounts", "?embed=1", "/health", "data-every=\"5\""} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the shell should mention %s", want)
 		}
 	}
 
 	// A module is still its own page, and knows when it is embedded.
-	for _, path := range []string{"/dashboard?embed=1", "/accounts?embed=1"} {
+	for _, path := range []string{"/tasks?embed=1", "/dashboard?embed=1", "/accounts?embed=1"} {
 		rec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
