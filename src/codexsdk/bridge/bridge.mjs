@@ -45,6 +45,7 @@ import readline from "node:readline";
 import {
 	PROTOCOL,
 	coerceText,
+	failureMessage,
 	itemText,
 	normalizeUsage,
 	resolveCodexDefaults,
@@ -159,6 +160,10 @@ async function send(params = {}, requestId) {
 	let text = "";
 	let usage = null;
 	let state = "";
+	// A failed turn carries its reason on **stdout** (`error` / `turn.failed` events) while the
+	// CLI exits non-zero with only a progress line on stderr — so the SDK's own error text is
+	// not the reason. Keep the provider's words here and prefer them below (failureMessage).
+	let failure = "";
 	try {
 		const { events } = await agent.thread.runStreamed(prompt, { signal: controller.signal });
 		for await (const event of events) {
@@ -176,11 +181,19 @@ async function send(params = {}, requestId) {
 					break;
 				case "turn.failed":
 				case "thread.error":
+				case "error":
+					failure = failureMessage(event) || failure;
 					state = "error";
 					break;
 				default:
 					break;
 			}
+		}
+		// A stream that ended on a failed turn is a failed run, whether or not the CLI exits
+		// non-zero afterwards: reporting it as a result with `status: error` would hand the
+		// caller an empty answer with the wrong reason attached.
+		if (state === "error") {
+			throw new Error(failure || "codex reported the turn failed");
 		}
 		if (!state) state = controller.signal.aborted ? "aborted" : "finished";
 		write({
@@ -203,7 +216,12 @@ async function send(params = {}, requestId) {
 			type: "result",
 			id: requestId,
 			ok: false,
-			error: rpcError(aborted ? "cancelled" : "agent_error", err?.message || String(err)),
+			error: rpcError(
+				aborted ? "cancelled" : "agent_error",
+				// The provider's own words come first: the CLI's exit text is a progress line
+				// ("Reading prompt from stdin…"), not a reason.
+				aborted ? err?.message || String(err) : failure || err?.message || String(err),
+			),
 		});
 	} finally {
 		running.delete(agent.id);

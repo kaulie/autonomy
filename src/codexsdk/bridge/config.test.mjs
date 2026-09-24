@@ -7,12 +7,34 @@ import {
 	MODE_PLAN,
 	PROTOCOL,
 	coerceText,
+	failureMessage,
 	itemText,
 	normalizeUsage,
 	resolveCodexDefaults,
 	sandboxModeFor,
 	statusOf,
 } from "./config.mjs";
+
+test("a failed turn keeps the provider's own words", () => {
+	// What the CLI actually sends on stdout when the provider refuses (2026-09-24: a pooled
+	// codex account with an unfunded key). The exit text alone says nothing.
+	assert.equal(
+		failureMessage({ type: "error", message: "Quota exceeded. Check your plan and billing details." }),
+		"Quota exceeded. Check your plan and billing details.",
+	);
+	assert.equal(
+		failureMessage({ type: "turn.failed", error: { message: "Quota exceeded." } }),
+		"Quota exceeded.",
+	);
+	// thread.error and a message straight on the event are the other two spellings.
+	assert.equal(failureMessage({ type: "thread.error", message: "stream closed" }), "stream closed");
+	assert.equal(failureMessage({ type: "turn.failed", error: {} }), "");
+	// Everything that is not a failure carries nothing (and never invents a reason).
+	assert.equal(failureMessage({ type: "turn.completed", usage: {} }), "");
+	assert.equal(failureMessage({ type: "item.completed", item: { type: "error", message: "x" } }), "");
+	assert.equal(failureMessage(null), "");
+	assert.equal(failureMessage({ type: "error" }), "");
+});
 
 test("protocol is its own name, not the cline one", () => {
 	assert.equal(PROTOCOL, "codex-bridge/1");
