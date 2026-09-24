@@ -48,12 +48,22 @@ func preparePolicyRoot(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"AGENT_V2.md", "CONSTRAINTS.json"} {
-		b, err := os.ReadFile(filepath.Join("agent_policy", name))
+	// Every prompt file this runtime renders comes from this directory (docs/prompt.md), so the
+	// fixture copies the directory rather than a list of names: a new prompt file is one file, not
+	// one file plus a fixture edit.
+	entries, err := os.ReadDir("agent_policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join("agent_policy", entry.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, entry.Name()), b, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

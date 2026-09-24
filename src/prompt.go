@@ -3,15 +3,33 @@ package autonomy
 import "github.com/kaulie/autonomy/src/llmbackend"
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 const defaultAgentPolicyRel = "src/agent_policy/AGENT_V2.md"
+
+// The two halves of the reasoning prompt are files, not Go strings.
+//
+//   - REASONING_FRAME.md is what an agent is told once per session, at initialization: its own
+//     system prompt (when it has one) and the policy (AGENT_V2.md). It is a template with two
+//     placeholders, so the composition is visible where the words are;
+//   - REASONING_DELTA.md is what every later decision cycle carries: the current values as one
+//     JSON block, whose surrounding prose (the cycle header, the briefing note, the closing
+//     instruction) is this file.
+//
+// Editing the wording of either is editing a file under src/agent_policy/ — the same rule the
+// policy and the worker prompts already follow (docs/prompt.md).
+const (
+	reasoningFrameRel = "src/agent_policy/REASONING_FRAME.md"
+	reasoningDeltaRel = "src/agent_policy/REASONING_DELTA.md"
+)
 
 // promptPlaceholders is the placeholder vocabulary a policy or a delegated
 // worker prompt is rendered from, as of one decision cycle. AGENT_V2.md (the
@@ -121,18 +139,61 @@ func projectRoot() (string, error) {
 	return llmbackend.ProjectRoot()
 }
 
-// loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V2.md at runtime.
-func loadAgentPolicy() (string, error) {
+// The reasoning prompt files ship inside the binary as well as on disk.
+//
+// A runtime reads its copy from PROJECT_ROOT — a deployment can edit the words without a rebuild —
+// and falls back to this one when there is none: a later decision cycle must not fail because a
+// file went missing under a long-lived session, and the bytes are the same file either way (the
+// embedded copy is the repository's, taken at build time).
+//
+//go:embed agent_policy/REASONING_FRAME.md
+var embeddedReasoningFrame string
+
+//go:embed agent_policy/REASONING_DELTA.md
+var embeddedReasoningDelta string
+
+// embeddedPrompt is the fallback for a prompt file this build carries.
+func embeddedPrompt(rel string) string {
+	switch rel {
+	case reasoningFrameRel:
+		return embeddedReasoningFrame
+	case reasoningDeltaRel:
+		return embeddedReasoningDelta
+	}
+	return ""
+}
+
+// loadPromptFile reads one prompt file under $PROJECT_ROOT at runtime: the policy, the reasoning
+// frame, the delta. Every prompt this package renders comes through here, so "the wording is a
+// file" is one implementation rather than a claim.
+func loadPromptFile(rel string) (string, error) {
+	fallback := func(reason error) (string, error) {
+		if embedded := embeddedPrompt(rel); embedded != "" {
+			return embedded, nil
+		}
+		return "", reason
+	}
 	root, err := projectRoot()
 	if err != nil {
-		return "", err
+		return fallback(err)
 	}
-	path := filepath.Join(root, defaultAgentPolicyRel)
+	path := filepath.Join(root, rel)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read agent policy %s: %w", path, err)
+		return fallback(fmt.Errorf("read prompt file %s: %w", path, err))
 	}
 	return string(b), nil
+}
+
+// loadAgentPolicy reads $PROJECT_ROOT/src/agent_policy/AGENT_V2.md at runtime.
+func loadAgentPolicy() (string, error) { return loadPromptFile(defaultAgentPolicyRel) }
+
+// applyPromptTemplate fills a template's placeholders. The template's own trailing newlines are
+// dropped first: a file ends with a newline because editors do, and the value that goes in
+// (an assembled policy, a JSON block) already ends where it ends — so the rendered text is what
+// the placeholders say, not what the file's last byte happens to be.
+func applyPromptTemplate(template string, values map[string]string) string {
+	return applyPolicyPlaceholders(strings.TrimRight(template, "\n"), values)
 }
 
 // A reasoning session is multi-turn: the Cline session / Cursor agent keeps the
@@ -154,6 +215,10 @@ var reasoningDeltaPlaceholders = []string{"{{TASK}}", "{{CONTEXT_ENTITY}}", "{{W
 // It is sent once per session — on the first decision cycle after the session
 // was created; later cycles send only buildReasoningDelta.
 func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, error) {
+	template, err := loadPromptFile(reasoningFrameRel)
+	if err != nil {
+		return "", err
+	}
 	raw, err := loadAgentPolicy()
 	if err != nil {
 		return "", err
@@ -165,14 +230,21 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 	policy := applyPolicyPlaceholders(raw, values)
 	// The agent's own system prompt, given at initialization (before any task, see
 	// AgentInitializer), is part of the stable half: it travels ahead of the policy,
-	// once per session, ahead of the task's own words.
+	// once per session, ahead of the task's own words. It is the template's other
+	// placeholder, so where it lands relative to the policy is REASONING_FRAME.md's
+	// business, not this function's.
+	systemPrompt := ""
 	if prompt := agentSystemPrompt(ctx.Agent); prompt != "" {
-		policy = "## System Prompt\n\n" + prompt + "\n\n" + policy
+		systemPrompt = "## System Prompt\n\n" + prompt + "\n\n"
 	}
-	if !strings.HasSuffix(policy, "\n") {
-		policy += "\n"
+	frame := applyPromptTemplate(template, map[string]string{
+		"{{SYSTEM_PROMPT}}": systemPrompt,
+		"{{AGENT_POLICY}}":  policy,
+	})
+	if !strings.HasSuffix(frame, "\n") {
+		frame += "\n"
 	}
-	return policy, nil
+	return frame, nil
 }
 
 // buildReasoningDelta is the per-cycle half: the current Task / Context Entity /
@@ -199,23 +271,31 @@ func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, err
 		return "", fmt.Errorf("marshal reasoning delta: %w", err)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "## Decision Cycle %d — current values\n", ctx.Cycle)
-	fmt.Fprintf(&b, "Current values for the placeholders marked \"%s\" above.\n\n", reasoningDeltaMarker)
-	// A run that starts after a restart is a continuation, and its briefing is the
-	// only place that says so: without this sentence the rounds below read as work the
-	// planner never did (src/task_record.go, src/graceful-restart.md).
+	template, err := loadPromptFile(reasoningDeltaRel)
+	if err != nil {
+		return "", err
+	}
+	// A run that starts after a restart is a continuation, and its briefing is the only place that
+	// says so: without this sentence the rounds below read as work the planner never did
+	// (src/task_record.go, docs/graceful-restart.md). The sentence is this function's; where it sits
+	// in the message is REASONING_DELTA.md's.
+	briefing := ""
 	if ctx.Briefing != nil {
-		b.WriteString("`briefing` is your own record on this task from *before this run* — your plans, " +
+		briefing = "`briefing` is your own record on this task from *before this run* — your plans, " +
 			"the steps they ran and what those steps produced (a restart does not lose it). Continue " +
 			"from what it already delivered instead of doing it again, and see `state.open_criteria` " +
-			"for what is still missing.\n\n")
+			"for what is still missing.\n\n"
 	}
-	b.WriteString("```json\n")
-	b.Write(raw)
-	b.WriteString("\n```\n\n")
-	b.WriteString("Reply with the AGENT_V2 Output Schema JSON for this cycle.\n")
-	return b.String(), nil
+	delta := applyPromptTemplate(template, map[string]string{
+		"{{CYCLE}}":         strconv.Itoa(ctx.Cycle),
+		"{{DELTA_MARKER}}":  reasoningDeltaMarker,
+		"{{BRIEFING_NOTE}}": briefing,
+		"{{PAYLOAD}}":       string(raw),
+	})
+	if !strings.HasSuffix(delta, "\n") {
+		delta += "\n"
+	}
+	return delta, nil
 }
 
 // buildReasoningPrompt is the message for a session's FIRST decision cycle: the

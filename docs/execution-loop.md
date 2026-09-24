@@ -1,5 +1,8 @@
 # Execution Loop
 
+> 提示词的两半（初始化 frame 与每轮 delta）现在是**文件**：`src/agent_policy/REASONING_FRAME.md`
+> 与 `REASONING_DELTA.md`，见 [prompt.md](prompt.md)。
+
 ## 定义
 
 Autonomy 的核心计算循环是 **Goal-driven Agent Execution Loop**，不是 Workflow Engine。
