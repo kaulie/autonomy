@@ -330,6 +330,21 @@ store 读不了是 `500`，不是空列表 —— 空页只能表示「没有 ag
 role / lifecycle / state / health / current task / working / provider·model / run id），带自动刷新。
 无构建步骤、无外部资源 —— 页面就干这一件事。打开方式见 [dashboard.md](dashboard.md)。
 
+### `GET /tasks` — 任务页面（发指令 + 选账号 + 任务状态）
+
+自包含 HTML 页面，两半：
+
+- **发指令**：`POST /api/tasks` 的表单 —— `description`、可空的 `task_id`（填已有的 = 续那条任务），
+  以及**账号下拉**（`GET /api/accounts`）：选一个 = 这条任务跑在那条账号上（`account_id`），
+  选 `pool default` = 交给池子解析（见 [accounts.md](accounts.md)）。选了账号时页面会先写下
+  「这次会跑在哪个 harness/vendor/model/工作目录上」；
+- **任务列表**：`GET /api/tasks`，点一行看 `GET /api/tasks/{id}` —— 状态、错误，以及 `state`
+  （最新一轮 / 契约还差什么 / 被重启切断在哪一步，见 [execution-loop.md](execution-loop.md)），
+  另有 events / messages / stop 的入口。
+
+按壳传的 `?every=<秒>` 轮询（0 = 不自动刷新），且**只重画列表与详情**：正在填的表单不会被轮询清掉。
+模块与刷新控件的说明见 [ui.md](ui.md)。
+
 ## 数据 API（评测侧读日志，不再读库）
 
 `agent-benchmark-tool` 原先以 `mode=ro` 直接挂 autonomy 的 SQLite 文件取数，于是库路径与 schema 成了两边的

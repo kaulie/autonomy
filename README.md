@@ -222,6 +222,31 @@ way: no new run, the runs in flight get `AUTONOMY_SHUTDOWN_GRACE` (10s) to come 
 they are stopped and the store and provider sessions are closed properly. See
 [docs/graceful-restart.md](docs/graceful-restart.md).
 
+### Harness account pool
+
+Which harness, vendor, model, workspace root and credential a task runs on is a **pool choice**,
+never an environment variable: an account is one harness (`cursor` / `cline` / `codex`) + one vendor
++ one credential, and the runtime resolves one per agent (`src/accounts.go`,
+`src/agent_account.go`). Add, edit, verify (and disable) them at
+`http://127.0.0.1:4300/accounts`, or over `GET` / `POST` / `PATCH` / `DELETE /api/accounts`; a key is
+written once and only ever rendered **masked**.
+
+A task picks its account in three ways, all of them the same `account_id` on
+`POST /api/tasks`: the **account dropdown** on the tasks page, the field in an API call, or
+`autonomy -account acct-…` on the CLI. Naming none leaves the choice to the pool — its default
+account for the runtime's harness. The choice is recorded on the agent row, so a continuation and
+the automatic resume after a restart stay on the same account; a named account that is missing or
+disabled refuses the instruction instead of quietly running on another key. See
+[docs/accounts.md](docs/accounts.md).
+
+### The runtime's own UI
+
+`GET /` is a shell with the runtime's modules in its navigation, each of them also reachable on its
+own path and none of them needing a build step: **Tasks** (`/tasks` — send an instruction on a chosen
+account, then read where the tasks that came of it stand, including the `state` of a round the
+runtime had to cut), **Agent status** (`/dashboard`) and **Harness accounts** (`/accounts`), plus the
+per-agent event and message views a status row opens ([docs/ui.md](docs/ui.md)).
+
 The hello demo health-checks a fake service and finishes only when `StateVerifier` sees `Contract.ExpectedState` on the world — capability success alone is not enough.
 
 Decision cycle: `BuildDecisionContext` → `Decide` → `Execute` → `Record` → `UpdateWorld` → `Verify` / `ShouldTerminate`.

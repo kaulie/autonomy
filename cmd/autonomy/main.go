@@ -26,6 +26,7 @@
 //	autonomy -task task-28                                          # instruction is the row's description
 //	autonomy -task task-28 -progress                                # just look
 //	autonomy -task task-28 -stop                                    # stop what it is on
+//	autonomy -account acct-f26e65bd7a4a21f7 -description "…"         # run it on that pool account
 //	autonomy -broadcast project-749a0238 -description "上线窗口挪到今晚"  # that project's agents
 //	autonomy -broadcast all -description "今天 18:00 全员停服演练"        # every project's agents
 package main
@@ -73,6 +74,7 @@ type options struct {
 	domain      string
 	goal        string
 	context     contextRefs
+	account     string
 	broadcast   string
 	wait        bool
 	follow      bool
@@ -137,6 +139,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	o := options{
 		server:  envOr("AUTONOMY_API_URL", defaultServer),
 		task:    envOr("AUTONOMY_TASK_ID", demoTaskID),
+		account: envOr("AUTONOMY_ACCOUNT_ID", ""),
 		context: contextRefs{"project": "project-2"},
 		wait:    true,
 		follow:  true,
@@ -155,6 +158,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.domain, "domain", "", "task domain (default: the runtime's)")
 	fs.StringVar(&o.goal, "goal", "", "goal type, e.g. dev_feature (default: the runtime's)")
 	fs.Var(o.context, "context", "context_ref key=value, repeatable; an empty value drops the key")
+	fs.StringVar(&o.account, "account", o.account, "account pool entry this task runs on: its harness, vendor, model and credentials (env AUTONOMY_ACCOUNT_ID); empty leaves the choice to the pool, i.e. the harness's default account")
 	fs.BoolVar(&o.wait, "wait", o.wait, "follow the task until its status is no longer running/pending")
 	fs.BoolVar(&o.follow, "follow", o.follow, "print the run's conversation while waiting")
 	fs.DurationVar(&o.poll, "poll", o.poll, "how often the task's status is read while waiting")
@@ -171,6 +175,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	}
 	o.description = strings.TrimSpace(o.description)
 	o.broadcast = strings.TrimSpace(o.broadcast)
+	o.account = strings.TrimSpace(o.account)
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if o.description == "" && !o.stop && !o.progress && o.broadcast == "" && !set["task"] {
@@ -189,6 +194,9 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		}
 		if set["task"] {
 			return o, errors.New("-task names one task; a broadcast picks its targets from the scope it is given")
+		}
+		if set["account"] {
+			return o, errors.New("-account names what one task runs on; a broadcast hands its message to agents that already have one")
 		}
 		if o.description == "" {
 			return o, errors.New("-broadcast needs something to say: -description \"…\" (or words after the flags)")
@@ -300,6 +308,7 @@ func submit(ctx context.Context, c *client, o options, stdout, stderr io.Writer)
 		Domain:      o.domain,
 		GoalType:    o.goal,
 		ContextRef:  o.context,
+		AccountID:   o.account,
 	}
 	var acc acceptResponse
 	if err := c.post(ctx, "/api/tasks", req, &acc); err != nil {

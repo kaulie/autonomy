@@ -25,6 +25,12 @@ type acceptRequest struct {
 	Domain      string            `json:"domain,omitempty"`
 	GoalType    string            `json:"goal_type,omitempty"`
 	ContextRef  map[string]string `json:"context_ref,omitempty"`
+	// AccountID names the account pool entry this task's agent runs on
+	// (src/accounts.go): its harness, vendor, model, workspace root and credential.
+	// Absent leaves the choice to the pool (its default account for the harness), so
+	// "which account pays for this" is answerable per task instead of by editing the
+	// deployment's environment.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // acceptResponse is what the runtime answers an accepted instruction with: the

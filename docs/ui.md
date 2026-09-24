@@ -21,7 +21,7 @@ runtime/agent/task/账号这些页面都在解一个具体问题，谁也不需�
 ## 顶栏：刷新周期
 
 三个按钮 **5s / 10s / 15s** + 一个 **auto-refresh 开关**（关了就不轮询，只看手动刷新）。
-它只对**会轮询的视图**显示（agent 状态、事件流、消息流），值通过 `every=<秒>` 传给模块
+它只对**会轮询的视图**显示（任务页、agent 状态、事件流、消息流），值通过 `every=<秒>` 传给模块
 （0 = 不自动刷新）—— 所以周期只在这一处设置，模块自己不再提供输入框。
 
 ## 路由：模块名，或任意路径
@@ -36,10 +36,15 @@ runtime/agent/task/账号这些页面都在解一个具体问题，谁也不需�
 
 | 模块 | 路径 | 文档 |
 |---|---|---|
+| Tasks | `GET /tasks`（数据 `GET /api/tasks`、`GET /api/tasks/{id}`、`POST /api/tasks`、`GET /api/accounts`） | [http-api.md](http-api.md#get-tasks--任务页面（发指令--选账号--任务状态）) |
 | Agent status | `GET /dashboard`（数据 `GET /api/agents`） | [dashboard.md](dashboard.md) |
 | Harness accounts | `GET /accounts`（数据 `/api/accounts`） | [accounts.md](accounts.md) |
 | Agent events | `GET /agents/{agentID}/events?task=…`（数据 `GET /api/tasks/{taskID}/agents/{agentID}/events`） | 本文 |
 | Agent messages | `GET /agents/{agentID}/messages`（数据 `GET /api/agents/{agentID}/messages`） | 本文 |
+
+**Tasks 是「去做事」的入口**：发一条指令（可指定池子里的账号），下面是任务列表，点一行看它的
+状态与 `state`（最新一轮、契约还差什么、被重启切断在哪一步）。它**只重画列表与详情**，所以轮询
+不会清掉你正在敲的那条指令。
 
 ## 加一个模块
 

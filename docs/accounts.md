@@ -81,6 +81,15 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
   而 agent 的常驻会话并不知道自己换了人。
 - **任务级配置**：`POST /api/tasks` 可以带 `account_id`（`AcceptTaskRequest.AccountID`）。
   它在**受理时**校验：id 不存在或账号被停用 = 这条指令被拒（而不是任务跑到第一个 cycle 才死）。
+- **三种指定方式**（同一个字段，三个入口）：
+  1. **页面**：`http://127.0.0.1:4300/tasks`（壳里的 Tasks 模块）—— 发指令时从**账号下拉**里选，
+     第一项 `pool default` 就是「不指定，交给池子」；页面还会先把「这次跑在哪个
+     harness/vendor/model/工作目录上」写在按钮旁边（见 [ui.md](ui.md)）；
+  2. **API**：`curl -X POST …/api/tasks -d '{"description":"…","account_id":"acct-…"}'`；
+  3. **CLI**：`autonomy -account acct-… -description "…"`（env `AUTONOMY_ACCOUNT_ID`）；
+     与 `-broadcast` 同用会被拒 —— 广播没有「一条任务」可以指向某个账号。
+- **续做不会换账号**：账号记在 agent 行上（`account_id`），所以下一条指令、以及重启后的自动续做
+  都还在同一个账号上；要换就显式再指定一次。
 - **agent 采纳什么**：harness（= 后端）、model、工作区根、凭据；`account_id` 落库，所以重启后
   同一只 agent 还在同一个账号上。
 
