@@ -1,1 +1,1 @@
-{"name":"probe","private":true,"dependencies":{"@openai/codex-sdk":"^0.156.1"}}
+{"name":"probe","private":true,"dependencies":{"@openai/codex-sdk":"^0.156.1"},"scripts":{"smoke":"node smoke.mjs","test":"node --test"}}

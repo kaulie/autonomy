@@ -76,6 +76,27 @@ export function statusOf(state) {
 	}
 }
 
+/**
+ * failureMessage is a failed turn's own words, "" for every event that is not one.
+ *
+ * The CLI reports a provider-side failure as **stdout** events — `{"type":"error","message":…}`
+ * and `{"type":"turn.failed","error":{"message":…}}` — and exits non-zero with only a progress
+ * line on stderr ("Reading prompt from stdin…"). So the SDK's own error text ("Codex Exec exited
+ * with code 1: …") is not the reason: the reason is here, and a caller that only sees the exit
+ * text cannot tell a quota from a bad key from a rejected model (2026-09-24: a pooled codex
+ * account whose key had no credits surfaced as nothing but that progress line).
+ */
+export function failureMessage(event) {
+	const type = String(event?.type || "");
+	if (type === "turn.failed" || type === "thread.error") {
+		return coerceText(event?.error?.message) || coerceText(event?.message);
+	}
+	if (type === "error") {
+		return coerceText(event?.message) || coerceText(event?.error?.message);
+	}
+	return "";
+}
+
 /** itemText is the text of one completed Codex item, "" for the ones that carry none. */
 export function itemText(item) {
 	if (!item || typeof item !== "object") return "";
