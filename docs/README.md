@@ -15,6 +15,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 5. [session.md](session.md) — 一只 agent 与 LLM 的会话（planner 与 worker 跑同一套）
 5b. [accounts.md](accounts.md) — 账号池：一个账号 = harness + vendor + 一把凭据（凭据只从这里来）
 5c. [ui.md](ui.md) — UI 主界面（`GET /` 的壳）与它的模块（dashboard / accounts）
+21. [testing.md](testing.md) — 测试怎么放：位置、命名，以及为什么同包测试不能搬走
 6. [capability.md](capability.md) / [provider.md](provider.md) / [action.md](action.md) — 能力空间
 7. [asset.md](asset.md) / [domain.md](domain.md) — 世界中的对象与语义空间
 8. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界

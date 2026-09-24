@@ -97,20 +97,5 @@ func TestAnAgentsMessagesAreWhatItReceivedAndWhatItAnswered(t *testing.T) {
 	}
 }
 
-// The two pages a dashboard row opens are served, with or without the shell around them.
-func TestTheAgentViewPagesAreServed(t *testing.T) {
-	server := NewHTTPServer(nil)
-	for _, path := range []string{"/agents/10001/events?task=task-1", "/agents/10001/messages", "/agents/10001/events?task=task-1&embed=1&every=15"} {
-		rec := httptest.NewRecorder()
-		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s status=%d", path, rec.Code)
-		}
-		if !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
-			t.Fatalf("GET %s content-type=%q", path, rec.Header().Get("Content-Type"))
-		}
-	}
-}
-
 // strconvID is the decimal form of an agent id, for building a path.
 func strconvID(id int64) string { return strconv.FormatInt(id, 10) }
