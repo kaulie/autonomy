@@ -84,6 +84,10 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
   （见 [delegation.md](delegation.md)）。这样「一个任务一个账号」对整条委派链成立：同一把凭据、
   同一份额度、同一个 workspace root（`<账号 root>/agent-N/`）。账号被删/停用时**委托会失败**，
   不会回落到另一条账号。
+  这条规则是**可外部控制的变量**，不是写死的：每次委派用 `AcquireAgentOpts.ExtendsPlannerAgent`
+  （`*bool`，`nil` = 用默认）说，部署用 `AUTONOMY_WORKER_EXTENDS_PLANNER_AGENT` 给默认
+  （**默认开**，`0`/`off`/`false`/`no` 关掉即回到「worker 自己取 provider，再由池子解析」的老行为）；
+  capability 的显式选择优先。`Backend: local`（无 provider 的本地 worker）永远不继承。
 - **工作目录也来自账号**：agent 的工作目录是「账号的 root + 它自己的目录名」，即使账号是在第一轮
   才被解析出来的（`ensureLLMSession`）。只有两种例外：账号没填 root（用运行时默认 root），
   或者 capability 显式要了一个目录（`AcquireAgentOpts.Workspace`）。

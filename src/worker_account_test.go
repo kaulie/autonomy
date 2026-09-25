@@ -280,3 +280,109 @@ func TestADelegatedStepRunsItsWorkerOnTheTasksAccount(t *testing.T) {
 		t.Fatalf("worker workspace=%q want it under the account's root %q", worker.Workspace, created.WorkspaceRoot)
 	}
 }
+
+// The choice is a variable, not a hardcoded rule: the capability may say it for one
+// acquisition, the deployment sets the default, and the capability's word wins.
+func TestExtendsPlannerAgentIsAChoiceNotAHardcodedRule(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name   string
+		env    string
+		choice *bool
+		want   bool
+	}{
+		{name: "nothing said, no switch: on (the pool governs the task)", want: true},
+		{name: "deployment switches it off", env: "0", want: false},
+		{name: "the other spellings of off", env: "off", want: false},
+		{name: "false", env: "false", want: false},
+		{name: "no", env: "no", want: false},
+		{name: "an explicit on stays on", env: "1", want: true},
+		{name: "a capability that asks for it, against the deployment", env: "0", choice: &yes, want: true},
+		{name: "a capability that refuses it, with no switch", choice: &no, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(EnvWorkerExtendsPlannerAgent, tc.env)
+			if got := workerExtendsPlannerAgent(tc.choice); got != tc.want {
+				t.Fatalf("env=%q choice=%v → %v, want %v", tc.env, tc.choice, got, tc.want)
+			}
+		})
+	}
+}
+
+// Switched off, a worker is exactly what it was before: it takes the provider its capability
+// asked for (the process default) and the pool resolves that one for it.
+func TestAWorkerThatDoesNotExtendItsPlannerTakesItsOwnProvider(t *testing.T) {
+	installFakeCodexClient(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_CLINE_PROVIDER", "deepseek")
+	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
+	store := resumeTestStore(t)
+	created, err := store.CreateAccount(Account{
+		Harness: "codex", Vendor: "openai", Label: "codex main", Enabled: true, IsDefault: true,
+		WorkspaceRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	planner := &Agent{ID: 9105, Name: "agent-9105", Lifecycle: AgentLifecyclePersistent}
+	planner.adoptAccount(&created)
+
+	factory := NewAgentFactory()
+	runtime := NewRuntime(factory)
+	runtime.cycle = &DecisionContext{Agent: planner}
+	no := false
+	sess, err := runtime.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-9105", Backend: "cursor", ExtendsPlannerAgent: &no,
+	})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	worker := factory.Get(sess.ID())
+	if worker == nil {
+		t.Fatalf("the acquired worker is not registered: %s", sess.ID())
+	}
+	if worker.AccountID == created.ID {
+		t.Fatalf("worker account=%q, want it *not* to be the task's account when it does not extend its planner", worker.AccountID)
+	}
+	if worker.Backend != llmbackend.Cline {
+		t.Fatalf("worker backend=%q want the provider the capability asked for (the process default: cline)", worker.Backend)
+	}
+	if worker.Workspace != AgentWorkspacePath(worker.Name) {
+		t.Fatalf("worker workspace=%q want the runtime's default %q", worker.Workspace, AgentWorkspacePath(worker.Name))
+	}
+}
+
+// The same switch from the outside: nothing in the code changes, the deployment says so.
+func TestTheDeploymentCanSwitchWorkerInheritanceOff(t *testing.T) {
+	t.Setenv(EnvWorkerExtendsPlannerAgent, "0")
+	store := resumeTestStore(t)
+	created, err := store.CreateAccount(Account{
+		Harness: "codex", Vendor: "openai", Label: "codex main", Enabled: true, IsDefault: true,
+		WorkspaceRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	planner := &Agent{ID: 9106, Name: "agent-9106", Lifecycle: AgentLifecyclePersistent}
+	planner.adoptAccount(&created)
+	factory := NewAgentFactory()
+	runtime := NewRuntime(factory)
+	runtime.cycle = &DecisionContext{Agent: planner}
+
+	if account, err := runtime.workerAccount(); err != nil || account == nil || account.ID != created.ID {
+		t.Fatalf("account=%v err=%v want the task's account for the decision to be about", account, err)
+	}
+	// With inheritance off, the acquisition must not consult it at all — the worker keeps the
+	// local backend here, exactly as it did before this feature existed.
+	sess, err := runtime.AcquireAgent(context.Background(), broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-9106", Backend: string(llmbackend.Local),
+	})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if worker := factory.Get(sess.ID()); worker == nil || worker.AccountID != "" {
+		t.Fatalf("worker=%+v want no account on it", worker)
+	}
+}

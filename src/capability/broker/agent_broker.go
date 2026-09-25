@@ -29,6 +29,16 @@ type AcquireAgentOpts struct {
 	// instead of being kept (the default, see docs/agent.md). Leave it false for
 	// work whose agent is worth coming back to.
 	Ephemeral bool
+	// ExtendsPlannerAgent says this worker is an *extension* of the agent that delegated to
+	// it: it runs on that agent's account — the same harness, credential, model and workspace
+	// root — instead of picking a provider of its own.
+	//
+	// nil leaves it to the runtime's default (AUTONOMY_WORKER_EXTENDS_PLANNER_AGENT, which is
+	// on unless the deployment switches it off): a task's account is meant to govern its whole
+	// delegation chain, so a worker must not spend a second account's quota on the same task's
+	// work. A capability that knows its sub-task should run somewhere else — the same switch,
+	// for one acquisition — passes false.
+	ExtendsPlannerAgent *bool
 }
 
 // AgentSession is control of one autonomy-registered agent (backend may be Cursor).

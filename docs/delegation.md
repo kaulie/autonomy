@@ -45,9 +45,16 @@ Task Owner → Coding Agent → Research Agent → …
   继承**委托它的那只 agent**（即任务自己的 agent）的账号（`Runtime.workerAccount` → `resolveAccountFor`），
   连 harness 一起：任务在 codex 账号上，worker 就是 codex（`Runtime.AcquireAgent` 的 codex 分支 +
   `Agent.AttachCodex`）。所以一个任务从 planner 到每一只 worker，**同一把凭据、同一份额度、
-  同一个 workspace root**。`Backend: local` 是唯一的例外（本地不含 provider 的 worker，无账号可继承）。
-  账号的解析位置也因此只有两处：委派时继承一次、每轮 `ensureLLMSession` 再确认一次；账号被删/停用
-  时**委托直接失败**（`account … is gone` / `disabled`），不会悄悄换一把 key 跑
+  同一个 workspace root**。账号被删/停用时**委托直接失败**（`account … is gone` / `disabled`），
+  不会悄悄换一把 key 跑。
+  这条规则本身是个**变量**，不是写死的：
+  - 每次委派可以自己说 —— `AcquireAgentOpts.ExtendsPlannerAgent`（`*bool`：`nil` = 用默认，
+    `true`/`false` = 这一次就这么办）；
+  - 运行时的默认由部署给 —— `AUTONOMY_WORKER_EXTENDS_PLANNER_AGENT`（**默认开**；
+    写 `0` / `off` / `false` / `no` 关掉，关掉后 worker 就回到「取 capability 要的那个 provider，
+    再由池子解析它」的老行为）。
+    capability 的显式选择**优先于**部署的默认（`src/worker_account.go`：`workerExtendsPlannerAgent`）
+- **账号的解析位置因此只有两处**：委派时按上面的规则继承一次，每轮 `ensureLLMSession` 再确认一次
 - **会话是同一个**：worker 拿到的 session 与 runtime 给 planner 的**是同一种**（`src/llm_session.go`）——
   capability 看到的只是它的窄视图（`ID` / `Workspace` / `Prompt` / `Release`）。它这一轮的 `mode=agent`、
   输入行记成 `role=agent`、round 从 1 开始，都不是"另一种 session"，而是**身份**（`Role=worker`）推出来的，
