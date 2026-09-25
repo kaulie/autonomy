@@ -72,6 +72,10 @@ func (in *AgentInitializer) Initialize(opts AgentInitOptions) (*Agent, error) {
 		agent.Workspace = ws
 	}
 	if model := strings.TrimSpace(opts.Model); model != "" {
+		// A model given at initialization is a *request*: it is recorded in the agent's policy
+		// and honored by the plan that decides what the agent runs on (src/agent_runtime.go),
+		// which is also what a later adoption may override with the account's own model.
+		agent.runtimePolicy.RequestedModel = model
 		agent.Model = model
 	}
 	agent.GiveSystemPrompt(opts.SystemPrompt)

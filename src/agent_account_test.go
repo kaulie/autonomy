@@ -26,12 +26,13 @@ func TestAnAgentResolvesItsHarnessDefaultAccount(t *testing.T) {
 	t.Setenv("AUTONOMY_LLM_BACKEND", "codex")
 	agent := &Agent{ID: 9911, Name: "agent-9911", Lifecycle: AgentLifecycleEphemeral}
 
-	resolved, err := resolveAccountFor(agent)
+	plan, err := assignAgentRuntime(agent, agentRuntimePolicy{})
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("plan: %v", err)
 	}
-	if resolved.ID != account.ID {
-		t.Fatalf("resolved %s, want the default account %s", resolved.ID, account.ID)
+	resolved := plan.Account
+	if resolved == nil || resolved.ID != account.ID {
+		t.Fatalf("resolved %v, want the default account %s", resolved, account.ID)
 	}
 
 	agent.adoptAccount(resolved)
@@ -72,21 +73,21 @@ func TestARecordedAccountWinsOverTheDefault(t *testing.T) {
 	// Without a recorded account the default wins; with one, the recorded choice does — that
 	// is what makes "the task named an account" mean the task bills that account.
 	plain := &Agent{ID: 9912, Name: "agent-9912", Lifecycle: AgentLifecycleEphemeral}
-	resolved, err := resolveAccountFor(plain)
+	plainPlan, err := assignAgentRuntime(plain, agentRuntimePolicy{})
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("plan: %v", err)
 	}
-	if resolved.ID != first.ID {
-		t.Fatalf("resolved %s, want the default %s", resolved.ID, first.ID)
+	if plainPlan.Account == nil || plainPlan.Account.ID != first.ID {
+		t.Fatalf("resolved %v, want the default %s", plainPlan.Account, first.ID)
 	}
 
 	named := &Agent{ID: 9913, Name: "agent-9913", Lifecycle: AgentLifecycleEphemeral, AccountID: second.ID}
-	resolved, err = resolveAccountFor(named)
+	namedPlan, err := assignAgentRuntime(named, agentRuntimePolicy{})
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("plan: %v", err)
 	}
-	if resolved.ID != second.ID {
-		t.Fatalf("resolved %s, want the recorded %s", resolved.ID, second.ID)
+	if namedPlan.Account == nil || namedPlan.Account.ID != second.ID {
+		t.Fatalf("resolved %v, want the recorded %s", namedPlan.Account, second.ID)
 	}
 }
 
@@ -105,7 +106,7 @@ func TestPoolWithoutTheHarnessRefusesAndSaysWhereToAddOne(t *testing.T) {
 	}
 
 	agent := &Agent{ID: 9914, Name: "agent-9914", Lifecycle: AgentLifecycleEphemeral}
-	_, err = resolveAccountFor(agent)
+	_, err = assignAgentRuntime(agent, agentRuntimePolicy{})
 	if err == nil {
 		t.Fatal("an agent with no account to run on must be refused")
 	}
@@ -123,7 +124,7 @@ func TestADisabledAccountIsRefusedNotSkipped(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	agent := &Agent{ID: 9915, Name: "agent-9915", Lifecycle: AgentLifecycleEphemeral, AccountID: account.ID}
-	_, err = resolveAccountFor(agent)
+	_, err = assignAgentRuntime(agent, agentRuntimePolicy{})
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("err=%v want a refusal naming the disabled account", err)
 	}

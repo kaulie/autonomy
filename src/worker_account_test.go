@@ -117,12 +117,29 @@ func TestADelegationOntoAMissingAccountIsRefused(t *testing.T) {
 	}
 }
 
-// A broker call with nothing being delegated from (no cycle) has no account to inherit: the
-// worker keeps the provider it asked for, exactly as every acquisition did before.
+// A broker call with nothing being delegated from (no delegating agent) has no account to
+// inherit: the plan falls back to the pool's own order for the provider the capability asked
+// for, exactly as every acquisition did before.
 func TestAWorkerOutsideACycleInheritsNothing(t *testing.T) {
-	runtime := NewRuntime(NewAgentFactory())
-	if account, err := runtime.workerAccount(); err != nil || account != nil {
-		t.Fatalf("account=%v err=%v want nothing to inherit", account, err)
+	store := resumeTestStore(t)
+	cline, err := store.CreateAccount(Account{
+		Harness: "cline", Vendor: "deepseek", Label: "cline default", Model: "deepseek-v4-pro",
+		Enabled: true, IsDefault: true, WorkspaceRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	worker := &Agent{ID: 9110, Name: "agent-9110", Role: AgentRoleWorker, Lifecycle: AgentLifecyclePersistent}
+	plan, err := assignAgentRuntime(worker, agentRuntimePolicy{RequestedBackend: "cursor"})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if plan.Account == nil || plan.Account.ID != cline.ID {
+		t.Fatalf("account=%v want the pool's own default for the requested harness (%s)", plan.Account, cline.ID)
+	}
+	if plan.Backend != llmbackend.Cline {
+		t.Fatalf("backend=%q want cline (the pool's default for the requested harness)", plan.Backend)
 	}
 }
 
@@ -349,8 +366,18 @@ func TestAWorkerThatDoesNotExtendItsPlannerTakesItsOwnProvider(t *testing.T) {
 	if worker.Backend != llmbackend.Cline {
 		t.Fatalf("worker backend=%q want the provider the capability asked for (the process default: cline)", worker.Backend)
 	}
-	if worker.Workspace != AgentWorkspacePath(worker.Name) {
-		t.Fatalf("worker workspace=%q want the runtime's default %q", worker.Workspace, AgentWorkspacePath(worker.Name))
+	// It is the pool's default for *that* harness, and that account's root is where it works:
+	// the account still owns the root, it is simply not the task's account.
+	defaults, err := store.ListAccounts(AccountFilter{Harness: "cline"})
+	if err != nil || len(defaults) == 0 {
+		t.Fatalf("list cline accounts: %v (%d)", err, len(defaults))
+	}
+	poolDefault := defaults[0]
+	if worker.AccountID != poolDefault.ID {
+		t.Fatalf("worker account=%q want the pool's cline default %s", worker.AccountID, poolDefault.ID)
+	}
+	if want := AgentWorkspacePathIn(poolDefault.WorkspaceRoot, worker.Name); worker.Workspace != want {
+		t.Fatalf("worker workspace=%q want %q (that account's root + its own name)", worker.Workspace, want)
 	}
 }
 
@@ -371,8 +398,9 @@ func TestTheDeploymentCanSwitchWorkerInheritanceOff(t *testing.T) {
 	runtime := NewRuntime(factory)
 	runtime.cycle = &DecisionContext{Agent: planner}
 
-	if account, err := runtime.workerAccount(); err != nil || account == nil || account.ID != created.ID {
-		t.Fatalf("account=%v err=%v want the task's account for the decision to be about", account, err)
+	plan, err := assignAgentRuntime(planner, agentRuntimePolicy{DelegatingAgent: nil})
+	if err != nil || plan.Account == nil || plan.Account.ID != created.ID {
+		t.Fatalf("account=%v err=%v want the task's account for the decision to be about", plan.Account, err)
 	}
 	// With inheritance off, the acquisition must not consult it at all — the worker keeps the
 	// local backend here, exactly as it did before this feature existed.

@@ -242,6 +242,12 @@ type Agent struct {
 	// agent's own prompt is rendered from — and are not persisted.
 	Role    AgentRole
 	Purpose string
+	// runtimePolicy is what the piece that created this agent asked for — a capability's
+	// Backend/Model when it acquired a worker, whether that worker extends its planner, the
+	// model an initializer was given — and it is what assignAgentRuntime weighs against the
+	// agent's role and the deployment's switches (src/agent_runtime.go). Runtime state, like
+	// Role and Purpose: the account it resolves to is what the row keeps.
+	runtimePolicy agentRuntimePolicy
 	// SystemPrompt is what this agent was initialized with (AgentInitializer), given
 	// before any task exists for it. It is carried in the reasoning frame, so it
 	// reaches the agent's session ahead of the task's own words (buildReasoningFrame).

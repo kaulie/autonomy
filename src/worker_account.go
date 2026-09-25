@@ -32,21 +32,3 @@ func workerExtendsPlannerAgent(choice *bool) bool {
 		return true
 	}
 }
-
-// workerAccount is the account a worker that extends its planner runs on: the one the
-// delegating agent — the task's own agent — is on.
-//
-// It is read through resolveAccountFor, so a worker inherits exactly what its task's agent
-// resolved (the account the task named, else that harness's default account), and a task whose
-// account is gone or disabled fails the delegation loudly instead of a worker quietly spending
-// another key.
-//
-// nil means "there is nothing to inherit": a broker call made outside a cycle (a capability
-// invoked with no delegating agent). The worker then keeps the provider it asked for and the
-// pool resolves that one on its first turn — what every acquisition did before.
-func (r *Runtime) workerAccount() (*Account, error) {
-	if r == nil || r.cycle == nil || r.cycle.Agent == nil {
-		return nil, nil
-	}
-	return resolveAccountFor(r.cycle.Agent)
-}
