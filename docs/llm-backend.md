@@ -28,6 +28,33 @@ persisted by the CLI under `~/.codex/sessions`, so `codex.resumeThread(id)` cont
 conversation after a restart — the agent row's recorded thread id is what the next process
 resumes, the same contract the other two keep.
 
+### Codex 的沙箱与网络（`AUTONOMY_CODEX_NETWORK`）
+
+codex 的每一轮跑在 CLI 自己的沙箱里（`plan` → `read-only`，其余 → `workspace-write`，见
+`src/codexsdk/bridge/config.mjs` 的 `sandboxModeFor`），而 CLI 的默认是**沙箱里不能出网**。于是
+「工作区是空的、让 agent 自己去拉代码」这条路在 codex 上必然卡住 —— 这台机器的出网方式是
+`HTTPS_PROXY=127.0.0.1:7897`，沙箱里连这个 localhost 地址都看不见，去掉代理又解析不了 github.com
+（2026-09-25 实测：一条任务的 `code_edit` worker 拿到空工作区、`git clone` 两次都失败）。
+
+这个开关是**外部的**（改完重启，不用改代码）：
+
+| 值 | 谁拿到网络 |
+|---|---|
+| *（不设）* / `all` | planner 与 worker 都拿（默认） |
+| `worker` | 只有 `agent` 模式（workspace-write） |
+| `planner` | 只有 `plan` 模式（read-only） |
+| `off` / `0` / `false` / `no` / `none` | 都不拿 |
+
+实现：`src/llmbackend/codex/network.go` 按模式解出布尔值 → `CreateOptions.NetworkAccess`
+（`src/bridgesdk`）→ 桥把它翻成 SDK 的 `networkAccessEnabled` → CLI 的
+`--config sandbox_workspace_write.network_access=true`（`threadOptionsFor`）。
+
+⚠️ 已知边界（实测）：`workspace-write + 网络` 下 `git clone/ls-remote` 正常；但 **`read-only`
+（planner）即使给了网络，`git` 的远端操作在这台 mac 上仍然拿不到东西** —— 只读沙箱不允许写
+`/tmp`，而 macOS 的 `git` 包装器（`xcrun`）每次都要在那里写缓存。只读模式下 `ls`、`git status`
+这类**本地**操作是可用的。要 planner 真的能 fetch/看仓库，要么给它一个可写的自己工作区，
+要么走「运行时先把仓库检出到工作区」那条路（免去 fetch）。
+
 它决定 `LLMReasoner`（planner 的决策轮）与 capability 拿到的 agent（`code_edit` →
 `Runtime.AcquireAgent`，`src/runtime.go`）跑在哪个 provider 上。`AUTONOMY_REASONER=local`
 是离线 reasoner，与后端无关。
