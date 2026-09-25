@@ -79,6 +79,14 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
 - **不轮换**：同一只 agent 的会话粘住同一个账号；换账号是显式的配置动作（`account_id`），
   不是隐式的负载均衡 —— 否则同一个 task 的相邻 cycle 会突然换一个 key、换一份额度，
   而 agent 的常驻会话并不知道自己换了人。
+- **委派也是同一个账号**：capability 要 agent（`AcquireAgent`）时，被委托的那只 worker **继承委托方
+  （任务自己的 agent）的账号**，连 harness 一起 —— 任务在 codex 账号上，写代码的 worker 也是 codex
+  （见 [delegation.md](delegation.md)）。这样「一个任务一个账号」对整条委派链成立：同一把凭据、
+  同一份额度、同一个 workspace root（`<账号 root>/agent-N/`）。账号被删/停用时**委托会失败**，
+  不会回落到另一条账号。
+- **工作目录也来自账号**：agent 的工作目录是「账号的 root + 它自己的目录名」，即使账号是在第一轮
+  才被解析出来的（`ensureLLMSession`）。只有两种例外：账号没填 root（用运行时默认 root），
+  或者 capability 显式要了一个目录（`AcquireAgentOpts.Workspace`）。
 - **任务级配置**：`POST /api/tasks` 可以带 `account_id`（`AcceptTaskRequest.AccountID`）。
   它在**受理时**校验：id 不存在或账号被停用 = 这条指令被拒（而不是任务跑到第一个 cycle 才死）。
 - **三种指定方式**（同一个字段，三个入口）：
