@@ -30,45 +30,40 @@ func llmMode(mode ReasonMode) llmbackend.Mode { return llmbackend.Mode(mode) }
 // ensureLLMSession attaches the agent's backend session (idempotent) and returns a label
 // for logs: the provider-side session/agent id when known.
 //
-// This is also where the agent's **account** is resolved (src/agent_account.go): the pool
-// entry it runs on — its harness, its model, and the credential the session is built from.
-// Resolving in the one place a session is attached is what makes "credentials come from the
-// pool, never from the environment" true for every path: a task's first run, a resumed run,
-// and a delegated worker all come through here. No account to run on is a refusal with a
-// pointer at /accounts, not a quiet fallback.
-//
-// For a worker the *account* is not resolved here: it is inherited from the agent that
-// delegated to it, at acquisition (Runtime.AcquireAgent → workerAccount), so a worker resolves
-// the same entry here — and a task's account governs its whole delegation chain.
-//
-// model is what the caller suggested (a Cursor-oriented default from LLMReasoner); the
-// account's own model wins, and an account without one leaves the model to its harness. cwd is
-// the caller's suggestion for where the run happens, and the account's root is what usually
-// decides it (see below).
+// What the agent runs on — provider, model, account, workspace root — is not decided here: it
+// is the runtime plan (assignAgentRuntime, src/agent_runtime.go), which is also what
+// Runtime.AcquireAgent consults for a worker. A turn adds two things to the policy it passes:
+// the model the caller suggests (a Cursor-oriented default from LLMReasoner), and the harness
+// the agent already ran on — a resumed row knows its backend, and that is what the pool then
+// resolves an account for. No account to run on is a refusal with a pointer at /accounts, not a
+// quiet fallback.
 func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode ReasonMode) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("nil agent")
 	}
-	account, err := resolveAccountFor(a)
+	policy := a.runtimePolicy
+	policy.DelegatingAgent = nil // a turn has no delegation in flight
+	policy.RequestedModel = model
+	if strings.TrimSpace(policy.RequestedBackend) == "" {
+		policy.RequestedBackend = string(a.effectiveBackend())
+	}
+	plan, err := assignAgentRuntime(a, policy)
 	if err != nil {
 		return "", err
 	}
-	a.adoptAccount(account)
-	if account.Model == "" {
-		a.SetModel(model)
-	}
-	// The account owns the workspace root: adoptAccount has just given the agent its own
-	// directory under it (its root + the agent's name). cwd is the caller's suggestion — the
-	// agent's workspace as it was *before* the account was resolved — so it is only what an
-	// agent whose account names no root runs in, or one whose directory was chosen for it
+	a.applyAgentRuntime(plan)
+	// The plan's account owns the workspace root: applyAgentRuntime has just given the agent its
+	// own directory under it (its root + the agent's name). cwd is the caller's suggestion — the
+	// agent's workspace as it was *before* the plan was applied — so it is only what an agent
+	// with no account root runs in, or one whose directory was chosen for it
 	// (Agent.workspaceChosen, which cwd then is). Applying it unconditionally put every agent
 	// back on the runtime's default root and undid the account's directory on its first run
 	// (2026-09-24: the pool's roots were ignored unless the task had named the account at
 	// accept time).
-	if strings.TrimSpace(account.WorkspaceRoot) == "" || a.workspaceChosen {
+	if plan.Account == nil || strings.TrimSpace(plan.Account.WorkspaceRoot) == "" || a.workspaceChosen {
 		a.SetWorkspace(cwd)
 	}
-	if a.AccountID != "" {
+	if plan.Account != nil {
 		// The account is what the row keeps: the next process resumes the same entry.
 		a.Persist()
 	}

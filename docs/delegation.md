@@ -41,12 +41,12 @@ Task Owner → Coding Agent → Research Agent → …
   这个目录来自**任务那只 agent 的账号**：账号的 root + worker 自己的目录名（`<root>/agent-N/`），
   与 planner 同一个 root。capability 若**显式**要一个自己的目录（`AcquireAgentOpts.Workspace`），
   那个目录优先，且之后每一轮都不会被账号的 root 顶掉
-- **账号是继承的（同一个任务，同一个账号）**：worker 不自己挑账号 —— `AcquireAgent` 在委派发生时
-  继承**委托它的那只 agent**（即任务自己的 agent）的账号（`Runtime.workerAccount` → `resolveAccountFor`），
-  连 harness 一起：任务在 codex 账号上，worker 就是 codex（`Runtime.AcquireAgent` 的 codex 分支 +
-  `Agent.AttachCodex`）。所以一个任务从 planner 到每一只 worker，**同一把凭据、同一份额度、
-  同一个 workspace root**。账号被删/停用时**委托直接失败**（`account … is gone` / `disabled`），
-  不会悄悄换一把 key 跑。
+- **账号是继承的（同一个任务，同一个账号）**：worker 不自己挑账号 —— 委派发生时按
+  `assignAgentRuntime`（`src/agent_runtime.go`，provider/model/账号的唯一决策处）继承**委托它的
+  那只 agent**（即任务自己的 agent）的账号，连 harness 一起：任务在 codex 账号上，worker 就是 codex
+  （`Runtime.AcquireAgent` 的 codex 分支 + `Agent.AttachCodex`）。所以一个任务从 planner 到每一只
+  worker，**同一把凭据、同一份额度、同一个 workspace root**。账号被删/停用时**委托直接失败**
+  （`account … is gone` / `disabled`），不会悄悄换一把 key 跑。
   这条规则本身是个**变量**，不是写死的：
   - 每次委派可以自己说 —— `AcquireAgentOpts.ExtendsPlannerAgent`（`*bool`：`nil` = 用默认，
     `true`/`false` = 这一次就这么办）；

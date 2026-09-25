@@ -475,44 +475,34 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		agent.Workspace = ws
 		agent.workspaceChosen = true
 	}
-	backend := strings.ToLower(strings.TrimSpace(opts.Backend))
-	if backend == "" || backend == string(llmbackend.Cursor) {
-		// Capabilities name a purpose ("an autonomous coding agent"), not a
-		// vendor: the legacy "cursor" label means "the host default backend",
-		// which AUTONOMY_LLM_BACKEND selects at runtime.
-		backend = string(llmbackend.DefaultBackend())
+	// What this worker runs on is one decision, and the same one a turn makes: the runtime plan
+	// (assignAgentRuntime, src/agent_runtime.go). What the capability asked for (Backend, Model)
+	// and whether this worker extends its planner are the policy; the pool — and, for a worker
+	// that extends its planner, the account the task is on — is what decides.
+	policy := agentRuntimePolicy{
+		RequestedBackend:    opts.Backend,
+		RequestedModel:      opts.Model,
+		ExtendsPlannerAgent: opts.ExtendsPlannerAgent,
+		DelegatingAgent:     r.delegatingAgent(),
 	}
-	// A delegated worker runs where its task runs: it extends the agent that delegated to it —
-	// inheriting its account, and with it the harness, credential, model and workspace root —
-	// instead of picking a provider of its own. Whether it does is not hardcoded here: the
-	// capability may say (AcquireAgentOpts.ExtendsPlannerAgent) and the deployment sets the
-	// default (workerExtendsPlannerAgent, src/worker_account.go). A worker that chose for
-	// itself would spend a second account's quota on the same task's work (2026-09-24: a task
-	// on a codex account had its code written by a cline worker).
-	//
-	// A *local* request is "no provider at all" (a test, a local-only worker), so there is no
-	// account to inherit and it is left exactly as it was.
-	if backend != string(llmbackend.Local) && workerExtendsPlannerAgent(opts.ExtendsPlannerAgent) {
-		account, err := r.workerAccount()
-		if err != nil {
-			r.releaseRegistered(agent)
-			return nil, err
-		}
-		if account != nil {
-			agent.adoptAccount(account)
-			agent.Persist()
-			backend = account.Harness
-		}
+	agent.runtimePolicy = policy
+	plan, err := assignAgentRuntime(agent, policy)
+	if err != nil {
+		r.releaseRegistered(agent)
+		return nil, err
 	}
-	// The model the session opens with: the account's own (adoptAccount), else the
-	// capability's suggestion — the same rule ensureLLMSession follows.
-	model := strings.TrimSpace(agent.Model)
-	if model == "" {
-		model = strings.TrimSpace(opts.Model)
+	agent.applyAgentRuntime(plan)
+	if plan.Account != nil {
+		// The account is what the row keeps: the next process resumes the same entry.
+		agent.Persist()
 	}
-	switch llmbackend.Backend(backend) {
+	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
+		// applyAgentRuntime took the account's root; the capability's own directory outranks it.
+		agent.Workspace = ws
+	}
+	switch plan.Backend {
 	case llmbackend.Cursor:
-		if err := agent.AttachCursor(ctx, model); err != nil {
+		if err := agent.AttachCursor(ctx, plan.Model); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
@@ -530,15 +520,15 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		// Local-only session: no LLM attach; Prompt is unsupported.
 	default:
 		r.releaseRegistered(agent)
-		return nil, fmt.Errorf("unknown agent backend %q", opts.Backend)
+		return nil, fmt.Errorf("unknown agent backend %q", plan.Backend)
 	}
 	agent.Start()
 	// Who is handing this worker its work: the agent that delegated, named on every
 	// message it gets (the capability is the hand, the planner is the agent that
 	// asked for the job — see docs/delegation.md).
 	delegatedBy := ""
-	if r.cycle != nil && r.cycle.Agent != nil {
-		delegatedBy = r.cycle.Agent.Name
+	if from := r.delegatingAgent(); from != nil {
+		delegatedBy = from.Name
 	}
 	// The worker's session: the same session a task's own agent runs on, with a
 	// worker identity on the agent. What makes its turns delegated turns is that
@@ -546,8 +536,8 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 	// why the worker's runs are attributed to the task the capability delegated from.
 	sess := NewLLMSession(r, agent, SessionOpts{
 		TaskID:      strings.TrimSpace(opts.TaskID),
-		Model:       opts.Model,
-		Provider:    backend,
+		Model:       plan.Model,
+		Provider:    string(plan.Provider),
 		DelegatedBy: delegatedBy,
 		Inbox:       r.inbox,
 	})
@@ -558,6 +548,15 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		r.stepSessions = append(r.stepSessions, sess)
 	}
 	return sess, nil
+}
+
+// delegatingAgent is the agent whose cycle this runtime is inside — the one a capability's
+// acquisition is delegated from. nil outside a cycle (a broker call with no delegating agent).
+func (r *Runtime) delegatingAgent() *Agent {
+	if r == nil || r.cycle == nil {
+		return nil
+	}
+	return r.cycle.Agent
 }
 
 // releaseRegistered lets go of an agent that could not be attached. It never

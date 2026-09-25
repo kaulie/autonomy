@@ -4,8 +4,9 @@
 
 运行时的凭据**只从这里来**：不再有 `AUTONOMY_*_API_KEY` / `CURSOR_API_KEY` 这种注入 ——
 `.env` 只留路径、端口、store DSN 这类部署参数，不留给「谁付费」。这条规矩的写法是
-`src/agent_account.go` 里的解析：会话 attach 之前先解析账号，解析不到就**拒绝**（错误里
-指向 `/accounts`），不静默换一个人跑。
+`src/agent_runtime.go` 里的**一个**决策（`assignAgentRuntime`）：会话 attach 之前先按 role 与
+控制策略决定「哪个 provider、哪个 model、谁的账号」，解析不到就**拒绝**（错误里指向 `/accounts`），
+不静默换一个人跑。
 
 ## 为什么需要 vendor
 
@@ -64,17 +65,46 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
 - 这与 web-cursor 完全同构：它的 `GET /api/providers` + `GET /api/models` 就是这两个问题；
 - 目录只是**建议**：池子仍然接受手填的 vendor（provider 的清单会变，不该由我们替它把关）。
 
-## 怎么被选中（`src/agent_account.go`）
+## 一个地方决定 provider + model：`assignAgentRuntime`（`src/agent_runtime.go`）
+
+「这只 agent 用哪个 provider（harness）、哪个 model、花谁的账号、在哪个 root 下工作」是一个决定，
+只有一个地方做它：
 
 ```
-① agent 行记着 account_id（任务的 account_id，或上一次选择）
-       ↓ 找不到 / 被停用 → 拒绝（不换人跑）
-② 该 harness 的默认账号（is_default）
+assignAgentRuntime(agent, policy) → agentRuntimePlan{ Account, Backend, Provider, Model, Why }
+```
+
+**输入**（role + 控制策略）：
+
+| 输入 | 谁给 | 说明 |
+|---|---|---|
+| `agent.Role` | 运行时 | `planner`（任务自己的 agent）/ `worker`（capability 要来的） |
+| `agent.AccountID` | 任务（`account_id`）或上一次继承 | 记过就用它；找不到 / 被停用 → 拒绝 |
+| `policy.RequestedBackend` | capability（`AcquireAgentOpts.Backend`）/ 初始化的模型 | `""` 与老的 `"cursor"` = 宿主默认（`AUTONOMY_LLM_BACKEND`） |
+| `policy.RequestedModel` | capability / reasoner / `AgentInitOptions.Model` | 只是**建议**：池子优先 |
+| `policy.ExtendsPlannerAgent` | capability（每次委派）| `nil` = 部署默认；`true`/`false` = 这一次 |
+| `policy.DelegatingAgent` | Runtime（当前 cycle 的 agent）| worker 继承谁的账号 |
+| `AUTONOMY_WORKER_EXTENDS_PLANNER_AGENT` | 部署 | 继承与否的默认（默认开） |
+| 账号池 | store | 唯一凭据来源 |
+
+**优先级**（同一份代码，两处调用：`Runtime.AcquireAgent` 建 worker、`Agent.ensureLLMSession` 每一轮）：
+
+```
+① agent 行记着 account_id（任务指定 / 上次继承）
+       ↓ 找不到 / 被停用 → 拒绝（不换人跑），错误指到 /accounts
+② worker 且「继承 planner」开着 → 委托方那只 agent 的账号（同一任务同一个账号）
        ↓
-③ 该 harness 里第一个启用的账号
+③ 该 harness 的默认账号（is_default）→ 第一个启用的账号
        ↓
 ④ 池子里没有 → 拒绝：「no enabled <harness> account in the pool: add one at /accounts」
+
+harness = 账号的 harness（有账号时）> 调用方要的 > 部署默认
+model   = 账号的 model        > 调用方要的 > 该 harness 自己的默认
 ```
+
+**输出**只由两个 applier 落到 agent 上：`Agent.applyAgentRuntime`（account → id/label/凭据/root，
+backend/provider/model）与它的 `adoptAccount`；attach（`AttachCursor`/`AttachCline`/`AttachCodex`）
+只负责按 plan 打开会话，自己不再挑 provider 或 model。
 
 - **不轮换**：同一只 agent 的会话粘住同一个账号；换账号是显式的配置动作（`account_id`），
   不是隐式的负载均衡 —— 否则同一个 task 的相邻 cycle 会突然换一个 key、换一份额度，
@@ -135,6 +165,8 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
 | `src/db/sqlite_accounts.go` / `postgres_accounts.go` | 两个引擎的实现与建表（`provider_accounts`） |
 | `src/accounts_service.go` | API 形状：`AccountView`（掩码）、增删改查、`DefaultAccount`、`VerifyAccount` |
 | `src/accounts_page.go` | `GET /accounts` 的页面 |
-| `src/agent_account.go` | 解析链 + agent 采纳账号 |
+| `src/agent_runtime.go` | **唯一**的 provider / model / 账号决策（`assignAgentRuntime` → `applyAgentRuntime`） |
+| `src/agent_account.go` | agent 从账号采纳什么（id/label/凭据/workspace root） |
+| `src/worker_account.go` | worker 是否继承 planner 账号的开关（env） |
 | `src/llmbackend/*/probe.go` | 各 harness 的探活 |
 | `src/llmbackend/*/session.go` | 会话用 `Facts().Creds`（不再读 env） |
