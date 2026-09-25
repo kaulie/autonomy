@@ -202,6 +202,8 @@ if [ "${AUTONOMY_SKIP_BRIDGE_CHECK:-0}" = "1" ]; then
   log "跳过桥自检（AUTONOMY_SKIP_BRIDGE_CHECK=1）"
 elif [ "${AUTONOMY_REASONER:-llm}" = "local" ]; then
   log "跳过桥自检（AUTONOMY_REASONER=local：不经过 LLM 后端）"
+elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "claude" ] || [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "claude_code" ]; then
+  "${AUTONOMY_CLAUDE_BIN:-claude}" --version >/dev/null 2>&1 || die "Claude CLI 不可用；安装 claude 或设置 AUTONOMY_CLAUDE_BIN"
 elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "cline" ] || [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "codex" ]; then
   # 两个 Node 桥的后端检查一样，只有坐标不同。
   node_backend="${AUTONOMY_LLM_BACKEND:-cursor}"

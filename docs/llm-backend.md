@@ -21,6 +21,7 @@
 | 空 / `cursor` | Cursor SDK 桥 | 默认（standalone 二进制） |
 | `cline` / `cline_sdk` | Cline SDK 桥（[cline-reasoner.md](cline-reasoner.md)） | Node 桥 + `@cline/sdk` |
 | `codex` / `codex_sdk` | Codex SDK 桥（`src/codexsdk/bridge`） | Node 桥 + `@openai/codex-sdk`（它自己驱动 `codex` CLI） |
+| `claude` / `claude_code` | Claude Code CLI（[配置与验证](claude-harness.md)） | 直接运行 `claude --print`，无需 Node 桥 |
 
 The three harnesses live in `src/llmbackend/{cursor,cline,codex}`; a backend with no harness
 linked in is refused by name (import `src/llmbackend/all`). Codex is the newest: its thread is

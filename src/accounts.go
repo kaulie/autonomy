@@ -57,6 +57,8 @@ func DefaultVendorFor(harness string) string {
 		return CursorVendor
 	case string(llmbackend.Codex):
 		return "openai"
+	case string(llmbackend.Claude):
+		return "anthropic"
 	default:
 		return "deepseek"
 	}
@@ -65,7 +67,7 @@ func DefaultVendorFor(harness string) string {
 // AccountHarnesses are the harnesses the pool can hold credentials for, in a stable order:
 // what the UI offers and what validation accepts.
 func AccountHarnesses() []string {
-	return []string{string(llmbackend.Cursor), string(llmbackend.Cline), string(llmbackend.Codex)}
+	return []string{string(llmbackend.Cursor), string(llmbackend.Cline), string(llmbackend.Codex), string(llmbackend.Claude)}
 }
 
 // normalizeHarness maps a harness name (and the aliases a caller may use) onto the backend
@@ -78,6 +80,8 @@ func normalizeHarness(harness string) string {
 		return string(llmbackend.Cline)
 	case string(llmbackend.Codex), "codex_sdk":
 		return string(llmbackend.Codex)
+	case string(llmbackend.Claude), "claude_code":
+		return string(llmbackend.Claude)
 	default:
 		return ""
 	}

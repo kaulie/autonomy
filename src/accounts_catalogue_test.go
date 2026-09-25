@@ -57,6 +57,8 @@ func TestTheCatalogueEndpointsAnswerOverHTTP(t *testing.T) {
 		want string
 	}{
 		{"/api/accounts/vendors?harness=cline", "\"deepseek\""},
+		{"/api/accounts/vendors?harness=claude", "\"anthropic\""},
+		{"/api/accounts/models?harness=claude", "\"anthropic\""},
 		{"/api/accounts/models?harness=cline&vendor=deepseek", "\"deepseek-v4-pro\""},
 		{"/api/accounts/vendors?harness=gemini", "error"},
 	} {
