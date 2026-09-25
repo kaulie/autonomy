@@ -225,7 +225,7 @@ they are stopped and the store and provider sessions are closed properly. See
 ### Harness account pool
 
 Which harness, vendor, model, workspace root and credential a task runs on is a **pool choice**,
-never an environment variable: an account is one harness (`cursor` / `cline` / `codex`) + one vendor
+never an environment variable: an account is one harness (`cursor` / `cline` / `codex` / [`claude`](docs/claude-harness.md)) + one vendor
 + one credential, and the runtime resolves one per agent (`src/accounts.go`,
 `src/agent_account.go`). Add, edit, verify (and disable) them at
 `http://127.0.0.1:4300/accounts`, or over `GET` / `POST` / `PATCH` / `DELETE /api/accounts`; a key is

@@ -10,6 +10,7 @@
 package all
 
 import (
+	_ "github.com/kaulie/autonomy/src/llmbackend/claude"
 	// The harnesses this build can run agents on: one folder each, registered by importing
 	// them (see the package comment).
 	_ "github.com/kaulie/autonomy/src/llmbackend/cline"

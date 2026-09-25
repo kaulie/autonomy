@@ -14,6 +14,8 @@ func DefaultBackend() Backend {
 		return Cline
 	case string(Codex), "codex_sdk":
 		return Codex
+	case string(Claude), "claude_code":
+		return Claude
 	default:
 		return Cursor
 	}

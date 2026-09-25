@@ -516,6 +516,11 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 			r.releaseRegistered(agent)
 			return nil, err
 		}
+	case llmbackend.Claude:
+		if _, _, err := agent.llmSession().Attach(ctx, llmbackend.ModeAgent); err != nil {
+			r.releaseRegistered(agent)
+			return nil, err
+		}
 	case llmbackend.Local:
 		// Local-only session: no LLM attach; Prompt is unsupported.
 	default:
