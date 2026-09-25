@@ -2,10 +2,13 @@ package autonomy
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/capability/broker"
 	"github.com/kaulie/autonomy/src/codexsdk"
 	"github.com/kaulie/autonomy/src/codexsdk/fakebridge"
@@ -197,5 +200,83 @@ func TestAWorkerAcquiredWithItsOwnWorkspaceKeepsIt(t *testing.T) {
 	}
 	if worker.Workspace != requested {
 		t.Fatalf("after a turn the workspace=%q want the requested %q", worker.Workspace, requested)
+	}
+}
+
+// End to end through the loop's own door: the plan step that delegates runs its worker on the
+// account the task is on. The process default here is deliberately cline while the task's
+// account is codex — without the inheritance the step would run a cline worker.
+func TestADelegatedStepRunsItsWorkerOnTheTasksAccount(t *testing.T) {
+	installFakeCodexClient(t)
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_CLINE_PROVIDER", "deepseek")
+	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
+	t.Setenv("PROJECT_ROOT", filepath.Join(".."))
+	store := executionTestStore(t)
+	created, err := store.CreateAccount(Account{
+		Harness: "codex", Vendor: "openai", Label: "codex main", Enabled: true, IsDefault: true,
+		WorkspaceRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	agents := NewAgentFactory()
+	runtime := NewRuntime(agents)
+	factory := capability.NewFactory()
+	capability.RegisterDefaults(factory, capability.Deps{Agents: runtime})
+	runtime.SetCapabilities(factory.GetAll()...)
+	_autonomy = &Autonomy{CapabilityFactory: factory, Store: store}
+
+	ctx := executionContext()
+	ctx.Agent.adoptAccount(&created) // the task's own agent, on the task's account
+
+	if _, err := runtime.Execute(Decision{
+		Type:   "plan",
+		Reason: "hand the work to a coding agent",
+		Actions: []Action{CapabilityAction{
+			Name:           "code_edit",
+			Inputs:         literalInputs(map[string]string{"instruction": "do the thing"}),
+			ExpectedEffect: "the change is in the workspace and its pull request is open",
+		}},
+		Ctx: ctx,
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	plans, err := store.ListExecutionPlans("task-exec")
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%v err=%v", plans, err)
+	}
+	steps, err := store.ListExecutionSteps(plans[0].ID)
+	if err != nil || len(steps) != 1 {
+		t.Fatalf("steps=%v err=%v", steps, err)
+	}
+	interactions, err := store.ListExecutionStepInteractions(steps[0].ID)
+	if err != nil || len(interactions) != 1 {
+		t.Fatalf("interactions=%v err=%v", interactions, err)
+	}
+	// The run that answered the step is the codex one (the task's account), not a cline one.
+	if got := interactions[0].Provider; got != string(llmbackend.ProviderCodex) {
+		t.Fatalf("delegated run provider=%q want codex (the task's account), not the process default", got)
+	}
+
+	var agentID int64
+	if err := store.RawDB().QueryRow(`SELECT agent_id FROM reason_turns WHERE id = ?`, interactions[0].ReasonTurnID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+	worker := agents.Get(fmt.Sprintf("agent-%d", agentID))
+	if worker == nil {
+		t.Fatalf("the worker agent-%d is not registered", agentID)
+	}
+	if worker.AccountID != created.ID {
+		t.Fatalf("worker account=%q want the task's %s", worker.AccountID, created.ID)
+	}
+	if worker.Backend != llmbackend.Codex {
+		t.Fatalf("worker backend=%q want codex", worker.Backend)
+	}
+	if !strings.HasPrefix(worker.Workspace, created.WorkspaceRoot) {
+		t.Fatalf("worker workspace=%q want it under the account's root %q", worker.Workspace, created.WorkspaceRoot)
 	}
 }
