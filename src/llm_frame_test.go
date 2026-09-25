@@ -131,9 +131,11 @@ func TestLLMFrameResetsOnNewClineSession(t *testing.T) {
 		t.Fatal("reusing a session must not resend the frame")
 	}
 
-	// Different cwd → different session key → new session → frame again.
-	other := t.TempDir()
-	if _, err := agent.ensureLLMSession(context.Background(), "composer-2", other, ReasonModePlan); err != nil {
+	// A different mode is a different session key — the Cline session is sticky in (mode, cwd)
+	// — so this is a new SDK session and the frame goes again. (The workspace half of that key
+	// is the agent's account's business, src/agent_backend.go: it cannot be moved by passing a
+	// cwd, which is what this test used to do.)
+	if _, err := agent.ensureLLMSession(context.Background(), "composer-2", agent.Workspace, ReasonModeAgent); err != nil {
 		t.Fatalf("new session: %v", err)
 	}
 	if !agent.needsLLMFrame() {

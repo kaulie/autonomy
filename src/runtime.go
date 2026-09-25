@@ -470,7 +470,10 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		agent.CurrentTask = &Task{ID: taskID}
 	}
 	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
+		// The capability asked for a directory of its own (broker.AcquireAgentOpts.Workspace):
+		// it wins over the account's root, now and on every later turn (Agent.workspaceChosen).
 		agent.Workspace = ws
+		agent.workspaceChosen = true
 	}
 	backend := strings.ToLower(strings.TrimSpace(opts.Backend))
 	if backend == "" || backend == string(llmbackend.Cursor) {
@@ -479,14 +482,45 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		// which AUTONOMY_LLM_BACKEND selects at runtime.
 		backend = string(llmbackend.DefaultBackend())
 	}
+	// A delegated worker runs where its task runs: it inherits the account the delegating
+	// agent is on — the same harness, the same credential, the same workspace root — instead
+	// of picking a provider of its own. A capability names a purpose, not an account, and a
+	// worker on another account would spend a second key on the same task's work
+	// (2026-09-24: a task on a codex account had its code written by a cline worker).
+	//
+	// A *local* request is "no provider at all" (a test, a local-only worker), so there is no
+	// account to inherit and it is left exactly as it was.
+	if backend != string(llmbackend.Local) {
+		account, err := r.workerAccount()
+		if err != nil {
+			r.releaseRegistered(agent)
+			return nil, err
+		}
+		if account != nil {
+			agent.adoptAccount(account)
+			agent.Persist()
+			backend = account.Harness
+		}
+	}
+	// The model the session opens with: the account's own (adoptAccount), else the
+	// capability's suggestion — the same rule ensureLLMSession follows.
+	model := strings.TrimSpace(agent.Model)
+	if model == "" {
+		model = strings.TrimSpace(opts.Model)
+	}
 	switch llmbackend.Backend(backend) {
 	case llmbackend.Cursor:
-		if err := agent.AttachCursor(ctx, opts.Model); err != nil {
+		if err := agent.AttachCursor(ctx, model); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
 	case llmbackend.Cline:
 		if err := agent.AttachCline(ctx); err != nil {
+			r.releaseRegistered(agent)
+			return nil, err
+		}
+	case llmbackend.Codex:
+		if err := agent.AttachCodex(ctx); err != nil {
 			r.releaseRegistered(agent)
 			return nil, err
 		}
@@ -522,6 +556,24 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		r.stepSessions = append(r.stepSessions, sess)
 	}
 	return sess, nil
+}
+
+// workerAccount is the account a capability-acquired agent runs on: the one the delegating
+// agent — the task's own agent — is on.
+//
+// It is read through resolveAccountFor, so a worker inherits exactly what its task's agent
+// resolved (the account the task named, else that harness's default account), and a task whose
+// account is gone or disabled fails the delegation loudly instead of a worker quietly spending
+// another key.
+//
+// nil means "there is nothing to inherit": a broker call made outside a cycle (a capability
+// invoked with no delegating agent). The worker then keeps the provider it asked for and the
+// pool resolves that one on its first turn — what every acquisition did before.
+func (r *Runtime) workerAccount() (*Account, error) {
+	if r == nil || r.cycle == nil || r.cycle.Agent == nil {
+		return nil, nil
+	}
+	return resolveAccountFor(r.cycle.Agent)
 }
 
 // releaseRegistered lets go of an agent that could not be attached. It never

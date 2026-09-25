@@ -5,6 +5,7 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // This file is the runtime's door onto llmbackend: an agent's turns go through one
@@ -36,8 +37,14 @@ func llmMode(mode ReasonMode) llmbackend.Mode { return llmbackend.Mode(mode) }
 // and a delegated worker all come through here. No account to run on is a refusal with a
 // pointer at /accounts, not a quiet fallback.
 //
+// For a worker the *account* is not resolved here: it is inherited from the agent that
+// delegated to it, at acquisition (Runtime.AcquireAgent → workerAccount), so a worker resolves
+// the same entry here — and a task's account governs its whole delegation chain.
+//
 // model is what the caller suggested (a Cursor-oriented default from LLMReasoner); the
-// account's own model wins, and an account without one leaves the model to its harness.
+// account's own model wins, and an account without one leaves the model to its harness. cwd is
+// the caller's suggestion for where the run happens, and the account's root is what usually
+// decides it (see below).
 func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode ReasonMode) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("nil agent")
@@ -50,7 +57,17 @@ func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode Re
 	if account.Model == "" {
 		a.SetModel(model)
 	}
-	a.SetWorkspace(cwd)
+	// The account owns the workspace root: adoptAccount has just given the agent its own
+	// directory under it (its root + the agent's name). cwd is the caller's suggestion — the
+	// agent's workspace as it was *before* the account was resolved — so it is only what an
+	// agent whose account names no root runs in, or one whose directory was chosen for it
+	// (Agent.workspaceChosen, which cwd then is). Applying it unconditionally put every agent
+	// back on the runtime's default root and undid the account's directory on its first run
+	// (2026-09-24: the pool's roots were ignored unless the task had named the account at
+	// accept time).
+	if strings.TrimSpace(account.WorkspaceRoot) == "" || a.workspaceChosen {
+		a.SetWorkspace(cwd)
+	}
 	if a.AccountID != "" {
 		// The account is what the row keeps: the next process resumes the same entry.
 		a.Persist()

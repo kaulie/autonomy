@@ -37,7 +37,17 @@ Task Owner → Coding Agent → Research Agent → …
   由 `AcquireAgentOpts.TaskID` 带过去），因为它干的活属于同一条 Task
 - **执行位置**：被委托的 agent 在自己的 `AGENT_WORKSPACE` 里执行。委托方不能把自己的 workspace
   交给它 —— 委托走 `AcquireAgent` 且**不带 workspace**（`code_edit` 不再接收 `workspace`/`cwd` 输入），
-  worker 的 workspace 由 `AgentSession.Workspace()` 回读并渲染进提示词（见 [agent.md](agent.md)）
+  worker 的 workspace 由 `AgentSession.Workspace()` 回读并渲染进提示词（见 [agent.md](agent.md)）。
+  这个目录来自**任务那只 agent 的账号**：账号的 root + worker 自己的目录名（`<root>/agent-N/`），
+  与 planner 同一个 root。capability 若**显式**要一个自己的目录（`AcquireAgentOpts.Workspace`），
+  那个目录优先，且之后每一轮都不会被账号的 root 顶掉
+- **账号是继承的（同一个任务，同一个账号）**：worker 不自己挑账号 —— `AcquireAgent` 在委派发生时
+  继承**委托它的那只 agent**（即任务自己的 agent）的账号（`Runtime.workerAccount` → `resolveAccountFor`），
+  连 harness 一起：任务在 codex 账号上，worker 就是 codex（`Runtime.AcquireAgent` 的 codex 分支 +
+  `Agent.AttachCodex`）。所以一个任务从 planner 到每一只 worker，**同一把凭据、同一份额度、
+  同一个 workspace root**。`Backend: local` 是唯一的例外（本地不含 provider 的 worker，无账号可继承）。
+  账号的解析位置也因此只有两处：委派时继承一次、每轮 `ensureLLMSession` 再确认一次；账号被删/停用
+  时**委托直接失败**（`account … is gone` / `disabled`），不会悄悄换一把 key 跑
 - **会话是同一个**：worker 拿到的 session 与 runtime 给 planner 的**是同一种**（`src/llm_session.go`）——
   capability 看到的只是它的窄视图（`ID` / `Workspace` / `Prompt` / `Release`）。它这一轮的 `mode=agent`、
   输入行记成 `role=agent`、round 从 1 开始，都不是"另一种 session"，而是**身份**（`Role=worker`）推出来的，

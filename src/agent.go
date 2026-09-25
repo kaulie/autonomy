@@ -225,6 +225,12 @@ type Agent struct {
 	accountLabel string
 	credential   llmbackend.Creds
 	Workspace    string // AGENT_WORKSPACE for this agent (code sandbox)
+	// workspaceChosen says the workspace was picked for this agent by something other than
+	// its account — a capability that acquired it with a directory of its own
+	// (broker.AcquireAgentOpts.Workspace). Adoption then leaves it alone: the account owns
+	// its root, but an explicit choice outranks it. Runtime state, like Role and Purpose:
+	// this only happens to an agent a capability asked for.
+	workspaceChosen bool
 	// DeletedAt is when this agent was let go (agents.deleted_at), zero while it
 	// is live. It is a row fact, not runtime state: it is read with the row and
 	// says whether the agent a task names can still be resumed (see
