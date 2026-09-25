@@ -482,15 +482,17 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		// which AUTONOMY_LLM_BACKEND selects at runtime.
 		backend = string(llmbackend.DefaultBackend())
 	}
-	// A delegated worker runs where its task runs: it inherits the account the delegating
-	// agent is on — the same harness, the same credential, the same workspace root — instead
-	// of picking a provider of its own. A capability names a purpose, not an account, and a
-	// worker on another account would spend a second key on the same task's work
-	// (2026-09-24: a task on a codex account had its code written by a cline worker).
+	// A delegated worker runs where its task runs: it extends the agent that delegated to it —
+	// inheriting its account, and with it the harness, credential, model and workspace root —
+	// instead of picking a provider of its own. Whether it does is not hardcoded here: the
+	// capability may say (AcquireAgentOpts.ExtendsPlannerAgent) and the deployment sets the
+	// default (workerExtendsPlannerAgent, src/worker_account.go). A worker that chose for
+	// itself would spend a second account's quota on the same task's work (2026-09-24: a task
+	// on a codex account had its code written by a cline worker).
 	//
 	// A *local* request is "no provider at all" (a test, a local-only worker), so there is no
 	// account to inherit and it is left exactly as it was.
-	if backend != string(llmbackend.Local) {
+	if backend != string(llmbackend.Local) && workerExtendsPlannerAgent(opts.ExtendsPlannerAgent) {
 		account, err := r.workerAccount()
 		if err != nil {
 			r.releaseRegistered(agent)
@@ -556,24 +558,6 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		r.stepSessions = append(r.stepSessions, sess)
 	}
 	return sess, nil
-}
-
-// workerAccount is the account a capability-acquired agent runs on: the one the delegating
-// agent — the task's own agent — is on.
-//
-// It is read through resolveAccountFor, so a worker inherits exactly what its task's agent
-// resolved (the account the task named, else that harness's default account), and a task whose
-// account is gone or disabled fails the delegation loudly instead of a worker quietly spending
-// another key.
-//
-// nil means "there is nothing to inherit": a broker call made outside a cycle (a capability
-// invoked with no delegating agent). The worker then keeps the provider it asked for and the
-// pool resolves that one on its first turn — what every acquisition did before.
-func (r *Runtime) workerAccount() (*Account, error) {
-	if r == nil || r.cycle == nil || r.cycle.Agent == nil {
-		return nil, nil
-	}
-	return resolveAccountFor(r.cycle.Agent)
 }
 
 // releaseRegistered lets go of an agent that could not be attached. It never
