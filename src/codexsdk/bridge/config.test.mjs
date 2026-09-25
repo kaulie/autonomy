@@ -13,6 +13,7 @@ import {
 	resolveCodexDefaults,
 	sandboxModeFor,
 	statusOf,
+	threadOptionsFor,
 } from "./config.mjs";
 
 test("a failed turn keeps the provider's own words", () => {
@@ -103,4 +104,24 @@ test("usage is normalized, or absent when the provider said nothing", () => {
 
 test("the default system prompt says what an autonomy worker is", () => {
 	assert.match(DEFAULT_SYSTEM_PROMPT, /autonomous coding agent/);
+});
+
+test("a thread is opened with its mode's sandbox, and the network the runtime asked for", () => {
+	// Nothing said: the key is absent, not false — absent leaves the CLI's own default (no
+	// network) in place, while false would be us switching it off against that default.
+	assert.deepEqual(threadOptionsFor({ cwd: "/tmp/ws", mode: MODE_AGENT }), {
+		workingDirectory: "/tmp/ws",
+		skipGitRepoCheck: true,
+		sandboxMode: "workspace-write",
+	});
+	assert.equal("networkAccessEnabled" in threadOptionsFor({ cwd: "/w", mode: MODE_AGENT }), false);
+
+	// A planner's cycle decides read-only, a worker may write; network is per turn either way.
+	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_PLAN }).sandboxMode, "read-only");
+	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_AGENT, networkAccess: true }).networkAccessEnabled, true);
+	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_PLAN, networkAccess: true }).networkAccessEnabled, true);
+	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_AGENT, networkAccess: false }).networkAccessEnabled, false);
+
+	// A caller may have its own reason to run where no repository is (the CLI's guard is not ours).
+	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_AGENT, skipGitRepoCheck: false }).skipGitRepoCheck, false);
 });

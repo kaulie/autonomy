@@ -37,6 +37,32 @@ export function sandboxModeFor(mode) {
 	return String(mode || "").trim().toLowerCase() === MODE_PLAN ? "read-only" : "workspace-write";
 }
 
+/**
+ * threadOptionsFor is what one Codex thread is opened with: where it works, which sandbox it
+ * runs in, and whether that sandbox may reach the network.
+ *
+ * Network is what lets a sandboxed turn do real work on a repository: `workspace-write` with the
+ * CLI's own default (no network) cannot clone or fetch — and the host's egress may be a localhost
+ * proxy the sandbox cannot see, so "this machine is online" says nothing about the turn
+ * (2026-09-25: a task's code_edit worker had an empty workspace and no way to fill it). The
+ * runtime decides it per mode (src/llmbackend/codex/network.go) and passes it down; an undefined
+ * `networkAccess` leaves the CLI's default in place.
+ *
+ * Codex insists its working directory be a git repository; an autonomy agent workspace is one,
+ * but that is the CLI's own guard, not our policy — hence skipGitRepoCheck.
+ */
+export function threadOptionsFor({ cwd, mode, networkAccess, skipGitRepoCheck = true } = {}) {
+	const options = {
+		workingDirectory: cwd,
+		skipGitRepoCheck,
+		sandboxMode: sandboxModeFor(mode),
+	};
+	if (networkAccess !== undefined) {
+		options.networkAccessEnabled = Boolean(networkAccess);
+	}
+	return options;
+}
+
 /** coerceText flattens whatever the runtime sent into the prompt text. */
 export function coerceText(value) {
 	if (typeof value === "string") return value;

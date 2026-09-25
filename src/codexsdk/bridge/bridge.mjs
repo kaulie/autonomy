@@ -49,8 +49,8 @@ import {
 	itemText,
 	normalizeUsage,
 	resolveCodexDefaults,
-	sandboxModeFor,
 	statusOf,
+	threadOptionsFor,
 } from "./config.mjs";
 
 /** One Codex handle per bridge process, keyed by the credentials it was built with. */
@@ -91,13 +91,9 @@ function createAgent(params = {}, requestId = null) {
 	const resumeSessionId = (params.resumeSessionId || "").trim();
 	const systemPrompt = (params.systemPrompt || "").trim();
 
-	const threadOptions = {
-		workingDirectory: cwd,
-		// Codex insists its working directory be a git repository; an autonomy agent
-		// workspace is one, but this is the CLI's own guard, not our policy.
-		skipGitRepoCheck: true,
-		sandboxMode: sandboxModeFor(mode),
-	};
+	// Where this thread works, which sandbox it runs in, and whether that sandbox may reach the
+	// network: the runtime says (config.mjs → threadOptionsFor), the bridge does not decide.
+	const threadOptions = threadOptionsFor({ cwd, mode, networkAccess: params.networkAccess });
 	if (model) threadOptions.model = model;
 
 	const codex = clientFor(params);

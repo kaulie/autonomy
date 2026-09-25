@@ -33,6 +33,15 @@ type CreateOptions struct {
 	// Empty starts a conversation from nothing, which is also what a session with no
 	// transcript left (retention, deletion) falls back to.
 	ResumeSessionID string
+	// NetworkAccess asks the bridge to let this session reach the network from *inside* its
+	// sandbox (Codex: `sandbox_workspace_write.network_access`; the CLI's own default is no
+	// network). nil says nothing, which the bridge reads as "leave it to the CLI".
+	//
+	// A sandboxed turn that cannot reach the network cannot do real work on a repository it
+	// has to fetch: the host's egress may be a localhost proxy the sandbox cannot see, and
+	// without it a git remote does not even resolve. The harness decides it per mode
+	// (src/llmbackend/codex/network.go); a bridge that has no sandbox ignores it.
+	NetworkAccess *bool
 }
 
 // Agent is one resident Cline session. The session is started lazily by the
@@ -69,7 +78,7 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	systemPrompt := firstNonEmpty(opts.SystemPrompt, f.client.SystemPrompt)
 	resumeID := strings.TrimSpace(opts.ResumeSessionID)
 
-	raw, err := tr.call(ctx, "createAgent", map[string]any{
+	params := map[string]any{
 		"providerId":      provider,
 		"modelId":         model,
 		"apiKey":          firstNonEmpty(opts.APIKey, f.client.APIKey),
@@ -78,7 +87,11 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 		"mode":            mode,
 		"systemPrompt":    systemPrompt,
 		"resumeSessionId": resumeID,
-	})
+	}
+	if opts.NetworkAccess != nil {
+		params["networkAccess"] = *opts.NetworkAccess
+	}
+	raw, err := tr.call(ctx, "createAgent", params)
 	if err != nil {
 		return nil, err
 	}
