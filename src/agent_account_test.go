@@ -162,6 +162,26 @@ func TestATaskCanNameTheAccountItRunsOn(t *testing.T) {
 		t.Fatalf("agents.account_id=%q want %s", agent.AccountID, account.ID)
 	}
 
+	// A task may also name the model: the account still supplies harness / vendor /
+	// credential / root, but the session opens with the requested model.
+	overridden, err := runtime.AcceptTask(AcceptTaskRequest{
+		ID: "t-account-model", Description: "do the thing on another model",
+		AccountID: account.ID, Model: "minimax-m2.5",
+	})
+	if err != nil {
+		t.Fatalf("accept with model: %v", err)
+	}
+	overriddenAgent, err := store.GetAgent(overridden.AgentID)
+	if err != nil {
+		t.Fatalf("get overridden agent: %v", err)
+	}
+	if overriddenAgent.AccountID != account.ID {
+		t.Fatalf("account=%q want %s (model must not switch the account)", overriddenAgent.AccountID, account.ID)
+	}
+	if overriddenAgent.Model != "minimax-m2.5" {
+		t.Fatalf("model=%q want the request's override, not the account's %q", overriddenAgent.Model, account.Model)
+	}
+
 	// And an account that does not exist is refused at accept.
 	_, err = runtime.AcceptTask(AcceptTaskRequest{ID: "t-bad-account", Description: "x", AccountID: "acct-nope"})
 	if err == nil || !strings.Contains(err.Error(), "/accounts") {

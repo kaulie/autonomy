@@ -95,9 +95,13 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
   "goal_type": "dev_feature",
   "task_id": "optional-client-id",
   "context_ref": { "project": "project-2" },
-  "mode": "command"
+  "mode": "command",
+  "account_id": "acct-…",
+  "model": "deepseek-v4-pro"
 }
 ```
+
+`account_id` 选账号池里的一条（`GET /api/accounts`）：这条任务跑在那个 harness / vendor / 凭据 / 工作目录上。不传 = 交给池子解析（该 harness 的默认账号）。`model` 是这次任务对账号默认模型的覆盖；不传 = 用账号自己的 model（或 harness 默认）。账号仍决定凭据和工作区，只换打开 session 的模型。可用的模型见 `GET /api/accounts/models?harness=&vendor=&accountId=`。
 
 `mode` 只对**后续**消息有意义（带已有 `task_id`）：
 
