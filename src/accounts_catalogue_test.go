@@ -42,6 +42,15 @@ func TestTheVendorAndModelCataloguesComeFromTheHarness(t *testing.T) {
 	if cursorVendors, err := runtime.AccountVendors(ctx, "cursor", ""); err != nil || strings.Join(cursorVendors, ",") != "cursor" {
 		t.Fatalf("cursor vendors=%v err=%v want cursor", cursorVendors, err)
 	}
+	// Cursor's catalogue comes from the SDK; without a live bridge it still
+	// answers with the harness default so a UI has something to offer.
+	cursorModels, err := runtime.AccountModels(ctx, "cursor", "cursor", "")
+	if err != nil {
+		t.Fatalf("cursor models: %v", err)
+	}
+	if len(cursorModels) == 0 {
+		t.Fatal("cursor models must not be empty (at least the harness default)")
+	}
 	if _, err := runtime.AccountVendors(ctx, "gemini", ""); err == nil {
 		t.Fatal("an unknown harness must be refused")
 	}
