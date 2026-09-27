@@ -105,6 +105,14 @@ const accountsPageHTML = `<!DOCTYPE html>
       <label for="f-root">agent root workspace <span class="hint">(exclusive: one account per root)</span></label>
       <input type="text" id="f-root" placeholder="/Users/me/agent-workspaces/this-account">
     </div>
+    <div>
+      <label for="f-git-repos">git repos <span class="hint">(owner/name this account may push; comma-separated)</span></label>
+      <input type="text" id="f-git-repos" placeholder="kaulie/autonomy">
+    </div>
+    <div>
+      <label for="f-git-token">git token <span class="hint">(optional PAT; blank = GitHub App or host gh)</span></label>
+      <input type="password" id="f-git-token" placeholder="github_pat_…">
+    </div>
   </div>
   <div class="row actions">
     <label class="check"><input type="checkbox" id="f-enabled" checked> enabled</label>
@@ -198,7 +206,9 @@ function render() {
       "<td><code>" + esc(a.apiKeyMasked || (a.hasKey ? "••••" : "—")) + "</code>" +
       (a.hasKey ? "" : ' <span class="hint">cli auth</span>') + "</td>" +
       "<td>" + esc(a.model || "—") + "</td>" +
-      "<td><code>" + esc(a.agentRootWorkspace || "runtime default") + "</code></td>" +
+      "<td><code>" + esc(a.agentRootWorkspace || "runtime default") + "</code>" +
+      (a.gitRepos && a.gitRepos.length ? "<div class=\"hint\">git " + esc(a.gitRepos.join(", ")) + "</div>" : "") +
+      "</td>" +
       "<td>" + state + "</td>" +
       '<td style="white-space:nowrap">' +
         '<button data-act="edit" data-id="' + esc(a.accountId) + '">edit</button> ' +
@@ -265,6 +275,8 @@ function fillForm(a) {
   $("f-base").value = a ? (a.baseUrl || "") : "";
   $("f-model").value = a ? (a.model || "") : "";
   $("f-root").value = a ? (a.agentRootWorkspace || "") : "";
+  $("f-git-repos").value = a && a.gitRepos ? a.gitRepos.join(", ") : "";
+  $("f-git-token").value = "";
   $("f-enabled").checked = a ? !!a.enabled : true;
   $("f-default").checked = a ? !!a.isDefault : false;
   $("keyhint").textContent = a ? "(blank = keep the current key)" : "(blank = use the CLI's own auth)";
@@ -280,6 +292,8 @@ $("editor").addEventListener("submit", async (event) => {
     baseUrl: $("f-base").value.trim(),
     model: $("f-model").value.trim(),
     agentRootWorkspace: $("f-root").value.trim(),
+    gitRepos: $("f-git-repos").value.split(/[,;\s]+/).filter(Boolean),
+    gitToken: $("f-git-token").value.trim(),
     enabled: $("f-enabled").checked,
     isDefault: $("f-default").checked,
   };

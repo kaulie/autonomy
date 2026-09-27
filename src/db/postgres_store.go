@@ -226,6 +226,12 @@ func (s *PostgresStore) migrate() error {
 	if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("migrate postgres agents.account_id: %w", err)
 	}
+	if _, err := s.db.Exec(`ALTER TABLE provider_accounts ADD COLUMN IF NOT EXISTS git_repos TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate postgres provider_accounts.git_repos: %w", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE provider_accounts ADD COLUMN IF NOT EXISTS git_token TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate postgres provider_accounts.git_token: %w", err)
+	}
 	if err := s.ensureAccountsWorkspaceIndex(); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] accounts workspace index: %v\n", err)
 	}

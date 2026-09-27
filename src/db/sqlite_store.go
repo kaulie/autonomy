@@ -430,6 +430,14 @@ CREATE INDEX IF NOT EXISTS idx_reason_turns_active ON reason_turns(task_id, agen
 	if err := s.ensureAccountsWorkspaceIndex(); err != nil {
 		fmt.Fprintf(os.Stderr, "[autonomy] accounts workspace index: %v\n", err)
 	}
+	for _, c := range []struct{ name, decl string }{
+		{"git_repos", "TEXT NOT NULL DEFAULT ''"},
+		{"git_token", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.ensureColumn("provider_accounts", c.name, c.decl); err != nil {
+			return fmt.Errorf("migrate provider_accounts.%s: %w", c.name, err)
+		}
+	}
 	if _, err := s.db.Exec(inboxDDL); err != nil {
 		return fmt.Errorf("migrate agent_messages: %w", err)
 	}

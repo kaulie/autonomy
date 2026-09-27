@@ -25,11 +25,13 @@ func (a *Agent) adoptAccount(account *Account) {
 	a.AccountID = account.ID
 	a.accountLabel = account.Label
 	a.credential = llmbackend.Creds{
-		Harness: account.Harness,
-		Vendor:  account.Vendor,
-		APIKey:  account.APIKey,
-		BaseURL: account.BaseURL,
-		Model:   account.Model,
+		Harness:  account.Harness,
+		Vendor:   account.Vendor,
+		APIKey:   account.APIKey,
+		BaseURL:  account.BaseURL,
+		Model:    account.Model,
+		GitToken: account.GitToken,
+		GitRepos: append([]string(nil), account.GitRepos...),
 	}
 	if backend := llmbackend.Backend(account.Harness); backend != "" {
 		a.Backend = backend

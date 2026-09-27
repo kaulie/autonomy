@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS provider_accounts (
   base_url       TEXT NOT NULL DEFAULT '',
   model          TEXT NOT NULL DEFAULT '',
   workspace_root TEXT NOT NULL DEFAULT '',
+  git_repos      TEXT NOT NULL DEFAULT '',
+  git_token      TEXT NOT NULL DEFAULT '',
   enabled        BOOLEAN NOT NULL DEFAULT TRUE,
   is_default     BOOLEAN NOT NULL DEFAULT FALSE,
   created_at     TIMESTAMPTZ NOT NULL,
@@ -60,12 +62,14 @@ func scanPgAccount(sc interface{ Scan(...any) error }) (Account, error) {
 	var (
 		account          Account
 		created, updated time.Time
+		gitRepos         string
 	)
 	if err := sc.Scan(&account.ID, &account.Harness, &account.Vendor, &account.Label, &account.APIKey,
-		&account.BaseURL, &account.Model, &account.WorkspaceRoot, &account.Enabled, &account.IsDefault,
-		&created, &updated); err != nil {
+		&account.BaseURL, &account.Model, &account.WorkspaceRoot, &gitRepos, &account.GitToken,
+		&account.Enabled, &account.IsDefault, &created, &updated); err != nil {
 		return Account{}, err
 	}
+	account.GitRepos = DecodeGitRepos(gitRepos)
 	account.CreatedAt = created.UTC()
 	account.UpdatedAt = updated.UTC()
 	return account, nil
@@ -155,10 +159,10 @@ func (s *PostgresStore) CreateAccount(account Account) (Account, error) {
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO provider_accounts (`+accountCols+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		`INSERT INTO provider_accounts (`+accountCols+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		account.ID, account.Harness, account.Vendor, account.Label, account.APIKey, account.BaseURL,
-		account.Model, account.WorkspaceRoot, account.Enabled, account.IsDefault,
-		pgTime(account.CreatedAt), pgTime(account.UpdatedAt)); err != nil {
+		account.Model, account.WorkspaceRoot, EncodeGitRepos(account.GitRepos), account.GitToken,
+		account.Enabled, account.IsDefault, pgTime(account.CreatedAt), pgTime(account.UpdatedAt)); err != nil {
 		return Account{}, fmt.Errorf("create account: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -198,6 +202,12 @@ func (s *PostgresStore) UpdateAccount(id string, patch AccountPatch) (Account, e
 	if patch.WorkspaceRoot != nil {
 		next.WorkspaceRoot = *patch.WorkspaceRoot
 	}
+	if patch.GitRepos != nil {
+		next.GitRepos = *patch.GitRepos
+	}
+	if patch.GitToken != nil {
+		next.GitToken = *patch.GitToken
+	}
 	if patch.Enabled != nil {
 		next.Enabled = *patch.Enabled
 	}
@@ -228,9 +238,10 @@ func (s *PostgresStore) UpdateAccount(id string, patch AccountPatch) (Account, e
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE provider_accounts SET harness = $1, vendor = $2, label = $3, api_key = $4, base_url = $5,
-		 model = $6, workspace_root = $7, enabled = $8, is_default = $9, updated_at = $10 WHERE account_id = $11`,
+		 model = $6, workspace_root = $7, git_repos = $8, git_token = $9, enabled = $10, is_default = $11, updated_at = $12 WHERE account_id = $13`,
 		next.Harness, next.Vendor, next.Label, next.APIKey, next.BaseURL, next.Model,
-		next.WorkspaceRoot, next.Enabled, next.IsDefault, pgTime(next.UpdatedAt), next.ID); err != nil {
+		next.WorkspaceRoot, EncodeGitRepos(next.GitRepos), next.GitToken, next.Enabled, next.IsDefault,
+		pgTime(next.UpdatedAt), next.ID); err != nil {
 		return Account{}, fmt.Errorf("update account: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -17,22 +17,26 @@ import (
 // auth, the normal case for a machine that already ran `cline auth` / `codex auth`).
 type AccountView struct {
 	Account
-	APIKeyMasked string `json:"apiKeyMasked"`
-	HasKey       bool   `json:"hasKey"`
+	APIKeyMasked   string `json:"apiKeyMasked"`
+	HasKey         bool   `json:"hasKey"`
+	GitTokenMasked string `json:"gitTokenMasked,omitempty"`
+	HasGitToken    bool   `json:"hasGitToken"`
 }
 
 // AccountInput is one account as a request body: the writable subset. The id, the timestamps
 // and the default rule belong to the store (src/db/sqlite_accounts.go).
 type AccountInput struct {
-	Harness       string `json:"harness"`
-	Vendor        string `json:"vendor"`
-	Label         string `json:"label"`
-	APIKey        string `json:"apiKey"`
-	BaseURL       string `json:"baseUrl"`
-	Model         string `json:"model"`
-	WorkspaceRoot string `json:"agentRootWorkspace"`
-	Enabled       *bool  `json:"enabled"`
-	IsDefault     *bool  `json:"isDefault"`
+	Harness       string    `json:"harness"`
+	Vendor        string    `json:"vendor"`
+	Label         string    `json:"label"`
+	APIKey        string    `json:"apiKey"`
+	BaseURL       string    `json:"baseUrl"`
+	Model         string    `json:"model"`
+	WorkspaceRoot string    `json:"agentRootWorkspace"`
+	GitRepos      *[]string `json:"gitRepos"`
+	GitToken      string    `json:"gitToken"`
+	Enabled       *bool     `json:"enabled"`
+	IsDefault     *bool     `json:"isDefault"`
 }
 
 // AccountVerification is what one probe of one account found.
@@ -51,11 +55,20 @@ type AccountVerification struct {
 }
 
 // viewAccount renders one account with its mask.
+func derefRepos(repos *[]string) []string {
+	if repos == nil {
+		return nil
+	}
+	return *repos
+}
+
 func viewAccount(account Account) AccountView {
 	return AccountView{
-		Account:      account,
-		APIKeyMasked: MaskAPIKey(account.APIKey),
-		HasKey:       strings.TrimSpace(account.APIKey) != "",
+		Account:        account,
+		APIKeyMasked:   MaskAPIKey(account.APIKey),
+		HasKey:         strings.TrimSpace(account.APIKey) != "",
+		GitTokenMasked: MaskAPIKey(account.GitToken),
+		HasGitToken:    strings.TrimSpace(account.GitToken) != "",
 	}
 }
 
@@ -100,6 +113,7 @@ func (r *Autonomy) AddAccount(input AccountInput) (AccountView, error) {
 	account, err := store.CreateAccount(Account{
 		Harness: input.Harness, Vendor: input.Vendor, Label: input.Label, APIKey: input.APIKey,
 		BaseURL: input.BaseURL, Model: input.Model, WorkspaceRoot: input.WorkspaceRoot,
+		GitRepos: derefRepos(input.GitRepos), GitToken: input.GitToken,
 		Enabled: enabled, IsDefault: isDefault,
 	})
 	if err != nil {
@@ -116,7 +130,7 @@ func (r *Autonomy) EditAccount(accountID string, input AccountInput) (AccountVie
 	if err != nil {
 		return AccountView{}, err
 	}
-	patch := AccountPatch{Enabled: input.Enabled, IsDefault: input.IsDefault}
+	patch := AccountPatch{Enabled: input.Enabled, IsDefault: input.IsDefault, GitRepos: input.GitRepos}
 	for _, edit := range []struct {
 		value string
 		into  **string
@@ -128,6 +142,7 @@ func (r *Autonomy) EditAccount(accountID string, input AccountInput) (AccountVie
 		{input.BaseURL, &patch.BaseURL},
 		{input.Model, &patch.Model},
 		{input.WorkspaceRoot, &patch.WorkspaceRoot},
+		{input.GitToken, &patch.GitToken},
 	} {
 		if edit.value != "" {
 			value := edit.value

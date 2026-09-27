@@ -404,6 +404,8 @@ type AccountPatch struct {
 	BaseURL       *string
 	Model         *string
 	WorkspaceRoot *string
+	GitRepos      *[]string
+	GitToken      *string
 	Enabled       *bool
 	IsDefault     *bool
 }

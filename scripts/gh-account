@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Wrap gh so a worker under an account root uses that account's token.
+# Put this directory ahead of /usr/bin on autonomyd's PATH, or symlink as gh.
+set -euo pipefail
+real_gh=$(command -v -a gh | while read -r p; do
+  case "$p" in
+    *gh-account) ;;
+    *) echo "$p"; break ;;
+  esac
+done)
+if [ -z "${real_gh:-}" ]; then
+  real_gh=/usr/bin/gh
+fi
+dir=$(pwd)
+for _ in $(seq 1 24); do
+  f="${dir}/.autonomy/github-token"
+  if [ -f "$f" ]; then
+    export GH_TOKEN
+    GH_TOKEN=$(tr -d '\n' < "$f")
+    exec "$real_gh" "$@"
+  fi
+  parent=$(dirname "$dir")
+  [ "$parent" = "$dir" ] && break
+  dir=$parent
+done
+exec "$real_gh" "$@"
