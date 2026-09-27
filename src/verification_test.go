@@ -253,9 +253,8 @@ func TestVerificationReaderIsCalledWithTheTaskID(t *testing.T) {
 
 // TestVerifyDoneJudgesCodeEditEvidence: the default software-development contract
 // binds code_edit's pr_url / summary with expect.exists and no check. A PR URL
-// has an authoritative reader (pull_request.review); a summary is the report
-// itself, so a filled slot is the fact. task-00b9478435f84938 / overseas
-// task-095a5b1b5a6ea49f failed both as inconclusive before this.
+// is observed by pull_request.status (existence and state, not review opinions);
+// a summary is the report itself, so a filled slot is the fact.
 func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -266,18 +265,32 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 		wantMethod string
 	}{
 		{
-			name: "pr_url exists is answered by pull_request.review",
+			name: "pr_url exists is answered by pull_request.status",
 			criterion: `{"name":"C1","requirement":"the pull request was reported",` +
 				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true}}`,
 			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
 			reader: &fakeVerificationReader{
-				name:    "pull_request.review",
+				name:    "pull_request.status",
 				inputs:  []spec.Field{{Name: "pr", Required: true}},
-				outputs: []spec.Field{{Name: "state"}, {Name: "title"}},
-				answer:  map[string]string{"state": "open", "title": "dashboard templates"},
+				outputs: []spec.Field{{Name: "exists"}, {Name: "state"}},
+				answer:  map[string]string{"exists": "true", "state": "open"},
 			},
 			wantResult: verificationPass,
-			wantMethod: "registry:pull_request.review",
+			wantMethod: "registry:pull_request.status",
+		},
+		{
+			name: "pr_url exists fails when the host has no such pull request",
+			criterion: `{"name":"C1","requirement":"the pull request was reported",` +
+				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true}}`,
+			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
+			reader: &fakeVerificationReader{
+				name:    "pull_request.status",
+				inputs:  []spec.Field{{Name: "pr", Required: true}},
+				outputs: []spec.Field{{Name: "exists"}},
+				answer:  map[string]string{"exists": "false"},
+			},
+			wantResult: verificationFail,
+			wantMethod: "registry:pull_request.status",
 		},
 		{
 			name: "summary exists is the filled report slot",

@@ -102,7 +102,7 @@ type verificationReader struct {
 
 var verificationReaders = map[string]verificationReader{
 	"service.deploy":   {Capability: "deployment.monitor", Input: "deployment"},
-	"code_edit.pr_url": {Capability: "pull_request.review", Input: "pr"},
+	"code_edit.pr_url": {Capability: "pull_request.status", Input: "pr"},
 }
 
 // verificationExistsInSlot are step outputs that *are* the fact for
@@ -276,6 +276,12 @@ func (r *Runtime) verifyStepCriterion(ctx DecisionContext, v *Verification, verd
 		return verdict(verificationInconclusive, fmt.Sprintf("the authoritative source could not answer: %v", err), reference, ask.method)
 	}
 	if criterion.Expect.Exists {
+		if exists, ok := answer["exists"]; ok {
+			if matches(exists, "true") {
+				return verdict(verificationPass, "the object exists", exists, ask.method)
+			}
+			return verdict(verificationFail, "the object is not there", exists, ask.method)
+		}
 		return verdict(verificationPass, "the authoritative source answered", reference, ask.method)
 	}
 	observed := strings.TrimSpace(answer[criterion.Expect.Field])
