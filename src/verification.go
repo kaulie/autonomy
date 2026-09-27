@@ -43,7 +43,7 @@ type Verification struct {
 	Cycle       int
 	Criterion   string // the criterion's name
 	Requirement string // what it says must be true, in its own words
-	Method      string // world_model | registry:<capability> | declared:<capability>
+	Method      string // world_model | registry:<capability> | declared:<capability> | slot
 	Evidence    string // JSON: the slot the criterion bound, and what it resolved to
 	Expected    string // the fact that must hold
 	Observed    string // what the authoritative source answered
@@ -101,7 +101,30 @@ type verificationReader struct {
 }
 
 var verificationReaders = map[string]verificationReader{
-	"service.deploy": {Capability: "deployment.monitor", Input: "deployment"},
+	"service.deploy":   {Capability: "deployment.monitor", Input: "deployment"},
+	"code_edit.pr_url": {Capability: "pull_request.review", Input: "pr"},
+}
+
+// verificationExistsInSlot are step outputs that *are* the fact for
+// expect.exists: a worker's report has no external object to ask about.
+// A pipeline id or PR URL is the opposite — those stay on a reader.
+var verificationExistsInSlot = map[string]bool{
+	"summary": true,
+}
+
+// readerFor looks up who answers about one producer's output: a key-specific
+// entry first (`code_edit.pr_url`), then the capability as a whole
+// (`service.deploy`).
+func readerFor(producer, key string) (verificationReader, bool) {
+	producer = strings.ToLower(strings.TrimSpace(producer))
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key != "" {
+		if reader, ok := verificationReaders[producer+"."+key]; ok {
+			return reader, true
+		}
+	}
+	reader, ok := verificationReaders[producer]
+	return reader, ok
 }
 
 // verifyDone evaluates the task's pinned Completion Contract and returns nil when every
@@ -241,6 +264,11 @@ func (r *Runtime) verifyStepCriterion(ctx DecisionContext, v *Verification, verd
 	}
 	ask, err := authorityFor(criterion, producer, src.key)
 	if err != nil {
+		if criterion.Expect.Exists && verificationExistsInSlot[strings.ToLower(src.key)] {
+			return verdict(verificationPass,
+				"the report is present in the evidence slot",
+				reference, "slot")
+		}
 		return verdict(verificationInconclusive, err.Error(), reference, verificationMethodNone)
 	}
 	answer, err := r.askAuthority(ctx, ask, prior)
@@ -283,7 +311,7 @@ func authorityFor(criterion Criterion, producer ActionResult, key string) (verif
 			inputs:     criterion.Check.Inputs,
 		}, nil
 	}
-	reader, ok := verificationReaders[strings.ToLower(strings.TrimSpace(producer.Capability))]
+	reader, ok := readerFor(producer.Capability, key)
 	if !ok {
 		return verificationAsk{}, fmt.Errorf(
 			"nothing authoritative answers about this evidence: %s reports %q, and no reader is registered for it (name the criterion's check, or observe the fact into the World Model)",

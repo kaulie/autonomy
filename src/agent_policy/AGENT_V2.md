@@ -288,7 +288,10 @@ start, the way you want to be held to them.
 - `check` — optional: which capability to ask about that evidence, when the runtime has no
   reader of its own for it. This is not a verification plan — it says where the truth
   about that object lives. It has to be a **read-only** capability, and `expect.field` has
-  to be one it reports.
+  to be one it reports. The runtime already knows `service.deploy` →
+  `deployment.monitor` and `code_edit.pr_url` → `pull_request.review`. A coding
+  agent's `summary` with `expect.exists` is judged by the slot being filled (the
+  report is the object).
 
 What follows from it:
 
