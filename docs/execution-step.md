@@ -51,7 +51,7 @@ verification(id, task_id, plan_id, cycle, criterion, requirement, method, eviden
 
 `criterion` 是 planner 写的那段 JSON 原文（`requirement` / `evidence` 槽 / `expect` / 可选的 `check`）；
 `evidence` 是 `{"slot": "…", "reference": "…"}` —— 槽是 planner 绑的，reference 是运行时**填**进去的；
-`method` 说这个真相是从哪问来的（`world_model` / `registry:<能力>` / `declared:<能力>` / `-`）。
+`method` 说这个真相是从哪问来的（`world_model` / `kind:<对象类型>` / `-`）。
 
 
 ## 计划的数据来源（Plan Data Lineage）

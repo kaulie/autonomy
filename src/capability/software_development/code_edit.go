@@ -42,7 +42,7 @@ func (CodeEdit) Inputs() []spec.Field {
 func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
-		{Name: "pr_url", Description: "the pull request the worker opened, when its report names one — the URL to hand to pr.check (verification) or pull_request.review (opinions); empty when the report names none"},
+		{Name: "pr_url", Kind: spec.KindPullRequest, Description: "the pull request the worker opened, when its report names one — a typed pull_request object; empty when the report names none"},
 	}
 }
 

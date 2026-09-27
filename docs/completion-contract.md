@@ -41,11 +41,11 @@ Completion Contract 是执行系统的**完成锚点**：在 Agent 可自由选�
 契约是**数据**，不是散文（`src/completion_contract.go`）：
 
 - planner 在**第一轮**答复里给出 `completion_contracts.steps[]`；运行时把每一条钉进 `completion_contract`
-  （一条判据一行，`INSERT OR IGNORE`），并在第一轮就先校验它（槽可读、本计划里那个 step 确实声明了这个 output、
-  `check` 指向的能力存在且报得出要比较的字段）。之后每轮的 Runtime Context 都带回**这份钉住的**合同。
+  （一条判据一行，`INSERT OR IGNORE`），并在第一轮就先校验它（槽可读、本计划里那个 step 确实声明了这个 output；
+  不得再写 `check`）。之后每轮的 Runtime Context 都带回**这份钉住的**合同。
 - 一条判据 = 一个必须成立的事实：`requirement`（事实，planner 的话）+ `evidence`（**证据槽**：这个事实的对象
-  将从哪里来，与 plan input 同一套绑定语法）+ `expect`（事实的可判定形态：`exists`，或某个字段等于某个值）+
-  可选 `check`（真相在哪个权威能力那里 —— 不是「怎么验证」）。
+  将从哪里来，与 plan input 同一套绑定语法）+ `expect`（事实的可判定形态：`exists`，或某个字段等于某个值）。
+  验真工具由产出字段的 `kind` 决定，不由 Planner 点名。
 - `done` 由 [Verification](verification.md) 对照这份契约判定：证据槽由**运行时**填（解析 planner 的绑定，
   范围是这个 task 的步历史），判定来自权威来源。不成立（`fail` / `inconclusive`）就是这一轮失败，planner 拿着
   verdict 重规划；运行结束时最后那个 `done` 仍没验过，任务落 `unverified`。

@@ -88,17 +88,20 @@ func (f *Factory) FormatConstructs() string {
 		Domain      string       `json:"domain"`
 		Description string       `json:"description"`
 		SystemCheck bool         `json:"system_check,omitempty"`
+		ChecksKind  string       `json:"checks_kind,omitempty"`
 		Input       []spec.Field `json:"input,omitempty"`
 		Output      []spec.Field `json:"output,omitempty"`
 	}
 	out := make([]constructJSON, 0, len(f.capabilities))
 	for _, c := range f.capabilities {
-		_, systemCheck := c.(spec.SystemCheck)
 		item := constructJSON{
 			Name:        c.Name(),
 			Domain:      c.Domain(),
 			Description: c.Description(),
-			SystemCheck: systemCheck,
+		}
+		if sc, ok := c.(spec.SystemCheck); ok {
+			item.SystemCheck = true
+			item.ChecksKind = sc.ChecksKind()
 		}
 		if declared, ok := c.(spec.Declared); ok {
 			item.Input = declared.Inputs()
