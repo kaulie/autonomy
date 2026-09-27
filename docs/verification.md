@@ -50,7 +50,7 @@ World Model / 只读能力 → pass / fail / inconclusive
 ## 权威来源（谁来回答）
 
 - **World Model**：本地 asset 的 `kind` / `state`，runtime 直接读。这类证据的槽本身就是读取（`world_model:asset.<id>.<field>`），不需要再去问谁。
-- **只读能力**：证据的**产出者**说明它是什么东西（`service.deploy` 的 output 是一条 pipeline），运行时的 `verificationReaders` 表说明这类证据该问谁、用什么 input 问（`service.deploy → deployment.monitor`；`code_edit.pr_url → pull_request.review`）。表里没有、判据也没写 `check` → **inconclusive**。例外：`expect.exists` 绑在 worker 的 `summary` 上时，槽里有非空报告就是事实（报告没有外部对象可问）。
+- **只读能力**：证据的**产出者**说明它是什么东西（`service.deploy` 的 output 是一条 pipeline），运行时的 `verificationReaders` 表说明这类证据该问谁、用什么 input 问（`service.deploy → deployment.monitor`；`code_edit.pr_url → pull_request.status`）。`pull_request.status` 只回答「PR 是否真实存在、当前 open/closed/merged」；审查意见走 `pull_request.review`，不参与判定。表里没有、判据也没写 `check` → **inconclusive**。例外：`expect.exists` 绑在 worker 的 `summary` 上时，槽里有非空报告就是事实（报告没有外部对象可问）。
 - **问的方式和 step 调用同一条路**：runtime 用它调用能力的方式调用读者 —— 判据绑定的入参原样传下去，不额外添加、不覆盖任何绑定；只有那个「runtime 自己只补一个入参」的 `task_id` 照样补给它（见 [execution-step.md](execution-step.md) §Runtime Responsibility）。所以一个会 acquire worker 的读者（`deployment.monitor` 就是）产出的 agent 行与 `reason_turns` 行**挂在同一条 Task 下**：验证所问的对象和产出它的那一步，属于同一个任务。
 - **Planner 指定的 `check`**：该域还没有注册 reader 时，判据可以直接写明权威能力。
 
@@ -95,7 +95,7 @@ World Model / 只读能力 → pass / fail / inconclusive
 
 ## 还没做的（说清楚边界）
 
-- **能回答的域很窄**：本地 World Model 的 `state` / `kind`，部署事实（`deployment.monitor`），以及 `code_edit` 开出的 PR（`pull_request.review`）。artifact registry、service registry、health check 之类还没有对应的权威读取能力 —— 没有权威来源的事实一律 `inconclusive`，并把这个原因交给 Planner。
+- **能回答的域很窄**：本地 World Model 的 `state` / `kind`，部署事实（`deployment.monitor`），以及 `code_edit` 开出的 PR（`pull_request.status`）。artifact registry、service registry、health check 之类还没有对应的权威读取能力 —— 没有权威来源的事实一律 `inconclusive`，并把这个原因交给 Planner。
 - **World Model 还没有 provenance / state transition**：状态证据只有当前值，还没有「谁在什么时候观察到的、变化前后是什么」。
 - **`check` 由 Planner 显式指定**是过渡口子：registry 长全后应当收掉。
 - **agent-backed verifier**（确定性判不了时用独立 agent 判断）、**human**（`need_input`）、**Trust 回流**：都还没做（见 [trust.md](trust.md)）。

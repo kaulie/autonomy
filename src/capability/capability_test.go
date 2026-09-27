@@ -40,10 +40,10 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 5 {
-		t.Fatalf("GetAll len=%d want 5", len(all))
+	if len(all) != 6 {
+		t.Fatalf("GetAll len=%d want 6", len(all))
 	}
-	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", deployment.Name} {
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pull_request.status", deployment.Name} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
 		}
@@ -59,10 +59,13 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if !strings.Contains(got, `"name": "service.deploy"`) {
 		t.Fatalf("expected service.deploy in constructs: %q", got)
 	}
-	// Same for landing a pull request: the planner sees the capability that
-	// merges a branch pair, so it does not have to invent a git command for it.
+	// Same for a named pull request: review opinions and existence/state are
+	// two constructs, not one.
 	if !strings.Contains(got, `"name": "pull_request.review"`) {
 		t.Fatalf("expected pull_request.review in constructs: %q", got)
+	}
+	if !strings.Contains(got, `"name": "pull_request.status"`) {
+		t.Fatalf("expected pull_request.status in constructs: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})
 	if err != nil {
@@ -119,8 +122,8 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
 		t.Fatalf("constructs are not the documented JSON: %v", err)
 	}
-	if len(constructs) != 5 {
-		t.Fatalf("constructs=%d want the 5 built-ins", len(constructs))
+	if len(constructs) != 6 {
+		t.Fatalf("constructs=%d want the 6 built-ins", len(constructs))
 	}
 	inputs := map[string][]spec.Field{}
 	outputs := map[string][]spec.Field{}
@@ -146,6 +149,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		// task-15's shape: name the pull request by its url, read its reviews
 		// (the capability never merges — a human does that).
 		{"pull_request.review", "pr", "pr_url", false, "reviews"},
+		{"pull_request.status", "pr", "pr_url", true, "exists"},
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},

@@ -289,9 +289,12 @@ start, the way you want to be held to them.
   reader of its own for it. This is not a verification plan — it says where the truth
   about that object lives. It has to be a **read-only** capability, and `expect.field` has
   to be one it reports. The runtime already knows `service.deploy` →
-  `deployment.monitor` and `code_edit.pr_url` → `pull_request.review`. A coding
-  agent's `summary` with `expect.exists` is judged by the slot being filled (the
-  report is the object).
+  `deployment.monitor` and `code_edit.pr_url` → `pull_request.status`.
+  `pull_request.status` answers whether the pull request exists and its
+  state (`open` / `closed` / merged). `pull_request.review` is for review
+  opinions and is not the verification reader. A coding agent's `summary`
+  with `expect.exists` is judged by the slot being filled (the report is
+  the object).
 
 What follows from it:
 
@@ -439,6 +442,8 @@ The first step's `instruction` is a literal you write; `pr` is bound to the outp
 `edit` is expected to report — that is the difference between a value you have and
 a value that does not exist yet. `pull_request.review` only reads the pull
 request's reviews and never merges it — a human must approve and land it.
+Verification of the same URL is `pull_request.status` (exists / open / closed /
+merged), not this review step.
 
 `expected_effect` describes the intended World State change. It must not be presented as a fact unless supported by capability semantics or prior observations.
 

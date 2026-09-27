@@ -42,7 +42,7 @@ func (CodeEdit) Inputs() []spec.Field {
 func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
-		{Name: "pr_url", Description: "the pull request the worker opened, when its report names one — the URL to hand to pull_request.review; empty when the report names none"},
+		{Name: "pr_url", Description: "the pull request the worker opened, when its report names one — the URL to hand to pull_request.status (verification) or pull_request.review (opinions); empty when the report names none"},
 	}
 }
 
@@ -111,7 +111,7 @@ var pullRequestURLPattern = regexp.MustCompile(`https?://[^\s<>()\[\]"'#]+/pulls
 
 // pullRequestIn reads the pull request out of a worker's report, if it named one:
 // the URL the worker was asked to report is a fact the next step can be given
-// (pull_request.review takes it as "pr"), and reading it here is what makes it an
+// (pull_request.status and pull_request.review take it as "pr"), and reading it here is what makes it an
 // output instead of a sentence someone has to re-read.
 //
 // A report that names no pull request yields nothing: not every delegation opens

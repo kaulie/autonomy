@@ -596,6 +596,7 @@ type gitHubPull struct {
 	Title   string `json:"title"`
 	State   string `json:"state"`
 	Draft   bool   `json:"draft"`
+	Merged  bool   `json:"merged"`
 	Head    struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
