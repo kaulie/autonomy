@@ -59,6 +59,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" \
   -o "${OUT}/bin/autonomyd" ./cmd/autonomyd
 
 cp "${ROOT}/scripts/start.sh" "${ROOT}/scripts/stop.sh" "${ROOT}/scripts/restart.sh" \
+  "${ROOT}/scripts/listen_addr.sh" "${ROOT}/scripts/autonomyd.service" \
   "${OUT}/scripts/"
 cp -R "${ROOT}/src/agent_policy/." "${OUT}/src/agent_policy/"
 

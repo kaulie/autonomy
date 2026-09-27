@@ -1,0 +1,37 @@
+# systemd unit for a remote-server install of the autonomy runtime.
+#
+# The release package already has scripts/start.sh (bridges, pid, /health).
+# This unit is Type=forking because start.sh daemonizes autonomyd, writes
+# backend/runtime.pid, waits for /health, then exits.
+#
+# Install (see docs/remote-deploy.md):
+#   1. unpack the release at RuntimeDirectory (default /opt/autonomy)
+#   2. set AUTONOMY_HTTP_HOST=0.0.0.0 in backend/.env (or override below)
+#   3. copy this file to /etc/systemd/system/autonomyd.service
+#   4. systemctl daemon-reload && systemctl enable --now autonomyd
+#
+# Do not point ExecStart at bin/autonomyd directly: start.sh is what wires
+# the packaged bridges and refuses to come up when the selected backend has
+# no working bridge.
+
+[Unit]
+Description=Autonomy agent runtime
+Documentation=https://github.com/kaulie/autonomy/blob/main/docs/remote-deploy.md
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/opt/autonomy/backend/runtime.pid
+WorkingDirectory=/opt/autonomy
+Environment=RUNTIME_DIR=/opt/autonomy
+Environment=SERVICE_PORT=4300
+Environment=AUTONOMY_HTTP_HOST=0.0.0.0
+ExecStart=/opt/autonomy/scripts/start.sh
+ExecStop=/opt/autonomy/scripts/stop.sh
+TimeoutStartSec=30
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

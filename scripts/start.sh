@@ -10,6 +10,8 @@
 #
 # 监听端口优先级：SERVICE_PORT > PORT > 默认 4300（服务契约里 autonomy 的 port）。
 # SERVICE_PORT 排在前面，是因为交互式 shell 里常残留别的服务的 PORT。
+# 监听主机：AUTONOMY_HTTP_HOST > SERVICE_HOST > 127.0.0.1（本机平台默认 loopback）。
+# 远程机器对外服务设 AUTONOMY_HTTP_HOST=0.0.0.0，见 docs/remote-deploy.md。
 #
 # runtime 布局（backend/ 下的内容由平台在部署时保留，不会被 --delete 清掉）：
 #   bin/autonomyd           可执行文件（来自发版包）
@@ -61,6 +63,8 @@ if [ ! -f "${ENV_FILE}" ]; then
   cat > "${ENV_FILE}" <<'EOF'
 # autonomy 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
 # 监听端口不在这里配置：由 SERVICE_PORT（优先）或 PORT 决定，都没有则 4300。
+# 监听主机默认 127.0.0.1（本机部署平台）。远程机器要对外服务时取消下一行注释：
+# AUTONOMY_HTTP_HOST=0.0.0.0
 # 数据库：全机只有一份（默认 ~/database/autonomy/autonomy.db），autonomy、
 # 评测工具、SQL 编辑器看的是同一个文件。要换位置就设这里（或 AUTONOMY_DATA_DIR
 # 只换目录）；没有特殊原因不要改，改了就等于换一个库。
@@ -102,7 +106,15 @@ fi
 set -a; . "${ENV_FILE}"; set +a
 
 # 平台注入的端口优先：不让 .env 里的 AUTONOMY_HTTP_ADDR 把服务钉在旧端口。
-export AUTONOMY_HTTP_ADDR="127.0.0.1:${PORT}"
+# 主机是远程部署的旋钮（AUTONOMY_HTTP_HOST / SERVICE_HOST），默认仍是 127.0.0.1。
+[ -f "${DIR}/listen_addr.sh" ] || die "缺少 ${DIR}/listen_addr.sh（发版包内容不完整？）"
+# shellcheck source=listen_addr.sh
+. "${DIR}/listen_addr.sh"
+LISTEN_HOST="$(resolve_listen_host)"
+AUTONOMY_HTTP_ADDR="$(compose_http_addr "${LISTEN_HOST}" "${PORT}")" ||
+  die "无法组成监听地址（host=${LISTEN_HOST} port=${PORT}）"
+export AUTONOMY_HTTP_ADDR
+HEALTH_HOST="$(health_probe_host "${LISTEN_HOST}")"
 # 引擎与库：sqlite（默认）走「全机一份库」那条推导，显式给了就听显式的；postgres 的连接串
 # 原样传下去，脚本不为它建目录、也不猜它。
 STORE_ENGINE="${AUTONOMY_STORE_ENGINE:-sqlite}"
@@ -296,7 +308,7 @@ for _ in $(seq 1 40); do
     tail -20 "${LOG_FILE}" >&2 || true
     exit 1
   fi
-  if curl -fsS -m 2 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+  if curl -fsS -m 2 "http://${HEALTH_HOST}:${PORT}/health" >/dev/null 2>&1; then
     log "启动成功 pid=${pid} log=${LOG_FILE}"
     exit 0
   fi

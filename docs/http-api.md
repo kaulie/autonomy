@@ -2,7 +2,7 @@
 
 Autonomy 对外的 HTTP 接口，两半：**任务接口**（受理指令、查进展、查 agent 状态、轮询对话流）与
 **数据接口**（把日志当数据读：列表 / 详情 / facets / task 选择器 / 自述，给评测侧用，见
-「[数据 API](#数据-api评测侧读日志不再读库)」）。契约本身由代码里的注解生成（见文末「服务契约」）。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。
+「[数据 API](#数据-api评测侧读日志不再读库)」）。契约本身由代码里的注解生成（见文末「服务契约」）。部署平台按服务契约调用 `scripts/restart.sh`：注入 `SERVICE_PORT`（优先于 `PORT`）、`RUNTIME_DIR`、`APP_VERSION`，契约里 autonomy 的 port 是 `4300`，探活 `GET /health`。监听主机默认 `127.0.0.1`；远程机器对外服务设 `AUTONOMY_HTTP_HOST`（见 [remote-deploy.md](remote-deploy.md)）。
 
 发版包（`build.sh`）自带两份东西，部署上直接能用：runtime 本体 `bin/autonomyd`，以及 cursor bridge `bin/cursor-sdk-bridge`（`third_party/` 是 gitignore 的下载产物，不带它的话部署上的 llm 任务会失败在 `cursor bridge ping`；`scripts/start.sh` 会把它指给 `CURSOR_SDK_BRIDGE_BIN`）。
 
