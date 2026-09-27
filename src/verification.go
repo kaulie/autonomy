@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/capability/spec"
 )
 
 // Verification: do the facts the Completion Contract names hold now?
@@ -44,7 +46,7 @@ type Verification struct {
 	Cycle       int
 	Criterion   string // the criterion's name
 	Requirement string // what it says must be true, in its own words
-	Method      string // world_model | registry:<capability> | declared:<capability>
+	Method      string // world_model | kind:<object-kind>
 	Evidence    string // JSON: the slot the criterion bound, and what it resolved to
 	Expected    string // the fact that must hold
 	Observed    string // what the authoritative source answered
@@ -87,59 +89,107 @@ func observedOrNothing(v Verification) string {
 	return v.Observed
 }
 
-// verificationReader is how the runtime answers a fact about one kind of evidence
-// without being told: the read-only capability that owns that kind of object, and the
-// input the evidence object is handed to it in.
-//
-// The key is the capability that *produced* the evidence (the step the criterion's
-// slot resolved to), because that is what says what kind of thing the evidence is: an
-// output of service.deploy is a pipeline, and a pipeline's truth lives in the
-// deployment control plane. Nothing here matches field names across capabilities — the
-// input is named explicitly, once, in one place (see docs/verification.md).
+// verificationReader is the system tool that checks one object kind, and the
+// input that object is handed to it in.
 type verificationReader struct {
-	Capability string // the capability to ask
-	Input      string // the input it takes the evidence object in
+	Capability string
+	Input      string
 }
 
-var verificationReaders = map[string]verificationReader{
-	"service.deploy":   {Capability: "deployment.monitor", Input: "deployment"},
-	"code_edit.pr_url": {Capability: "pr.check", Input: "pr"},
+// outputKind is the typed object a producer declared for one output field.
+// Empty means that field is not evidence the verifier can look up a tool for.
+func outputKind(producer, key string) string {
+	outputs, ok := declaredOutputsOf(producer)
+	if !ok {
+		return ""
+	}
+	for _, field := range outputs {
+		if fieldAccepts([]spec.Field{field}, key) {
+			return strings.ToLower(strings.TrimSpace(field.Kind))
+		}
+	}
+	return ""
 }
 
-// verificationTools are the system-level checks the verifier may call.
-// Coverage grows by adding a tool here — not by treating a worker report,
-// a review, or a planner-invented capability as truth.
-var verificationTools = map[string]bool{
-	"pr.check":           true,
-	"deployment.monitor": true,
+// toolForKind finds the one system tool that ChecksKind matches, and the input
+// that should receive this evidence (prefer an input whose name/alias is key).
+func toolForKind(kind, evidenceKey string) (verificationReader, bool) {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		return verificationReader{}, false
+	}
+	f := activeCapabilityFactory()
+	if f == nil {
+		return verificationReader{}, false
+	}
+	var found verificationReader
+	n := 0
+	for _, c := range f.GetAll() {
+		sc, ok := c.(spec.SystemCheck)
+		if !ok || strings.ToLower(strings.TrimSpace(sc.ChecksKind())) != kind {
+			continue
+		}
+		declared, ok := c.(spec.Declared)
+		if !ok {
+			continue
+		}
+		input := inputForKind(declared, kind, evidenceKey)
+		if input == "" {
+			continue
+		}
+		n++
+		found = verificationReader{Capability: c.Name(), Input: input}
+	}
+	if n != 1 {
+		return verificationReader{}, false
+	}
+	return found, true
+}
+
+func inputForKind(d spec.Declared, kind, evidenceKey string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	evidenceKey = strings.ToLower(strings.TrimSpace(evidenceKey))
+	var first string
+	for _, field := range d.Inputs() {
+		if strings.ToLower(strings.TrimSpace(field.Kind)) != kind {
+			continue
+		}
+		if first == "" {
+			first = field.Name
+		}
+		if fieldAccepts([]spec.Field{field}, evidenceKey) {
+			return field.Name
+		}
+	}
+	return first
 }
 
 func isVerificationTool(name string) bool {
-	return verificationTools[strings.ToLower(strings.TrimSpace(name))]
+	f := activeCapabilityFactory()
+	if f == nil {
+		return false
+	}
+	c := f.Get(strings.ToLower(strings.TrimSpace(name)))
+	if c == nil {
+		return false
+	}
+	_, ok := c.(spec.SystemCheck)
+	return ok
 }
 
 func verificationToolNames() string {
-	names := make([]string, 0, len(verificationTools))
-	for name := range verificationTools {
-		names = append(names, name)
+	f := activeCapabilityFactory()
+	if f == nil {
+		return ""
+	}
+	names := make([]string, 0)
+	for _, c := range f.GetAll() {
+		if _, ok := c.(spec.SystemCheck); ok {
+			names = append(names, c.Name())
+		}
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-// readerFor looks up who answers about one producer's output: a key-specific
-// entry first (`code_edit.pr_url`), then the capability as a whole
-// (`service.deploy`).
-func readerFor(producer, key string) (verificationReader, bool) {
-	producer = strings.ToLower(strings.TrimSpace(producer))
-	key = strings.ToLower(strings.TrimSpace(key))
-	if key != "" {
-		if reader, ok := verificationReaders[producer+"."+key]; ok {
-			return reader, true
-		}
-	}
-	reader, ok := verificationReaders[producer]
-	return reader, ok
 }
 
 // verifyDone evaluates the task's pinned Completion Contract and returns nil when every
@@ -315,38 +365,26 @@ type verificationAsk struct {
 	inputs     map[string]StepInput
 }
 
-// authorityFor decides who is asked about a piece of evidence: the capability the
-// planner named in the criterion's check, or the reader the runtime knows for that kind
-// of evidence. A kind nothing can answer is not a failure of the run — it is the
-// inconclusive the planner has to deal with.
+// authorityFor decides who is asked about a piece of evidence: the object kind
+// the producer declared on that output, then the one system tool that checks
+// that kind. The planner does not pick the tool (a leftover check field is
+// ignored). A kind nothing can answer is inconclusive, not a failure of the run.
 func authorityFor(criterion Criterion, producer ActionResult, key string) (verificationAsk, error) {
-	if criterion.HasCheck() {
-		name := criterion.Check.Capability
-		if !isVerificationTool(name) {
-			return verificationAsk{}, fmt.Errorf(
-				"verification only asks system tools (%s); %q is not one — add a tool if this fact should be checkable",
-				verificationToolNames(), name)
-		}
-		return verificationAsk{
-			capability: name,
-			method:     "declared:" + name,
-			inputs:     criterion.Check.Inputs,
-		}, nil
-	}
-	reader, ok := readerFor(producer.Capability, key)
-	if !ok {
+	kind := outputKind(producer.Capability, key)
+	if kind == "" {
 		return verificationAsk{}, fmt.Errorf(
-			"no system tool answers about this evidence: %s reports %q (coverage grows by adding a verification tool, not by treating the report as truth)",
+			"%s.%s has no object kind — not a typed evidence object (coverage grows by declaring a kind and adding a tool, not by treating the report as truth)",
 			producer.Capability, key)
 	}
-	if !isVerificationTool(reader.Capability) {
+	reader, ok := toolForKind(kind, key)
+	if !ok {
 		return verificationAsk{}, fmt.Errorf(
-			"the reader for this evidence is %q, which is not a system verification tool",
-			reader.Capability)
+			"no system tool checks kind %q (those registered: %s)",
+			kind, verificationToolNames())
 	}
 	return verificationAsk{
 		capability: reader.Capability,
-		method:     "registry:" + reader.Capability,
+		method:     "kind:" + kind,
 		inputs:     map[string]StepInput{reader.Input: BoundInput(criterion.Evidence.Source)},
 	}, nil
 }
@@ -505,10 +543,10 @@ func evidenceJSON(slot, reference string) string {
 //
 // What it refuses is a contract that cannot be read at all: an evidence slot that is not
 // a readable binding, a slot naming a step of this plan that cannot produce the value, or
-// a check the runtime cannot run. A criterion that states a fact with no slot, no
-// expectation, or no source to answer it *passes* here: it costs no work, and it is
-// reported as inconclusive when the `done` comes (docs/verification.md) — refusing the
-// whole plan would trade a verifiable fact for no work at all.
+// a leftover check (the object kind selects the tool). A criterion that states a fact
+// with no slot, no expectation, or no source to answer it *passes* here: it costs no
+// work, and it is reported as inconclusive when the `done` comes (docs/verification.md)
+// — refusing the whole plan would trade a verifiable fact for no work at all.
 func validateCompletionContract(contract []Criterion, actions []Action) error {
 	for i, criterion := range contract {
 		label := criterionLabel(criterion, i)
@@ -525,9 +563,7 @@ func validateCompletionContract(contract []Criterion, actions []Action) error {
 			}
 		}
 		if criterion.HasCheck() {
-			if err := checkAuthority(label, criterion); err != nil {
-				return err
-			}
+			return fmt.Errorf("completion contract %s: do not name a check — the object kind selects the system tool", label)
 		}
 	}
 	return nil
@@ -559,53 +595,6 @@ func checkSlotAgainstPlan(label string, src inputSource, actions []Action) error
 			return fmt.Errorf("completion contract %s: step %q (%s) does not report %q (it reports %s)", label, src.step, step.Name, src.key, fieldNames(outputs))
 		}
 		return nil
-	}
-	return nil
-}
-
-// checkAuthority checks a check the planner named: the capability has to exist, its
-// inputs have to line up with what it declares, and the field the criterion compares has
-// to be one it reports. A check that cannot answer would turn into a verdict, and a
-// verdict nothing supports is exactly what verification is here to stop.
-func checkAuthority(label string, criterion Criterion) error {
-	check := criterion.Check
-	f := activeCapabilityFactory()
-	if f == nil || !f.Has(check.Capability) {
-		return fmt.Errorf("completion contract %s: the check names capability %q, which this runtime does not have", label, check.Capability)
-	}
-	if !isVerificationTool(check.Capability) {
-		return fmt.Errorf("completion contract %s: the check names %q, which is not a system verification tool (those are %s)", label, check.Capability, verificationToolNames())
-	}
-	declared, hasSignature := declaredInputsOf(check.Capability)
-	for _, key := range sortedInputKeys(check.Inputs) {
-		in := check.Inputs[key]
-		if err := checkDeclaredInput(label+" check", check.Capability, key, declared, hasSignature); err != nil {
-			return err
-		}
-		if !in.IsBinding() {
-			continue
-		}
-		if _, err := parseInputSource(in.Source); err != nil {
-			return fmt.Errorf("completion contract %s: check input %q: %w", label, key, err)
-		}
-	}
-	if !hasSignature {
-		return nil
-	}
-	for _, field := range declared {
-		if field.Required && !suppliedInput(check.Inputs, field) {
-			return fmt.Errorf("completion contract %s: the check does not supply %q, which %s requires", label, field.Name, check.Capability)
-		}
-	}
-	if criterion.Expect.Exists || criterion.Expect.Field == "" {
-		return nil
-	}
-	outputs, declaredOutputs := declaredOutputsOf(check.Capability)
-	if !declaredOutputs {
-		return fmt.Errorf("completion contract %s: %s declares no outputs, so it cannot be asked for %q", label, check.Capability, criterion.Expect.Field)
-	}
-	if !fieldAccepts(outputs, criterion.Expect.Field) {
-		return fmt.Errorf("completion contract %s: %s does not report %q (it reports %s)", label, check.Capability, criterion.Expect.Field, fieldNames(outputs))
 	}
 	return nil
 }

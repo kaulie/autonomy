@@ -120,6 +120,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	var constructs []struct {
 		Name        string       `json:"name"`
 		SystemCheck bool         `json:"system_check"`
+		ChecksKind  string       `json:"checks_kind"`
 		Input       []spec.Field `json:"input"`
 		Output      []spec.Field `json:"output"`
 	}
@@ -144,6 +145,21 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	}
 	if systemCheck["pull_request.review"] || systemCheck["code_edit"] {
 		t.Fatalf("review and work capabilities are not verification tools: %v", systemCheck)
+	}
+	checksKind := map[string]string{}
+	for _, c := range constructs {
+		checksKind[c.Name] = c.ChecksKind
+	}
+	if checksKind["pr.check"] != spec.KindPullRequest || checksKind["deployment.monitor"] != spec.KindDeployment {
+		t.Fatalf("tools must declare the kind they check: %v", checksKind)
+	}
+	prURL, ok := fieldNamed(outputs["code_edit"], "pr_url")
+	if !ok || prURL.Kind != spec.KindPullRequest {
+		t.Fatalf("code_edit.pr_url kind=%q, want %s", prURL.Kind, spec.KindPullRequest)
+	}
+	pipe, ok := fieldNamed(outputs["service.deploy"], "pipeline_id")
+	if !ok || pipe.Kind != spec.KindDeployment {
+		t.Fatalf("service.deploy.pipeline_id kind=%q, want %s", pipe.Kind, spec.KindDeployment)
 	}
 
 	// Where a plan step goes wrong when the declaration is missing: the field

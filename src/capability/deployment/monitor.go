@@ -165,7 +165,7 @@ type Monitor struct {
 
 func (Monitor) Name() string { return Name }
 
-func (Monitor) SystemCheck() {}
+func (Monitor) ChecksKind() string { return spec.KindDeployment }
 
 func (Monitor) Domain() string { return Domain }
 
@@ -178,8 +178,8 @@ func (Monitor) Description() string {
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
 func (Monitor) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "deployment", Aliases: []string{"pipeline_id", "pipeline", "request_id", "target", "run", "id"}, Description: "the deployment / pipeline to follow, by the id the deployment control plane knows it as; required unless poll names it"},
-		{Name: "poll", Description: "the status path handed back by service.deploy (e.g. /api/pipelines/<id>); naming it is enough on its own and it is joined onto endpoint/status_url"},
+		{Name: "deployment", Aliases: []string{"pipeline_id", "pipeline", "request_id", "target", "run", "id"}, Kind: spec.KindDeployment, Description: "the deployment / pipeline to follow, by the id the deployment control plane knows it as; required unless poll names it"},
+		{Name: "poll", Kind: spec.KindDeployment, Description: "the status path handed back by service.deploy (e.g. /api/pipelines/<id>); naming it is enough on its own and it is joined onto endpoint/status_url"},
 		{Name: "status_url", Description: "the full status URL, when it is not <endpoint>/api/pipelines/<deployment>; it wins over endpoint"},
 		{Name: "endpoint", Description: "the deployment API base URL; default $DEPLOYMENT_API_URL, else http://127.0.0.1:4220, with the status path <endpoint>/api/pipelines/<deployment>"},
 		{Name: "logs_url", Description: "a separate logs URL, for a control plane whose logs are not at <status_url>/logs; a status answer that already carries logs is used instead"},

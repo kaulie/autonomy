@@ -21,7 +21,18 @@ type Field struct {
 	// Description is one line on what the field is, and what an empty value means
 	// when that is meaningful.
 	Description string `json:"description"`
+	// Kind is the typed object this field carries (an output) or accepts (an
+	// input). Verification looks up kind → the one system tool that checks it.
+	// Empty means the field is not a typed evidence object.
+	Kind string `json:"kind,omitempty"`
 }
+
+// Object kinds that system verification tools check. A producer output and the
+// tool input that receives it share the same kind.
+const (
+	KindPullRequest = "pull_request"
+	KindDeployment  = "deployment"
+)
 
 // Declared is implemented by a capability that declares its call signature: the
 // inputs it takes and the outputs it returns. The capability factory renders both
@@ -36,10 +47,10 @@ type Declared interface {
 	Outputs() []Field
 }
 
-// SystemCheck marks a capability as a system verification tool. The verifier
-// will only ask these (plus the World Model). Coverage grows by adding another
-// tool that implements this — not by treating a worker report or a review as
-// truth. The empty method is the mark; it carries no behaviour.
+// SystemCheck marks a capability as a system verification tool for one object
+// kind. The verifier looks up the evidence's kind and asks the tool that
+// ChecksKind matches. Coverage grows by adding another tool — not by treating
+// a worker report or a review as truth, and not by letting the planner pick.
 type SystemCheck interface {
-	SystemCheck()
+	ChecksKind() string
 }

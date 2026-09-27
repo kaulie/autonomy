@@ -81,9 +81,9 @@ func (DeployService) Inputs() []spec.Field {
 
 func (DeployService) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "pipeline_id", Description: "the accepted pipeline's id — poll it, do not wait for this call"},
+		{Name: "pipeline_id", Kind: spec.KindDeployment, Description: "the accepted pipeline's id — a typed deployment object; poll it, do not wait for this call"},
 		{Name: "state", Description: "the pipeline's state as accepted (queued)"},
-		{Name: "poll", Description: "the status path to follow, e.g. /api/pipelines/<id> (deployment.monitor takes it as poll)"},
+		{Name: "poll", Kind: spec.KindDeployment, Description: "the status path to follow, e.g. /api/pipelines/<id> (same deployment object; the monitor takes it as poll)"},
 		{Name: "deployment", Description: "the deployment the pipeline belongs to, once the control plane reports it"},
 		{Name: "version", Description: "the version being deployed, once the control plane reports it"},
 	}

@@ -18,6 +18,7 @@ import (
 // what it reports, and what it was last asked.
 type fakeVerificationReader struct {
 	name    string
+	kind    string
 	inputs  []spec.Field
 	outputs []spec.Field
 	answer  map[string]string
@@ -29,8 +30,19 @@ func (r *fakeVerificationReader) Name() string          { return r.name }
 func (r *fakeVerificationReader) Domain() string        { return "test" }
 func (r *fakeVerificationReader) Provider() string      { return "autonomy" }
 func (r *fakeVerificationReader) Description() string   { return "an authoritative reader" }
+func (r *fakeVerificationReader) ChecksKind() string    { return r.kind }
 func (r *fakeVerificationReader) Inputs() []spec.Field  { return r.inputs }
 func (r *fakeVerificationReader) Outputs() []spec.Field { return r.outputs }
+
+func verificationTestFactory(t *testing.T, tools ...capability.Capability) *capability.Factory {
+	t.Helper()
+	factory := capability.NewFactory()
+	capability.RegisterDefaults(factory, capability.Deps{})
+	for _, tool := range tools {
+		factory.Register(tool)
+	}
+	return factory
+}
 func (r *fakeVerificationReader) Run(in map[string]string) (map[string]string, error) {
 	r.asked = in
 	if r.err != nil {
@@ -71,9 +83,8 @@ func lastVerdicts(t *testing.T, store rawStore, taskID string) []Verification {
 }
 
 // TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence: a step's own report is the
-// evidence slot's *reference*, not the truth. The verdict comes from the capability that
-// owns that kind of object — the reader the runtime knows for the evidence's producer, or
-// the one the criterion names — and how it answered is recorded next to the reference.
+// evidence slot's *reference*, not the truth. The verdict comes from the system tool
+// that checks the object kind the producer declared on that output.
 func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 	const criterion = `{"name":"C2","requirement":"the deployment completed",` +
 		`"evidence":{"source":"step:deploy.output.pipeline_id"},` +
@@ -88,16 +99,17 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 		wantAsked  string
 	}{
 		{
-			name:     "the reader the runtime knows for a pipeline",
+			name:     "the tool for kind deployment answers a pipeline",
 			producer: "service.deploy",
 			reader: &fakeVerificationReader{
 				name:    "deployment.monitor",
-				inputs:  []spec.Field{{Name: "deployment", Required: true}},
+				kind:    spec.KindDeployment,
+				inputs:  []spec.Field{{Name: "deployment", Required: true, Kind: spec.KindDeployment}},
 				outputs: []spec.Field{{Name: "state"}, {Name: "healthy"}},
 				answer:  map[string]string{"state": "succeeded"},
 			},
 			wantResult: verificationPass,
-			wantMethod: "registry:deployment.monitor",
+			wantMethod: "kind:deployment",
 			wantAsked:  "pipe-9",
 		},
 		{
@@ -105,12 +117,13 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 			producer: "service.deploy",
 			reader: &fakeVerificationReader{
 				name:    "deployment.monitor",
-				inputs:  []spec.Field{{Name: "deployment", Required: true}},
+				kind:    spec.KindDeployment,
+				inputs:  []spec.Field{{Name: "deployment", Required: true, Kind: spec.KindDeployment}},
 				outputs: []spec.Field{{Name: "state"}},
 				answer:  map[string]string{"state": "failed"},
 			},
 			wantResult: verificationFail,
-			wantMethod: "registry:deployment.monitor",
+			wantMethod: "kind:deployment",
 			wantAsked:  "pipe-9",
 		},
 		{
@@ -118,12 +131,13 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 			producer: "service.deploy",
 			reader: &fakeVerificationReader{
 				name:    "deployment.monitor",
-				inputs:  []spec.Field{{Name: "deployment", Required: true}},
+				kind:    spec.KindDeployment,
+				inputs:  []spec.Field{{Name: "deployment", Required: true, Kind: spec.KindDeployment}},
 				outputs: []spec.Field{{Name: "state"}},
 				err:     errVerificationTestReader,
 			},
 			wantResult: verificationInconclusive,
-			wantMethod: "registry:deployment.monitor",
+			wantMethod: "kind:deployment",
 		},
 		{
 			name:       "nothing authoritative answers about this evidence",
@@ -136,10 +150,11 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := executionTestStore(t)
 			prevAuto := _autonomy
-			factory := capability.NewFactory()
+			var extras []capability.Capability
 			if tc.reader != nil {
-				factory.Register(tc.reader)
+				extras = []capability.Capability{tc.reader}
 			}
+			factory := verificationTestFactory(t, extras...)
 			_autonomy = &Autonomy{CapabilityFactory: factory}
 			t.Cleanup(func() { _autonomy = prevAuto })
 
@@ -192,62 +207,42 @@ func TestVerifyDoneAsksTheAuthoritativeSourceForStepEvidence(t *testing.T) {
 // worker (deployment.monitor does) has to attribute that worker's agent row and its
 // reason_turns rows to the task whose done is being verified; calling the capability
 // around the runtime's own fill is how runs end up with turns that belong to nobody.
-// What the contract bound for `task_id`, if anything, still wins.
 func TestVerificationReaderIsCalledWithTheTaskID(t *testing.T) {
-	const criterion = `{"name":"C2","requirement":"the deployment completed",` +
-		`"evidence":{"source":"step:deploy.output.pipeline_id"},` +
-		`"expect":{"field":"state","equals":"succeeded"}`
-
-	cases := []struct {
-		name     string
-		check    string // appended to the criterion: a check that names the task id itself
-		wantTask string
-	}{
-		{name: "the runtime fills the task id", wantTask: "task-attribution"},
-		{
-			name: "what the contract bound wins",
-			check: `,"check":{"capability":"deployment.monitor","inputs":{` +
-				`"deployment":{"source":"step:deploy.output.pipeline_id"},"task_id":"task-bound"}}`,
-			wantTask: "task-bound",
-		},
+	store := executionTestStore(t)
+	prevAuto := _autonomy
+	reader := &fakeVerificationReader{
+		name:    "deployment.monitor",
+		kind:    spec.KindDeployment,
+		inputs:  []spec.Field{{Name: "deployment", Required: true, Kind: spec.KindDeployment}, {Name: "task_id"}},
+		outputs: []spec.Field{{Name: "state"}},
+		answer:  map[string]string{"state": "succeeded"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			store := executionTestStore(t)
-			prevAuto := _autonomy
-			factory := capability.NewFactory()
-			reader := &fakeVerificationReader{
-				name:    "deployment.monitor",
-				inputs:  []spec.Field{{Name: "deployment", Required: true}, {Name: "task_id"}},
-				outputs: []spec.Field{{Name: "state"}},
-				answer:  map[string]string{"state": "succeeded"},
-			}
-			factory.Register(reader)
-			_autonomy = &Autonomy{CapabilityFactory: factory}
-			t.Cleanup(func() { _autonomy = prevAuto })
+	factory := verificationTestFactory(t, reader)
+	_autonomy = &Autonomy{CapabilityFactory: factory}
+	t.Cleanup(func() { _autonomy = prevAuto })
 
-			task := &Task{ID: "task-attribution"}
-			planID, err := store.CreateExecutionPlan(ExecutionPlan{TaskID: task.ID, DecisionType: "plan", Cycle: 1})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := store.AppendExecutionStep(ExecutionStep{
-				PlanID: planID, TaskID: task.ID, Cycle: 1, Idx: 1, Name: "deploy",
-				Capability: "service.deploy", Status: "ok",
-				Output: `{"pipeline_id":"pipe-9"}`,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			pinCriterion(t, task.ID, criterion+tc.check+"}")
+	task := &Task{ID: "task-attribution"}
+	planID, err := store.CreateExecutionPlan(ExecutionPlan{TaskID: task.ID, DecisionType: "plan", Cycle: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendExecutionStep(ExecutionStep{
+		PlanID: planID, TaskID: task.ID, Cycle: 1, Idx: 1, Name: "deploy",
+		Capability: "service.deploy", Status: "ok",
+		Output: `{"pipeline_id":"pipe-9"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pinCriterion(t, task.ID, `{"name":"C2","requirement":"the deployment completed",`+
+		`"evidence":{"source":"step:deploy.output.pipeline_id"},`+
+		`"expect":{"field":"state","equals":"succeeded"}}`)
 
-			rt := NewRuntime(NewAgentFactory(), factory.GetAll()...)
-			if err := rt.verifyDone(DecisionContext{Task: task, Cycle: 2}, planID); err != nil {
-				t.Fatalf("err=%v, want the claim to hold up", err)
-			}
-			if got := reader.asked["task_id"]; got != tc.wantTask {
-				t.Fatalf("the reader was asked task_id=%q, want %q (%v)", got, tc.wantTask, reader.asked)
-			}
-		})
+	rt := NewRuntime(NewAgentFactory(), factory.GetAll()...)
+	if err := rt.verifyDone(DecisionContext{Task: task, Cycle: 2}, planID); err != nil {
+		t.Fatalf("err=%v, want the claim to hold up", err)
+	}
+	if got := reader.asked["task_id"]; got != task.ID {
+		t.Fatalf("the reader was asked task_id=%q, want %q (%v)", got, task.ID, reader.asked)
 	}
 }
 
@@ -270,12 +265,13 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
 			reader: &fakeVerificationReader{
 				name:    "pr.check",
-				inputs:  []spec.Field{{Name: "pr", Required: true}},
+				kind:    spec.KindPullRequest,
+				inputs:  []spec.Field{{Name: "pr", Required: true, Kind: spec.KindPullRequest}},
 				outputs: []spec.Field{{Name: "exists"}, {Name: "state"}},
 				answer:  map[string]string{"exists": "true", "state": "open"},
 			},
 			wantResult: verificationPass,
-			wantMethod: "registry:pr.check",
+			wantMethod: "kind:pull_request",
 		},
 		{
 			name: "pr_url exists fails when the host has no such pull request",
@@ -284,15 +280,16 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
 			reader: &fakeVerificationReader{
 				name:    "pr.check",
-				inputs:  []spec.Field{{Name: "pr", Required: true}},
+				kind:    spec.KindPullRequest,
+				inputs:  []spec.Field{{Name: "pr", Required: true, Kind: spec.KindPullRequest}},
 				outputs: []spec.Field{{Name: "exists"}},
 				answer:  map[string]string{"exists": "false"},
 			},
 			wantResult: verificationFail,
-			wantMethod: "registry:pr.check",
+			wantMethod: "kind:pull_request",
 		},
 		{
-			name: "summary has no system tool so exists is inconclusive",
+			name: "summary has no object kind so exists is inconclusive",
 			criterion: `{"name":"C3","requirement":"the coding agent reported what it changed",` +
 				`"evidence":{"source":"step:implement.output.summary"},"expect":{"exists":true}}`,
 			output:     `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"moved dashboard HTML into templates"}`,
@@ -300,23 +297,31 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 			wantMethod: verificationMethodNone,
 		},
 		{
-			name: "a review is not a verification tool",
+			name: "planner check is ignored; kind still selects pr.check",
 			criterion: `{"name":"C1","requirement":"the pull request was reviewed",` +
 				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true},` +
 				`"check":{"capability":"pull_request.review","inputs":{"pr":{"source":"step:implement.output.pr_url"}}}}`,
-			output:     `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
-			wantResult: verificationInconclusive,
-			wantMethod: verificationMethodNone,
+			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
+			reader: &fakeVerificationReader{
+				name:    "pr.check",
+				kind:    spec.KindPullRequest,
+				inputs:  []spec.Field{{Name: "pr", Required: true, Kind: spec.KindPullRequest}},
+				outputs: []spec.Field{{Name: "exists"}},
+				answer:  map[string]string{"exists": "true"},
+			},
+			wantResult: verificationPass,
+			wantMethod: "kind:pull_request",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := executionTestStore(t)
 			prevAuto := _autonomy
-			factory := capability.NewFactory()
+			var extras []capability.Capability
 			if tc.reader != nil {
-				factory.Register(tc.reader)
+				extras = []capability.Capability{tc.reader}
 			}
+			factory := verificationTestFactory(t, extras...)
 			_autonomy = &Autonomy{CapabilityFactory: factory}
 			t.Cleanup(func() { _autonomy = prevAuto })
 
@@ -474,9 +479,8 @@ func TestVerifyDoneJudgesWorldCriteria(t *testing.T) {
 	}
 }
 
-func TestValidateCompletionContractRefusesAReviewAsCheck(t *testing.T) {
-	factory := capability.NewFactory()
-	capability.RegisterDefaults(factory, capability.Deps{})
+func TestValidateCompletionContractRefusesANamedCheck(t *testing.T) {
+	factory := verificationTestFactory(t)
 	prev := _autonomy
 	_autonomy = &Autonomy{CapabilityFactory: factory}
 	t.Cleanup(func() { _autonomy = prev })
@@ -485,14 +489,14 @@ func TestValidateCompletionContractRefusesAReviewAsCheck(t *testing.T) {
 		{"name":"C1","requirement":"the pull request exists",
 		 "evidence":{"source":"step:implement.output.pr_url"},
 		 "expect":{"exists":true},
-		 "check":{"capability":"pull_request.review",
+		 "check":{"capability":"pr.check",
 		          "inputs":{"pr":{"source":"step:implement.output.pr_url"}}}}
 	]`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = validateCompletionContract(contract, nil)
-	if err == nil || !strings.Contains(err.Error(), "not a system verification tool") {
-		t.Fatalf("err=%v, want review refused as a verification tool", err)
+	if err == nil || !strings.Contains(err.Error(), "do not name a check") {
+		t.Fatalf("err=%v, want any named check refused", err)
 	}
 }

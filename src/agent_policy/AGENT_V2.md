@@ -262,8 +262,6 @@ start, the way you want to be held to them.
       "name": "C2",
       "requirement": "the Deployment completed",
       "evidence": {"source": "step:deploy.output.pipeline_id"},
-      "check": {"capability": "deployment.monitor",
-                "inputs": {"deployment": {"source": "step:deploy.output.pipeline_id"}}},
       "expect": {"field": "state", "equals": "succeeded"}
     },
     {
@@ -285,13 +283,11 @@ start, the way you want to be held to them.
 - `expect` — `{"exists": true}`, or `{"field": "…", "equals": "…"}`: the field of the
   authoritative answer and the value it must have. A World Model slot already names the
   field it reads, so over one you may write `{"equals": "…"}` alone.
-- `check` — optional: which **system verification tool** to ask, when the runtime
-  has no reader of its own for that evidence. It must be a tool the system
-  already provides (`system_check` in Constructs). The runtime already knows
-  `service.deploy` → `deployment.monitor` and `code_edit.pr_url` → `pr.check`
-  (PR_Check: exists / open / closed / merged). `pull_request.review` is
-  opinions, not a check. A worker `summary` has no tool yet — that criterion
-  is inconclusive until one is added. Do not invent a check; add a tool.
+- Do **not** write `check`. You name the object (`evidence`). The output's
+  `kind` (in Constructs) selects the one system tool that verifies that kind:
+  `pull_request` → `pr.check`, `deployment` → `deployment.monitor`. A field
+  with no kind (a worker `summary`) cannot be verified until a kind and a
+  tool exist. Do not invent a tool; add one.
 
 What follows from it:
 
@@ -299,8 +295,8 @@ What follows from it:
   that never declared one cannot be completed: a `done` with nothing to verify it against
   is refused.
 - What a step *reported* is evidence — a reference — not truth. The verdict comes from the
-  authoritative source: the World Model for a World Model slot, otherwise the capability
-  that owns that kind of object. Do not expect a step's own summary to complete a Task.
+  World Model for a World Model slot, otherwise the system tool that checks the
+  output's `kind`. Do not expect a step's own summary to complete a Task.
 - A `done` holds only when **every** criterion passes. Anything else — a value that is not
   the fact, an object that is not there, a fact nothing can answer — is refused, and your
   next answer re-plans from the verdict.
@@ -475,7 +471,6 @@ it belongs in `description`.
         "name": "what this fact is called",
         "requirement": "the fact that must hold, in your words",
         "evidence": {"source": "step:<name>.output.<key> | world_model:asset.<id>.<kind|state>"},
-        "check": {"capability": "capability.name (read-only)", "inputs": {}},
         "expect": {"exists": true}
       }
     ]

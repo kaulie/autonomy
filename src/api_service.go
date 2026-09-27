@@ -117,7 +117,7 @@ type TaskContractCriterion struct {
 //
 // Evidence is the slot the criterion bound and what it resolved to, as JSON
 // (`{"slot": …, "reference": …}`); Method is who was asked
-// (`world_model` / `registry:<capability>` / `declared:<capability>` / `-` for "nobody
+// (`world_model` / `kind:<object-kind>` / `-` for "nobody
 // authoritative exists, so this cannot be verified"). Result is pass | fail |
 // inconclusive — only pass holds a `done` up.
 type TaskVerdictProgress struct {

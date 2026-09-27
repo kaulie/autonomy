@@ -39,7 +39,7 @@ func (PRCheck) Domain() string { return CheckDomain }
 
 func (PRCheck) Provider() string { return CheckProvider }
 
-func (PRCheck) SystemCheck() {}
+func (PRCheck) ChecksKind() string { return spec.KindPullRequest }
 
 func (PRCheck) Description() string {
 	return `PR_Check: the system verification tool for one pull request — does it exist, and what state is it in. Not a review. Name it by URL: "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted). output: {"exists","valid","state","draft","merged","number","pr","title","repo"} — exists/valid are "true" when the host has that pull request; state is "open" / "closed"; merged is what the host reports. This capability does not read review opinions.`
@@ -47,7 +47,7 @@ func (PRCheck) Description() string {
 
 func (PRCheck) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Required: true, Description: "the pull request to check: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository"},
+		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Required: true, Kind: spec.KindPullRequest, Description: "the pull request to check: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository"},
 		{Name: "repo", Aliases: []string{"repository"}, Description: "owner/name, when pr does not name the repository; it must not contradict pr"},
 	}
 }

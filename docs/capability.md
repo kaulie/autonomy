@@ -67,9 +67,9 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 |---|---|
 | `name` / `domain` | 语义名、语义域 |
 | `description` | 一段散文：语义、默认值、拒绝时的原因 |
-| `system_check` | 系统验证工具（Verifier 只问这些；缺覆盖就加一项，不借用干活/审查能力） |
+| `system_check` / `checks_kind` | 系统验证工具，以及它验的对象类型；Verifier 按产出字段的 `kind` 找唯一匹配的工具 |
 | `input` | 入参：`name`（规范键）、`aliases`（同一入参的别名）、`required`、`description` |
-| `output` | 返回：`name` + `description` |
+| `output` | 返回：`name` + `description` + 可选 `kind`（类型化证据对象） |
 
 **列表里没有 `provider`**：谁能干这活是 runtime 的决定，不是 step 能填的字段（step = capability + input），
 所以 planner 根本不该看到这个轴。runtime 把这份归属记在**它自己录下来的那一步**上
@@ -79,7 +79,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 
 - 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
 - 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的六个都声明**，这条被 `capability_test.go` 钉住。
-- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空）。验真走系统工具 `pr.check`（PR_Check：存在 / open / closed / merged）；审查意见走 `pull_request.review`。两者都吃同一个 `pr` URL，定位不同。Constructs 上 `system_check: true` 的才是 Verifier 能问的工具。
+- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR。产出字段带 `kind`（`pull_request` / `deployment`），Verifier 按 kind 找唯一的 `system_check` 工具。审查意见走 `pull_request.review`，不参与验真。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，没有任何字段能写「派给谁」—— 哪个 capability 背后有 agent（`code_edit` / `deployment.monitor` 会 acquire 一个 worker）由 runtime 决定，planner 也不需要知道（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 - **字段名是本能力的局部约定**：`output` 里的键只对**这个**能力有意义，下一个能力怎么叫、要不要它，由 planner 在计划里显式绑定（`{"source":"step:<name>.output.<key>"}`）—— runtime 从不跨能力猜名字、也不把共享 Context 当数据通道（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。所以能力声明里 `input`/`output` 的**描述**要写清语义：那是 planner 唯一能据以做映射的东西。
 - **`output` 只放本职产出**：能力这次调用**产出的东西**（结果、它创建/改动的对象与状态）。谁触发的、解析出的是哪个 ref、轮询了几次、哪个实现——都是**这次调用的元信息**，不进 `output`；下游真需要这类**世界状态**就走世界模型（`world_model:…`）。"别人要读"不是把它当输出的理由。

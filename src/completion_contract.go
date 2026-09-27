@@ -31,9 +31,9 @@ import (
 //     one is judged.
 //   - Expect — the fact itself, in a form the runtime can compare: the object exists,
 //     or one field of the authoritative answer has a value.
-//   - Check — optional, and only where the runtime's own registry has no reader for
-//     that evidence: which authoritative capability to ask, and with what. This is
-//     not "how to verify" — it is where the truth about that object lives.
+//   - Check — leftover, ignored. The producer output's kind selects the system
+//     tool; the planner does not name one. New contracts that still write it are
+//     refused at pin time.
 type Criterion struct {
 	Name        string
 	Requirement string
