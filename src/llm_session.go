@@ -168,15 +168,25 @@ func (s *LLMSession) turnShape() (ReasonMode, LLMMessageRole) {
 	return ReasonModePlan, LLMMessageRoleUser
 }
 
+// firstPromptCycle is the round the session's first prompt is recorded as. It opens the
+// conversation, so it takes no number from the caller's counting: a delegated worker's
+// prompts are still its own rounds 1..n and a task's cycles are still the runtime's
+// (docs/prompt.md).
+const firstPromptCycle = 0
+
 // beginTurn opens the run header for one turn of this session: the task it belongs to,
 // the round it is, and the shape its identity gives it. round is RoundAuto for a
-// session that numbers its own turns.
-func (s *LLMSession) beginTurn(prompt string, round int) *LLMTrace {
+// session that numbers its own turns; first marks the session's first prompt, which is
+// recorded as firstPromptCycle and leaves the numbering to the prompts that follow.
+func (s *LLMSession) beginTurn(prompt string, round int, first bool) *LLMTrace {
 	mode, inputRole := s.turnShape()
-	if round == RoundAuto {
+	switch {
+	case first:
+		round = firstPromptCycle
+	case round == RoundAuto:
 		s.round++
 		round = s.round
-	} else {
+	default:
 		s.round = round
 	}
 	trace := BeginLLMTraceFrom(s.agent, inputRole, s.taskID, round, mode, prompt)
@@ -207,11 +217,56 @@ func (s *LLMSession) workspaceOrCwd() string {
 // it is, and hands back the answer with where it was recorded. round is the round to
 // record it as (RoundAuto: the session's next one).
 //
+// **A session's first prompt is always the frame** — the agent's own system prompt and the
+// policy (buildReasoningFrame): the instructions that do not change per task. A session that
+// has not been given it yet gets it first, as its own turn, and only then does the caller's
+// prompt go out. So an agent is told who it is before it is told what to do, and a task's
+// words never have to carry the rules (docs/prompt.md).
+//
 // A turn the model's output limit cut off is the one failed run worth another turn:
 // the session is intact, nothing of the truncated turn ran, and the agent can be told
 // to finish the rest in smaller steps. Every other failure (a dead session, a provider
 // error, an exhausted account) is reported as it is.
 func (s *LLMSession) Say(ctx context.Context, prompt string, round int) (TurnResult, error) {
+	if _, err := s.GiveFirstPrompt(ctx); err != nil {
+		return TurnResult{}, err
+	}
+	return s.turn(ctx, prompt, round, false)
+}
+
+// GiveFirstPrompt gives this session its **first prompt** — the frame (the agent's own
+// system prompt + the agent policy) — if it has not been given it yet, and reports whether
+// it sent one. These are the two prompt injections an agent's life has:
+//
+//	agent created  → its first prompt: the frame      (AgentInitializer.Initialize)
+//	               → the task's prompt: the delta     (the task's decision cycles)
+//
+// It is idempotent per session, and per *session* is the point: a session created later (a
+// new backend session after a restart, a mode or workspace change, a bridge restart) has
+// been told nothing, so the frame goes again — as that session's first prompt, never
+// appended to a task's.
+//
+// A first prompt that failed is not marked delivered: the next turn sends it again rather
+// than running a decision cycle on a session that was never told the rules.
+func (s *LLMSession) GiveFirstPrompt(ctx context.Context) (bool, error) {
+	if s == nil || s.agent == nil || !s.agent.needsLLMFrame() {
+		return false, nil
+	}
+	prompt, err := buildReasoningFrame(DecisionContext{Agent: s.agent}, ReasoningInput{})
+	if err != nil {
+		return false, fmt.Errorf("build the agent's first prompt: %w", err)
+	}
+	if _, err := s.turn(ctx, prompt, RoundAuto, true); err != nil {
+		return false, err
+	}
+	s.agent.markLLMFrameSent()
+	return true, nil
+}
+
+// turn is one prompt on this session's backend — the body Say and GiveFirstPrompt share.
+// It carries no first-prompt guard of its own: whether the session has been told the rules
+// yet, and who is speaking, is the caller's business.
+func (s *LLMSession) turn(ctx context.Context, prompt string, round int, first bool) (TurnResult, error) {
 	if s == nil || s.agent == nil {
 		return TurnResult{}, fmt.Errorf("nil agent session")
 	}
@@ -238,15 +293,13 @@ func (s *LLMSession) Say(ctx context.Context, prompt string, round int) (TurnRes
 
 	retries := turnRetryBudget()
 	for attempt := 0; ; attempt++ {
-		trace := s.beginTurn(prompt, round)
+		trace := s.beginTurn(prompt, round, first)
 		text, runRes, err := s.agent.PromptLLMStream(goCtx, prompt, mode, trace.Emit)
 		if err == nil {
 			runRes.RawOutput = text
 			trace.Finish(runRes)
-			// The frame counts as delivered only once the session actually answered:
-			// a failed first turn resends it instead of leaving the session without
-			// its instructions.
-			s.agent.markLLMFrameSent()
+			// The frame is marked delivered by the injection that sent it
+			// (GiveFirstPrompt), not by every turn that happens to succeed.
 			return TurnResult{Text: text, Origin: trace.Origin()}, nil
 		}
 		trace.Finish(runRes)

@@ -212,8 +212,13 @@ var reasoningDeltaPlaceholders = []string{"{{TASK}}", "{{CONTEXT_ENTITY}}", "{{W
 // buildReasoningFrame is the stable half of the reasoning prompt: AGENT_V2.md
 // with the per-session placeholders (Agent, Goal Type, Completion Principles,
 // Constructs) filled in, and the per-cycle placeholders replaced by a marker.
-// It is sent once per session — on the first decision cycle after the session
-// was created; later cycles send only buildReasoningDelta.
+//
+// It is an agent's **first prompt**: the session is given it as soon as the agent
+// exists (Autonomy.InitializeAgent → LLMSession.GiveFirstPrompt) — before any task,
+// and so before any task's words; a session created later (a restart, a mode or
+// workspace change, a bridge restart) is given it again, as that session's first
+// prompt. It is never appended to a task prompt: the two are separate injections
+// (docs/prompt.md).
 func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, error) {
 	template, err := loadPromptFile(reasoningFrameRel)
 	if err != nil {
@@ -250,8 +255,9 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 // buildReasoningDelta is the per-cycle half: the current Task / Context Entity /
 // World / Runtime Context values (Runtime Context carries the step and
 // previous_actions) as one JSON block. It is what every decision cycle sends,
-// frame or no frame. The agent's own identity is not here: it does not change
-// between cycles, so it is part of the frame.
+// frame or no frame — it is the **task prompt**: what a decision cycle sends, and
+// the only thing a task's words travel in. The agent's own identity is not here:
+// it does not change between cycles, so it is part of the frame.
 func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, error) {
 	payload := struct {
 		Task          json.RawMessage `json:"task"`
@@ -296,21 +302,6 @@ func buildReasoningDelta(ctx DecisionContext, input ReasoningInput) (string, err
 		delta += "\n"
 	}
 	return delta, nil
-}
-
-// buildReasoningPrompt is the message for a session's FIRST decision cycle: the
-// frame plus this cycle's delta. Later cycles send only the delta, because the
-// session already holds the frame.
-func buildReasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
-	frame, err := buildReasoningFrame(ctx, input)
-	if err != nil {
-		return "", err
-	}
-	delta, err := buildReasoningDelta(ctx, input)
-	if err != nil {
-		return "", err
-	}
-	return frame + "\n" + delta, nil
 }
 
 func fencedJSON(raw []byte) string {

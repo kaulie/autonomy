@@ -121,7 +121,9 @@ func TestATruncatedTurnIsRetriedOnTheSameSession(t *testing.T) {
 		t.Fatal("the retry answered nothing")
 	}
 
-	rows, err := store.RawDB().Query(`SELECT status, error_message, input FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
+	// The session's first prompt (the frame) is a turn of its own — the truncated decision
+	// turn and its retry are what this test is about.
+	rows, err := store.RawDB().Query(`SELECT status, error_message, input FROM reason_turns WHERE task_id = 'task-9' AND input NOT LIKE '%Autonomy Bootstrap Prompt%' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,11 +174,11 @@ func TestATruncatedTurnIsNotRetriedForever(t *testing.T) {
 		t.Fatal("expected the truncated run to surface with retries off")
 	}
 	var turns int
-	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9' AND input NOT LIKE '%Autonomy Bootstrap Prompt%'`).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 1 {
-		t.Fatalf("recorded %d turns, want only the one that ran", turns)
+		t.Fatalf("recorded %d decision turns, want only the one that ran", turns)
 	}
 }
 
@@ -202,10 +204,10 @@ func TestOtherFailuresAreNotRetried(t *testing.T) {
 		t.Fatalf("err=%v, want the provider's own failure", err)
 	}
 	var turns int
-	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9'`).Scan(&turns); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT COUNT(*) FROM reason_turns WHERE task_id = 'task-9' AND input NOT LIKE '%Autonomy Bootstrap Prompt%'`).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 1 {
-		t.Fatalf("recorded %d turns, want only the one that ran", turns)
+		t.Fatalf("recorded %d decision turns, want only the one that ran", turns)
 	}
 }

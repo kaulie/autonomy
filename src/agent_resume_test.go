@@ -371,6 +371,8 @@ func TestAQueuedInstructionReachesTheCycleThatAnswersIt(t *testing.T) {
 	if len(prompts) < 2 {
 		t.Fatalf("the two instructions produced %d runs, want one each", len(prompts))
 	}
+	// The session's first prompt is the frame: the instructions are the runs after it.
+	prompts = prompts[1:]
 	for i, want := range []string{"deploy the service", "and then tell me"} {
 		if !strings.Contains(prompts[i], want) {
 			t.Errorf("run %d does not carry its instruction %q", i, want)

@@ -117,13 +117,16 @@ func TestADelegatedWorkerCycleCountsItsOwnInteractionRounds(t *testing.T) {
 	}
 	defer func() { _ = sess.Release(context.Background()) }()
 
+	// A session renders its first prompt (the frame) from the policy files.
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+
 	for i := 1; i <= 2; i++ {
 		if _, err := sess.Prompt(context.Background(), "hello"); err != nil {
 			t.Fatalf("prompt %d: %v", i, err)
 		}
 	}
 
-	rows, err := store.RawDB().Query(`SELECT id, cycle, mode FROM reason_turns WHERE task_id = 'task-9' ORDER BY id`)
+	rows, err := store.RawDB().Query(`SELECT id, cycle, mode FROM reason_turns WHERE task_id = 'task-9' AND input NOT LIKE '%Autonomy Bootstrap Prompt%' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}

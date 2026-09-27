@@ -46,30 +46,26 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 		Backend: llmbackend.Cursor, Workspace: "/tmp/ws/",
 	}
 	ctx := DecisionContext{Task: task, Agent: agent, Cycle: 2}
-	prompt, err := buildReasoningPrompt(ctx, ReasoningInput{Text: "extra"})
+	// Two prompts, two injections: the frame is what the session is given first
+	// (LLMSession.GiveFirstPrompt, when the agent is created) and the delta is what a
+	// decision cycle sends (reasoningPrompt). Neither carries the other (docs/prompt.md).
+	delta, err := reasoningPrompt(ctx, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	frame, err := buildReasoningFrame(ctx, ReasoningInput{Text: "extra"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	delta, err := buildReasoningDelta(ctx, ReasoningInput{Text: "extra"})
-	if err != nil {
-		t.Fatal(err)
+	if strings.Contains(delta, "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the task prompt must not carry the frame (the session is told the rules first):\n%s", delta)
 	}
-	// The first cycle's message is the frame plus this cycle's delta; later
-	// cycles send only the delta (the session already holds the frame).
-	if !strings.HasPrefix(prompt, frame) {
-		t.Fatalf("prompt must start with the AGENT_V2 frame")
+	if !strings.Contains(frame, "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the frame is where the policy rides:\n%s", frame)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(prompt), strings.TrimSpace(delta)) {
-		t.Fatalf("prompt must end with this cycle's delta")
-	}
-	if prompt != buildFramePlusDelta(t, ctx) {
-		t.Fatalf("prompt must be frame + delta verbatim")
-	}
+	// Between them they say everything the old single message said: the assertions below
+	// read both halves, so nothing that used to be covered went away.
+	prompt := frame + "\n" + delta
 
 	// Per-cycle values (task / world / runtime context) moved out of the frame:
 	// the frame stays byte-identical for the session, so its placeholders become a
@@ -165,21 +161,6 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	if payload.Task["id"] != "t1" || payload.Task["domain"] != "server" {
 		t.Fatalf("task=%v", payload.Task)
 	}
-}
-
-// buildFramePlusDelta is the contract buildReasoningPrompt must satisfy: frame
-// then delta, verbatim.
-func buildFramePlusDelta(t *testing.T, ctx DecisionContext) string {
-	t.Helper()
-	frame, err := buildReasoningFrame(ctx, ReasoningInput{Text: "extra"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	delta, err := buildReasoningDelta(ctx, ReasoningInput{Text: "extra"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return frame + "\n" + delta
 }
 
 func TestFormatContextEntitiesJSON(t *testing.T) {

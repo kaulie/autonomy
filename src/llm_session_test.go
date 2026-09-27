@@ -63,6 +63,8 @@ func TestOneSessionServesThePlannerAndTheWorker(t *testing.T) {
 			}
 			defer func() { _ = sess.Close(context.Background()) }()
 
+			// A session renders its first prompt (the frame) from the policy files.
+			t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
 			res, err := sess.Say(context.Background(), "hello", tc.round)
 			if err != nil {
 				t.Fatalf("say: %v", err)
@@ -91,8 +93,9 @@ func TestOneSessionServesThePlannerAndTheWorker(t *testing.T) {
 			if len(messages) == 0 || messages[0].Role != tc.wantRole {
 				t.Fatalf("input row=%+v, want role %q", messages, tc.wantRole)
 			}
-			if got := sess.Turns(); len(got) != 1 || got[0] != res.Origin.ReasonTurnID {
-				t.Fatalf("turns=%v, want the one turn this session took", got)
+			// Two turns: the session's first prompt (the frame) and the turn the caller asked for.
+			if got := sess.Turns(); len(got) != 2 || got[1] != res.Origin.ReasonTurnID {
+				t.Fatalf("turns=%v, want the session's first prompt and the turn it took", got)
 			}
 		})
 	}
@@ -120,7 +123,9 @@ func TestAPlannerTurnIsRetriedWhenTheTurnWasCutOff(t *testing.T) {
 		t.Fatalf("a truncated turn should be retried, not reported: %v", err)
 	}
 
-	rows, err := store.RawDB().Query(`SELECT cycle, status, input FROM reason_turns WHERE task_id = 'task-1' ORDER BY id`)
+	// The session's first prompt (the frame) is a turn of its own, ahead of the decision
+	// cycle this test is about.
+	rows, err := store.RawDB().Query(`SELECT cycle, status, input FROM reason_turns WHERE task_id = 'task-1' AND input NOT LIKE '%Autonomy Bootstrap Prompt%' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}

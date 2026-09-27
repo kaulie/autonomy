@@ -74,11 +74,11 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 
 	stage("prompt", "building")
 	tPrompt := time.Now()
-	prompt, sentFrame, err := reasoningPrompt(ctx, input)
+	prompt, err := reasoningPrompt(ctx, input)
 	if err != nil {
 		return ReasoningResult{}, fmt.Errorf("build prompt: %w", err)
 	}
-	stage("prompt", "ready bytes=%d frame=%v elapsed=%s", len(prompt), sentFrame, time.Since(tPrompt).Round(time.Millisecond))
+	stage("prompt", "ready bytes=%d elapsed=%s", len(prompt), time.Since(tPrompt).Round(time.Millisecond))
 	if cursor.TraceVerbose() {
 		stage("prompt", "body:\n%s", prompt)
 	}
@@ -108,17 +108,13 @@ func (r *LLMReasoner) Reason(ctx DecisionContext, input ReasoningInput) (Reasoni
 	return ReasoningResult{Decision: decision, Origin: turn.Origin}, nil
 }
 
-// reasoningPrompt builds the message for one decision cycle. The AGENT_V2 frame
-// (the instructions that do not change per cycle) travels only on a session's
-// first cycle; later cycles send just the delta, because the session already
-// holds the frame. See Agent.needsLLMFrame.
-func reasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, bool, error) {
-	if ctx.Agent.needsLLMFrame() {
-		prompt, err := buildReasoningPrompt(ctx, input)
-		return prompt, true, err
-	}
-	prompt, err := buildReasoningDelta(ctx, input)
-	return prompt, false, err
+// reasoningPrompt builds the message for one decision cycle: the **task prompt** — the
+// current values (Task / Context Entity / World / Runtime Context, which carries the step
+// and previous_actions), the cycle it is, and what to answer with. The instructions that do
+// not change per cycle are not here: they are the frame, and a session is given the frame as
+// its *first* prompt, before any task's words, by GiveFirstPrompt (docs/prompt.md).
+func reasoningPrompt(ctx DecisionContext, input ReasoningInput) (string, error) {
+	return buildReasoningDelta(ctx, input)
 }
 
 func recordReasonIO(ctx DecisionContext, input, output string) {

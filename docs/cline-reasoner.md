@@ -87,8 +87,9 @@ runtime 的环境。当前在哪个后端可以直接问：`curl -s 127.0.0.1:43
 
 - 一个 autonomy `Agent` ↔ **一个常驻 Cline session**：第一次 `send` 由 `ClineCore.start` 起会话，
   之后每次 `send` 都是 `ClineCore.send`，上下文与 prompt cache 复用。
-- **第一条 message 就是 AGENT_V2 frame**：session 的第一轮 prompt = frame + 本轮 delta，之后每轮只有 delta
-  （会话自己记得 frame，`Agent.needsLLMFrame()` 判断，见 docs/execution-loop.md）。
+- **第一条 message 就是 AGENT_V2 frame**：会话的第一条 prompt 就是 frame（agent 创建时注入的那条），
+  之后每条 message 都是 task prompt（delta）—— 两条不拼接（会话自己记得 frame，`Agent.needsLLMFrame()` 判断，
+  见 docs/execution-loop.md、docs/prompt.md）。
 - **常驻的前提是 `interactive: true`**（`AUTONOMY_CLINE_INTERACTIVE` 默认就是它）。SDK 里"常驻"与
   "interactive"是同义词：非 interactive 的 session 被当作单次 run，run 一结束 `finalizeSingleRun` →
   `shutdownSession` 就把它从活动表删掉（并 emit `ended`），下一次 `send` 报
