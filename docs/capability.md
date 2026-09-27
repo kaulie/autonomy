@@ -56,7 +56,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 —— agent 身份 / workspace / backend 是 worker 的（委托方的沙箱永远不会被说成 worker 的，委托方以
 `delegated_by` 出现），Task 与 `previous_actions` 是它被委托的那条 Task。host 取不到（测试替身）则该节渲染成
 `(not provided by this runtime)`，而不是把 `{{NAME}}` 原样丢给模型；能力自己的占位符（`{{WORKSPACE}}` /
-`{{GOAL}}`、监控用的 URL）永远由该能力自己填。不拿 agent 的能力（`pull_request.status` /
+`{{GOAL}}`、监控用的 URL）永远由该能力自己填。不拿 agent 的能力（`pr.check` /
 `pull_request.review` / `service.deploy`）没有 frame：它们是确定性调用，值只走输入与环境。
 
 ### `{{CONSTRUCTS}}` 里有什么
@@ -67,6 +67,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 |---|---|
 | `name` / `domain` | 语义名、语义域 |
 | `description` | 一段散文：语义、默认值、拒绝时的原因 |
+| `system_check` | 系统验证工具（Verifier 只问这些；缺覆盖就加一项，不借用干活/审查能力） |
 | `input` | 入参：`name`（规范键）、`aliases`（同一入参的别名）、`required`、`description` |
 | `output` | 返回：`name` + `description` |
 
@@ -78,7 +79,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 
 - 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
 - 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的六个都声明**，这条被 `capability_test.go` 钉住。
-- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空）。验证走 `pull_request.status`（存在 / open / closed / merged）；审查意见走 `pull_request.review`。两者都吃同一个 `pr` URL，定位不同。
+- 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR（从 worker 的报告里读出 URL 形式，没开 PR 就是空）。验真走系统工具 `pr.check`（PR_Check：存在 / open / closed / merged）；审查意见走 `pull_request.review`。两者都吃同一个 `pr` URL，定位不同。Constructs 上 `system_check: true` 的才是 Verifier 能问的工具。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，没有任何字段能写「派给谁」—— 哪个 capability 背后有 agent（`code_edit` / `deployment.monitor` 会 acquire 一个 worker）由 runtime 决定，planner 也不需要知道（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 - **字段名是本能力的局部约定**：`output` 里的键只对**这个**能力有意义，下一个能力怎么叫、要不要它，由 planner 在计划里显式绑定（`{"source":"step:<name>.output.<key>"}`）—— runtime 从不跨能力猜名字、也不把共享 Context 当数据通道（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。所以能力声明里 `input`/`output` 的**描述**要写清语义：那是 planner 唯一能据以做映射的东西。
 - **`output` 只放本职产出**：能力这次调用**产出的东西**（结果、它创建/改动的对象与状态）。谁触发的、解析出的是哪个 ref、轮询了几次、哪个实现——都是**这次调用的元信息**，不进 `output`；下游真需要这类**世界状态**就走世界模型（`world_model:…`）。"别人要读"不是把它当输出的理由。
@@ -101,13 +102,13 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 - 配置：`DEPLOYMENT_API_URL`（与 gateway 同名的变量）指向部署控制面，缺省 `http://127.0.0.1:4220`；`IDENTITY_ROLE` / `IDENTITY_ID` 覆盖署谁的名，缺省 `agent` / `autonomy`。
 - 失败即失败：控制面自己的原因（如 `service not found: x`）原样进 error，不被吞成「已触发」。
 
-## `pull_request.status`（验证：这条 PR 是否真实、当前什么状态）
+## `pr.check`（PR_Check：系统级验真，这条 PR 是否真实、当前什么状态）
 
-- 语义：给定一个 PR URL，问 git host「这个对象在不在、现在是 open / closed、有没有 merged」。这是 **verification 的权威读**，不是技术审查。
+- 语义：给定一个 PR URL，问 git host「这个对象在不在、现在是 open / closed、有没有 merged」。这是 **系统验证工具**，不是技术审查。
 - 输入：`{"pr":"https://<host>/owner/name/pull/43"}`（`pr_url` / `pull_request` 亦可）。
 - 输出：`{"exists","valid","state","draft","merged","number","pr","title","repo"}`。host 上没有这条 PR 时 `exists`/`valid` 为 `false`，不报错（判定是 fail，不是 inconclusive）。
 - **不读 reviews、不评论、不合并**。意见是 `pull_request.review` 的事。
-- `code_edit.pr_url` 的默认验证读者就是它。
+- `code_edit.pr_url` 的默认验证读者就是它。Verifier 只问带 `system_check` 的工具。
 
 ## `pull_request.review`（读某个 PR 的评审意见，**不合并**）
 

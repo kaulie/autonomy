@@ -64,7 +64,7 @@ step 的每个入参都写清**来源**，而且只有三种（没有第四种�
 - `{"source":"step:<name>.output.<key>"}` —— 同一计划里更早那个 step 的输出，`key` 必须是它声明过的 output。
 - `{"source":"world_model:asset.<id>.<kind|state>"}` —— World Model 里的值（就是 `## World` 里看到的那个资产）。
 
-- **能力之间的字段名各自为政、不做全局统一**：`code_edit` 报 `pr_url`、`pull_request.status` / `pull_request.review` 都收 `pr`（别名 `pr_url`），
+- **能力之间的字段名各自为政、不做全局统一**：`code_edit` 报 `pr_url`、`pr.check` / `pull_request.review` 都收 `pr`（别名 `pr_url`），
   "A 的 `artifact_version` 就是 B 的 `version`" 这种**语义映射是 planner 的判断**，runtime 从不跨能力猜名字。
 - **runtime 只做搬运**：绑定解析成值、值传给能力、缺的来源报出来。它**不**去共享 Context 里找键、不覆盖、不取"最新值"、
   也不替 planner 编一个入参——能力声明为 `Required` 的入参没给，**计划直接不成立**（见《五条规矩》第 1 条）。

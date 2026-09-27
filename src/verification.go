@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -43,7 +44,7 @@ type Verification struct {
 	Cycle       int
 	Criterion   string // the criterion's name
 	Requirement string // what it says must be true, in its own words
-	Method      string // world_model | registry:<capability> | declared:<capability> | slot
+	Method      string // world_model | registry:<capability> | declared:<capability>
 	Evidence    string // JSON: the slot the criterion bound, and what it resolved to
 	Expected    string // the fact that must hold
 	Observed    string // what the authoritative source answered
@@ -102,14 +103,28 @@ type verificationReader struct {
 
 var verificationReaders = map[string]verificationReader{
 	"service.deploy":   {Capability: "deployment.monitor", Input: "deployment"},
-	"code_edit.pr_url": {Capability: "pull_request.status", Input: "pr"},
+	"code_edit.pr_url": {Capability: "pr.check", Input: "pr"},
 }
 
-// verificationExistsInSlot are step outputs that *are* the fact for
-// expect.exists: a worker's report has no external object to ask about.
-// A pipeline id or PR URL is the opposite — those stay on a reader.
-var verificationExistsInSlot = map[string]bool{
-	"summary": true,
+// verificationTools are the system-level checks the verifier may call.
+// Coverage grows by adding a tool here — not by treating a worker report,
+// a review, or a planner-invented capability as truth.
+var verificationTools = map[string]bool{
+	"pr.check":           true,
+	"deployment.monitor": true,
+}
+
+func isVerificationTool(name string) bool {
+	return verificationTools[strings.ToLower(strings.TrimSpace(name))]
+}
+
+func verificationToolNames() string {
+	names := make([]string, 0, len(verificationTools))
+	for name := range verificationTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // readerFor looks up who answers about one producer's output: a key-specific
@@ -264,11 +279,6 @@ func (r *Runtime) verifyStepCriterion(ctx DecisionContext, v *Verification, verd
 	}
 	ask, err := authorityFor(criterion, producer, src.key)
 	if err != nil {
-		if criterion.Expect.Exists && verificationExistsInSlot[strings.ToLower(src.key)] {
-			return verdict(verificationPass,
-				"the report is present in the evidence slot",
-				reference, "slot")
-		}
 		return verdict(verificationInconclusive, err.Error(), reference, verificationMethodNone)
 	}
 	answer, err := r.askAuthority(ctx, ask, prior)
@@ -311,17 +321,28 @@ type verificationAsk struct {
 // inconclusive the planner has to deal with.
 func authorityFor(criterion Criterion, producer ActionResult, key string) (verificationAsk, error) {
 	if criterion.HasCheck() {
+		name := criterion.Check.Capability
+		if !isVerificationTool(name) {
+			return verificationAsk{}, fmt.Errorf(
+				"verification only asks system tools (%s); %q is not one — add a tool if this fact should be checkable",
+				verificationToolNames(), name)
+		}
 		return verificationAsk{
-			capability: criterion.Check.Capability,
-			method:     "declared:" + criterion.Check.Capability,
+			capability: name,
+			method:     "declared:" + name,
 			inputs:     criterion.Check.Inputs,
 		}, nil
 	}
 	reader, ok := readerFor(producer.Capability, key)
 	if !ok {
 		return verificationAsk{}, fmt.Errorf(
-			"nothing authoritative answers about this evidence: %s reports %q, and no reader is registered for it (name the criterion's check, or observe the fact into the World Model)",
+			"no system tool answers about this evidence: %s reports %q (coverage grows by adding a verification tool, not by treating the report as truth)",
 			producer.Capability, key)
+	}
+	if !isVerificationTool(reader.Capability) {
+		return verificationAsk{}, fmt.Errorf(
+			"the reader for this evidence is %q, which is not a system verification tool",
+			reader.Capability)
 	}
 	return verificationAsk{
 		capability: reader.Capability,
@@ -344,6 +365,9 @@ func authorityFor(criterion Criterion, producer ActionResult, key string) (verif
 // nothing else is added, and nothing bound is overwritten.
 func (r *Runtime) askAuthority(ctx DecisionContext, ask verificationAsk, prior []ActionResult) (map[string]string, error) {
 	name := strings.ToLower(strings.TrimSpace(ask.capability))
+	if !isVerificationTool(name) {
+		return nil, fmt.Errorf("verification only asks system tools (%s); %q is not one", verificationToolNames(), name)
+	}
 	reader, ok := r.caps[name]
 	if !ok {
 		return nil, fmt.Errorf("this runtime has no capability %q", name)
@@ -548,6 +572,9 @@ func checkAuthority(label string, criterion Criterion) error {
 	f := activeCapabilityFactory()
 	if f == nil || !f.Has(check.Capability) {
 		return fmt.Errorf("completion contract %s: the check names capability %q, which this runtime does not have", label, check.Capability)
+	}
+	if !isVerificationTool(check.Capability) {
+		return fmt.Errorf("completion contract %s: the check names %q, which is not a system verification tool (those are %s)", label, check.Capability, verificationToolNames())
 	}
 	declared, hasSignature := declaredInputsOf(check.Capability)
 	for _, key := range sortedInputKeys(check.Inputs) {

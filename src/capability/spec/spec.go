@@ -35,3 +35,11 @@ type Declared interface {
 	Inputs() []Field
 	Outputs() []Field
 }
+
+// SystemCheck marks a capability as a system verification tool. The verifier
+// will only ask these (plus the World Model). Coverage grows by adding another
+// tool that implements this — not by treating a worker report or a review as
+// truth. The empty method is the mark; it carries no behaviour.
+type SystemCheck interface {
+	SystemCheck()
+}

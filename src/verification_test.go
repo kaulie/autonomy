@@ -251,10 +251,9 @@ func TestVerificationReaderIsCalledWithTheTaskID(t *testing.T) {
 	}
 }
 
-// TestVerifyDoneJudgesCodeEditEvidence: the default software-development contract
-// binds code_edit's pr_url / summary with expect.exists and no check. A PR URL
-// is observed by pull_request.status (existence and state, not review opinions);
-// a summary is the report itself, so a filled slot is the fact.
+// TestVerifyDoneJudgesCodeEditEvidence: a PR URL is checked by the system tool
+// pr.check (PR_Check). A worker summary has no system tool, so expect.exists
+// on it is inconclusive — coverage grows by adding a tool, not by trusting the report.
 func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -265,18 +264,18 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 		wantMethod string
 	}{
 		{
-			name: "pr_url exists is answered by pull_request.status",
+			name: "pr_url exists is answered by pr.check",
 			criterion: `{"name":"C1","requirement":"the pull request was reported",` +
 				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true}}`,
 			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
 			reader: &fakeVerificationReader{
-				name:    "pull_request.status",
+				name:    "pr.check",
 				inputs:  []spec.Field{{Name: "pr", Required: true}},
 				outputs: []spec.Field{{Name: "exists"}, {Name: "state"}},
 				answer:  map[string]string{"exists": "true", "state": "open"},
 			},
 			wantResult: verificationPass,
-			wantMethod: "registry:pull_request.status",
+			wantMethod: "registry:pr.check",
 		},
 		{
 			name: "pr_url exists fails when the host has no such pull request",
@@ -284,21 +283,30 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true}}`,
 			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
 			reader: &fakeVerificationReader{
-				name:    "pull_request.status",
+				name:    "pr.check",
 				inputs:  []spec.Field{{Name: "pr", Required: true}},
 				outputs: []spec.Field{{Name: "exists"}},
 				answer:  map[string]string{"exists": "false"},
 			},
 			wantResult: verificationFail,
-			wantMethod: "registry:pull_request.status",
+			wantMethod: "registry:pr.check",
 		},
 		{
-			name: "summary exists is the filled report slot",
+			name: "summary has no system tool so exists is inconclusive",
 			criterion: `{"name":"C3","requirement":"the coding agent reported what it changed",` +
 				`"evidence":{"source":"step:implement.output.summary"},"expect":{"exists":true}}`,
 			output:     `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"moved dashboard HTML into templates"}`,
-			wantResult: verificationPass,
-			wantMethod: "slot",
+			wantResult: verificationInconclusive,
+			wantMethod: verificationMethodNone,
+		},
+		{
+			name: "a review is not a verification tool",
+			criterion: `{"name":"C1","requirement":"the pull request was reviewed",` +
+				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true},` +
+				`"check":{"capability":"pull_request.review","inputs":{"pr":{"source":"step:implement.output.pr_url"}}}}`,
+			output:     `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
+			wantResult: verificationInconclusive,
+			wantMethod: verificationMethodNone,
 		},
 	}
 	for _, tc := range cases {
@@ -343,7 +351,8 @@ func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
 			if tc.wantResult == verificationPass && runErr != nil {
 				t.Fatalf("err=%v, want the claim to hold up", runErr)
 			}
-			if tc.reader != nil && tc.reader.asked["pr"] != "https://github.com/kaulie/autonomy/pull/191" {
+			if tc.reader != nil && tc.wantResult != verificationInconclusive &&
+				tc.reader.asked["pr"] != "https://github.com/kaulie/autonomy/pull/191" {
 				t.Fatalf("the reader was asked with %v, want the PR URL", tc.reader.asked)
 			}
 		})
@@ -462,5 +471,28 @@ func TestVerifyDoneJudgesWorldCriteria(t *testing.T) {
 				t.Fatal("a claim that did not hold up was accepted")
 			}
 		})
+	}
+}
+
+func TestValidateCompletionContractRefusesAReviewAsCheck(t *testing.T) {
+	factory := capability.NewFactory()
+	capability.RegisterDefaults(factory, capability.Deps{})
+	prev := _autonomy
+	_autonomy = &Autonomy{CapabilityFactory: factory}
+	t.Cleanup(func() { _autonomy = prev })
+
+	contract, err := parseCompletionContract(json.RawMessage(`[
+		{"name":"C1","requirement":"the pull request exists",
+		 "evidence":{"source":"step:implement.output.pr_url"},
+		 "expect":{"exists":true},
+		 "check":{"capability":"pull_request.review",
+		          "inputs":{"pr":{"source":"step:implement.output.pr_url"}}}}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateCompletionContract(contract, nil)
+	if err == nil || !strings.Contains(err.Error(), "not a system verification tool") {
+		t.Fatalf("err=%v, want review refused as a verification tool", err)
 	}
 }

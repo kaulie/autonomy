@@ -165,6 +165,8 @@ type Monitor struct {
 
 func (Monitor) Name() string { return Name }
 
+func (Monitor) SystemCheck() {}
+
 func (Monitor) Domain() string { return Domain }
 
 func (Monitor) Provider() string { return Provider }

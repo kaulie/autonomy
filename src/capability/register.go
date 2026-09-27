@@ -35,10 +35,9 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// credential (GITHUB_TOKEN / GH_TOKEN, else the gh CLI's own — see
 	// github_credential.go) plus GITHUB_API_URL, and no host hook is needed.
 	f.Register(sd.PullRequestReview{})
-	// pull_request.status is the verification read: does this PR exist, and
-	// what state is it in. It does not fetch review opinions — that stays on
-	// pull_request.review.
-	f.Register(sd.PullRequestStatus{})
+	// pr.check (PR_Check) is the system verification tool: does this PR exist,
+	// and what state is it in. Review opinions stay on pull_request.review.
+	f.Register(sd.PRCheck{})
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})
