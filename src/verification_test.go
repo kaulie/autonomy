@@ -251,6 +251,92 @@ func TestVerificationReaderIsCalledWithTheTaskID(t *testing.T) {
 	}
 }
 
+// TestVerifyDoneJudgesCodeEditEvidence: the default software-development contract
+// binds code_edit's pr_url / summary with expect.exists and no check. A PR URL
+// has an authoritative reader (pull_request.review); a summary is the report
+// itself, so a filled slot is the fact. task-00b9478435f84938 / overseas
+// task-095a5b1b5a6ea49f failed both as inconclusive before this.
+func TestVerifyDoneJudgesCodeEditEvidence(t *testing.T) {
+	cases := []struct {
+		name       string
+		criterion  string
+		output     string
+		reader     *fakeVerificationReader
+		wantResult string
+		wantMethod string
+	}{
+		{
+			name: "pr_url exists is answered by pull_request.review",
+			criterion: `{"name":"C1","requirement":"the pull request was reported",` +
+				`"evidence":{"source":"step:implement.output.pr_url"},"expect":{"exists":true}}`,
+			output: `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"done"}`,
+			reader: &fakeVerificationReader{
+				name:    "pull_request.review",
+				inputs:  []spec.Field{{Name: "pr", Required: true}},
+				outputs: []spec.Field{{Name: "state"}, {Name: "title"}},
+				answer:  map[string]string{"state": "open", "title": "dashboard templates"},
+			},
+			wantResult: verificationPass,
+			wantMethod: "registry:pull_request.review",
+		},
+		{
+			name: "summary exists is the filled report slot",
+			criterion: `{"name":"C3","requirement":"the coding agent reported what it changed",` +
+				`"evidence":{"source":"step:implement.output.summary"},"expect":{"exists":true}}`,
+			output:     `{"pr_url":"https://github.com/kaulie/autonomy/pull/191","summary":"moved dashboard HTML into templates"}`,
+			wantResult: verificationPass,
+			wantMethod: "slot",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := executionTestStore(t)
+			prevAuto := _autonomy
+			factory := capability.NewFactory()
+			if tc.reader != nil {
+				factory.Register(tc.reader)
+			}
+			_autonomy = &Autonomy{CapabilityFactory: factory}
+			t.Cleanup(func() { _autonomy = prevAuto })
+
+			task := &Task{ID: "task-code-edit-verify"}
+			planID, err := store.CreateExecutionPlan(ExecutionPlan{TaskID: task.ID, DecisionType: "plan", Cycle: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AppendExecutionStep(ExecutionStep{
+				PlanID: planID, TaskID: task.ID, Cycle: 1, Idx: 1, Name: "implement",
+				Capability: "code_edit", Status: "ok",
+				Output: tc.output,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			pinCriterion(t, task.ID, tc.criterion)
+
+			rt := NewRuntime(NewAgentFactory(), factory.GetAll()...)
+			runErr := rt.verifyDone(DecisionContext{Task: task, Cycle: 2}, planID)
+
+			verdicts := lastVerdicts(t, store, task.ID)
+			if len(verdicts) != 1 {
+				t.Fatalf("verdicts=%d, want one", len(verdicts))
+			}
+			verdict := verdicts[0]
+			if verdict.Result != tc.wantResult {
+				t.Fatalf("result=%q (%s), want %q", verdict.Result, verdict.Reason, tc.wantResult)
+			}
+			if verdict.Method != tc.wantMethod {
+				t.Fatalf("method=%q, want %q", verdict.Method, tc.wantMethod)
+			}
+			if tc.wantResult == verificationPass && runErr != nil {
+				t.Fatalf("err=%v, want the claim to hold up", runErr)
+			}
+			if tc.reader != nil && tc.reader.asked["pr"] != "https://github.com/kaulie/autonomy/pull/191" {
+				t.Fatalf("the reader was asked with %v, want the PR URL", tc.reader.asked)
+			}
+		})
+	}
+}
+
 // TestVerifyDoneWithNoPinnedContract: nothing pinned is not a pass and not a crash — a
 // `done` has nothing to be verified against, which is what it is told.
 func TestVerifyDoneWithNoPinnedContract(t *testing.T) {
