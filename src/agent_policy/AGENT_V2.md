@@ -285,16 +285,13 @@ start, the way you want to be held to them.
 - `expect` — `{"exists": true}`, or `{"field": "…", "equals": "…"}`: the field of the
   authoritative answer and the value it must have. A World Model slot already names the
   field it reads, so over one you may write `{"equals": "…"}` alone.
-- `check` — optional: which capability to ask about that evidence, when the runtime has no
-  reader of its own for it. This is not a verification plan — it says where the truth
-  about that object lives. It has to be a **read-only** capability, and `expect.field` has
-  to be one it reports. The runtime already knows `service.deploy` →
-  `deployment.monitor` and `code_edit.pr_url` → `pull_request.status`.
-  `pull_request.status` answers whether the pull request exists and its
-  state (`open` / `closed` / merged). `pull_request.review` is for review
-  opinions and is not the verification reader. A coding agent's `summary`
-  with `expect.exists` is judged by the slot being filled (the report is
-  the object).
+- `check` — optional: which **system verification tool** to ask, when the runtime
+  has no reader of its own for that evidence. It must be a tool the system
+  already provides (`system_check` in Constructs). The runtime already knows
+  `service.deploy` → `deployment.monitor` and `code_edit.pr_url` → `pr.check`
+  (PR_Check: exists / open / closed / merged). `pull_request.review` is
+  opinions, not a check. A worker `summary` has no tool yet — that criterion
+  is inconclusive until one is added. Do not invent a check; add a tool.
 
 What follows from it:
 
@@ -442,7 +439,7 @@ The first step's `instruction` is a literal you write; `pr` is bound to the outp
 `edit` is expected to report — that is the difference between a value you have and
 a value that does not exist yet. `pull_request.review` only reads the pull
 request's reviews and never merges it — a human must approve and land it.
-Verification of the same URL is `pull_request.status` (exists / open / closed /
+Verification of the same URL is `pr.check` (PR_Check: exists / open / closed /
 merged), not this review step.
 
 `expected_effect` describes the intended World State change. It must not be presented as a fact unless supported by capability semantics or prior observations.

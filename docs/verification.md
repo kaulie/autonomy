@@ -50,9 +50,9 @@ World Model / 只读能力 → pass / fail / inconclusive
 ## 权威来源（谁来回答）
 
 - **World Model**：本地 asset 的 `kind` / `state`，runtime 直接读。这类证据的槽本身就是读取（`world_model:asset.<id>.<field>`），不需要再去问谁。
-- **只读能力**：证据的**产出者**说明它是什么东西（`service.deploy` 的 output 是一条 pipeline），运行时的 `verificationReaders` 表说明这类证据该问谁、用什么 input 问（`service.deploy → deployment.monitor`；`code_edit.pr_url → pull_request.status`）。`pull_request.status` 只回答「PR 是否真实存在、当前 open/closed/merged」；审查意见走 `pull_request.review`，不参与判定。表里没有、判据也没写 `check` → **inconclusive**。例外：`expect.exists` 绑在 worker 的 `summary` 上时，槽里有非空报告就是事实（报告没有外部对象可问）。
+- **系统验证工具**：Verifier **只**问系统提供的 check（`verificationTools` / Constructs 上的 `system_check`）。现在是 `pr.check`（PR_Check：这条 PR 是否真实、open/closed/merged）和 `deployment.monitor`（部署事实）。`verificationReaders` 说明某类证据默认问谁（`service.deploy → deployment.monitor`；`code_edit.pr_url → pr.check`）。审查意见走 `pull_request.review`，不在工具表里，不能拿来判定。表里没有、也没有点名一个系统工具 → **inconclusive**。覆盖不够就加工具，不把 worker 的 `summary` 或审查当真相。
 - **问的方式和 step 调用同一条路**：runtime 用它调用能力的方式调用读者 —— 判据绑定的入参原样传下去，不额外添加、不覆盖任何绑定；只有那个「runtime 自己只补一个入参」的 `task_id` 照样补给它（见 [execution-step.md](execution-step.md) §Runtime Responsibility）。所以一个会 acquire worker 的读者（`deployment.monitor` 就是）产出的 agent 行与 `reason_turns` 行**挂在同一条 Task 下**：验证所问的对象和产出它的那一步，属于同一个任务。
-- **Planner 指定的 `check`**：该域还没有注册 reader 时，判据可以直接写明权威能力。
+- **Planner 指定的 `check`**：该域还没有默认 reader 时，可以点名一个**已经在系统工具表里**的 check。不能点名审查或干活的能力。
 
 ## 判定与用途
 
@@ -72,7 +72,7 @@ World Model / 只读能力 → pass / fail / inconclusive
 - `completion_contract`：一条判据一行，**首轮写一次**（`INSERT OR IGNORE`）——「合同不可改」是 schema 的事实，不是谁记得去检查。
 - 读法：`GET /api/tasks/{task_id}` 的 `verification`（`contract` + `verdicts`，[http-api.md](http-api.md)）——
   和这张表同一份事实，页面不必读库。
-- `verification`：一次判定一行，只追加：`requirement` / `method`（`world_model`、`registry:<能力>`、`declared:<能力>`、`slot`）/ `evidence`（槽 + 解析出的 reference）/ `expected` / `observed` / `result` / `reason`。
+- `verification`：一次判定一行，只追加：`requirement` / `method`（`world_model`、`registry:<系统工具>`、`declared:<系统工具>`）/ `evidence`（槽 + 解析出的 reference）/ `expected` / `observed` / `result` / `reason`。
 
 两张表的形状见 [execution-step.md](execution-step.md)。
 
@@ -90,12 +90,13 @@ World Model / 只读能力 → pass / fail / inconclusive
 2. Fail / Inconclusive 必须可驱动再规划，而不是被吞掉。
 3. Verification 不偷偷改写 Contract：合同在第一轮被钉住，之后的运行只对照它 —— 一个 `done` 不能挑一份对自己有利的标准。
 4. Verifier 不找证据：槽是 Planner 绑的、Runtime 填的；找不到就是 inconclusive，不是「我找找有没有别的」。
-5. Verifier 不改世界：`check` 必须是只读能力。
+5. Verifier 不改世界：`check` 必须是系统验证工具（只读）。
 6. 判不了的判据 → inconclusive，绝不默认 pass；一个任务只要有一条判不了，它就不能以 `completed` 结束。
+7. Verifier 只用系统提供的工具；缺覆盖就加工具，不借用执行能力、审查或自报。
 
 ## 还没做的（说清楚边界）
 
-- **能回答的域很窄**：本地 World Model 的 `state` / `kind`，部署事实（`deployment.monitor`），以及 `code_edit` 开出的 PR（`pull_request.status`）。artifact registry、service registry、health check 之类还没有对应的权威读取能力 —— 没有权威来源的事实一律 `inconclusive`，并把这个原因交给 Planner。
+- **能回答的域很窄**：本地 World Model 的 `state` / `kind`，部署事实（`deployment.monitor`），以及 `code_edit` 开出的 PR（`pr.check`）。artifact registry、service registry、health check、worker `summary` 之类还没有对应的系统工具 —— 没有工具的事实一律 `inconclusive`，并把这个原因交给 Planner；下一步是加工具，不是放宽判定。
 - **World Model 还没有 provenance / state transition**：状态证据只有当前值，还没有「谁在什么时候观察到的、变化前后是什么」。
-- **`check` 由 Planner 显式指定**是过渡口子：registry 长全后应当收掉。
+- **`check` 只能点名系统工具**：不能拿 `pull_request.review` / `code_edit` 顶上。
 - **agent-backed verifier**（确定性判不了时用独立 agent 判断）、**human**（`need_input`）、**Trust 回流**：都还没做（见 [trust.md](trust.md)）。

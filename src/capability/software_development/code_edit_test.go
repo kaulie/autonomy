@@ -160,7 +160,7 @@ func TestCodeEditDelegatesToTheWorkersOwnWorkspace(t *testing.T) {
 
 // TestCodeEditReportsThePullRequestItsWorkerNames: the URL the worker is asked to
 // report becomes the step's own output, so the next step can be handed a pull
-// request instead of re-reading prose for it (pull_request.review takes it as
+// request instead of re-reading prose for it (pr.check and pull_request.review take it as
 // "pr", and also answers to "pr_url" — see its own test).
 func TestCodeEditReportsThePullRequestItsWorkerNames(t *testing.T) {
 	useRepoPrompt(t)

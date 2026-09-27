@@ -11,21 +11,21 @@ import (
 )
 
 const (
-	// StatusName is the verification capability for one pull request: does it
-	// exist, and what state is it in. It is not a review — that is
-	// pull_request.review.
-	StatusName     = "pull_request.status"
-	StatusDomain   = ReviewDomain
-	StatusProvider = ReviewProvider
+	// CheckName is PR_Check: the system verification tool for one pull request.
+	// It answers whether that object is real on the git host and what state it
+	// is in. It is not a review — that is pull_request.review.
+	CheckName     = "pr.check"
+	CheckDomain   = ReviewDomain
+	CheckProvider = ReviewProvider
 )
 
-// PullRequestStatus is the authoritative read for verification: given a
-// pull-request URL it answers whether that object is real on the git host and
-// what GitHub currently says about it (open / closed, draft, merged).
+// PRCheck is the system-level authenticity check for a pull request. Given a
+// URL it asks the git host whether that object exists and what GitHub currently
+// says about it (open / closed, draft, merged).
 //
-// It never lists reviews, never comments, and never merges. Those belong to
-// pull_request.review (opinions) and to a human (landing).
-type PullRequestStatus struct {
+// The verifier is the only caller that should use it as truth. It never lists
+// reviews, never comments, and never merges.
+type PRCheck struct {
 	APIURL      string
 	Token       string
 	GhAuthToken GhAuthTokenFn
@@ -33,24 +33,26 @@ type PullRequestStatus struct {
 	HTTPClient  *http.Client
 }
 
-func (PullRequestStatus) Name() string { return StatusName }
+func (PRCheck) Name() string { return CheckName }
 
-func (PullRequestStatus) Domain() string { return StatusDomain }
+func (PRCheck) Domain() string { return CheckDomain }
 
-func (PullRequestStatus) Provider() string { return StatusProvider }
+func (PRCheck) Provider() string { return CheckProvider }
 
-func (PullRequestStatus) Description() string {
-	return `observe whether one pull request exists and what state it is in — not a review. Name it by URL: "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted). output: {"exists","valid","state","draft","merged","number","pr","title","repo"} — exists/valid are "true" when the host has that pull request; state is "open" / "closed"; merged is what the host reports. This capability does not read review opinions.`
+func (PRCheck) SystemCheck() {}
+
+func (PRCheck) Description() string {
+	return `PR_Check: the system verification tool for one pull request — does it exist, and what state is it in. Not a review. Name it by URL: "pr":"https://<host>/owner/name/pull/43" ("pr_url"/"pull_request" work too; "owner/name#43" and a bare "43" with "repo" are accepted). output: {"exists","valid","state","draft","merged","number","pr","title","repo"} — exists/valid are "true" when the host has that pull request; state is "open" / "closed"; merged is what the host reports. This capability does not read review opinions.`
 }
 
-func (PullRequestStatus) Inputs() []spec.Field {
+func (PRCheck) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Required: true, Description: "the pull request to observe: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository"},
+		{Name: "pr", Aliases: []string{"pr_url", "pull_request"}, Required: true, Description: "the pull request to check: https://<host>/owner/name/pull/<number>, owner/name#<number>, or <number> when repo names the repository"},
 		{Name: "repo", Aliases: []string{"repository"}, Description: "owner/name, when pr does not name the repository; it must not contradict pr"},
 	}
 }
 
-func (PullRequestStatus) Outputs() []spec.Field {
+func (PRCheck) Outputs() []spec.Field {
 	return []spec.Field{
 		{Name: "exists", Description: `"true" when the git host has this pull request, "false" when it does not`},
 		{Name: "valid", Description: `"true" when the pull request is a real object on the host (same as exists)`},
@@ -64,7 +66,7 @@ func (PullRequestStatus) Outputs() []spec.Field {
 	}
 }
 
-func (c PullRequestStatus) review() PullRequestReview {
+func (c PRCheck) review() PullRequestReview {
 	return PullRequestReview{
 		APIURL:      c.APIURL,
 		Token:       c.Token,
@@ -74,18 +76,18 @@ func (c PullRequestStatus) review() PullRequestReview {
 	}
 }
 
-func (c PullRequestStatus) Run(in map[string]string) (map[string]string, error) {
+func (c PRCheck) Run(in map[string]string) (map[string]string, error) {
 	named, err := parsePullReference(firstNonEmpty(in[inputPull], in[inputPullURL], in[inputPullAlt]))
 	if err != nil {
 		return nil, err
 	}
 	if named.number == 0 {
-		return nil, fmt.Errorf("%s: missing pr (pass \"pr\":\"https://<host>/owner/name/pull/<number>\")", StatusName)
+		return nil, fmt.Errorf("%s: missing pr (pass \"pr\":\"https://<host>/owner/name/pull/<number>\")", CheckName)
 	}
 	repo := normalizeRepo(firstNonEmpty(in["repo"], in["repository"], c.Repo))
 	if named.repo != "" {
 		if repo != "" && !strings.EqualFold(repo, named.repo) {
-			return nil, fmt.Errorf("%s: the pull request url names %s but \"repo\" says %s", StatusName, named.repo, repo)
+			return nil, fmt.Errorf("%s: the pull request url names %s but \"repo\" says %s", CheckName, named.repo, repo)
 		}
 		repo = named.repo
 	}
@@ -93,7 +95,7 @@ func (c PullRequestStatus) Run(in map[string]string) (map[string]string, error) 
 		repo = normalizeRepo(firstNonEmpty(os.Getenv(EnvRepository), os.Getenv(EnvGitRepoURL)))
 	}
 	if repo == "" {
-		return nil, fmt.Errorf("%s: missing repository (pass \"repo\":\"owner/name\", or set %s / %s)", StatusName, EnvRepository, EnvGitRepoURL)
+		return nil, fmt.Errorf("%s: missing repository (pass \"repo\":\"owner/name\", or set %s / %s)", CheckName, EnvRepository, EnvGitRepoURL)
 	}
 
 	reader := c.review()
@@ -119,7 +121,7 @@ func (c PullRequestStatus) Run(in map[string]string) (map[string]string, error) 
 				"repo":   repo,
 			}, nil
 		}
-		return nil, fmt.Errorf("%s: %w", StatusName, err)
+		return nil, fmt.Errorf("%s: %w", CheckName, err)
 	}
 	return map[string]string{
 		"exists": "true",

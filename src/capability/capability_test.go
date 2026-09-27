@@ -43,7 +43,7 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if len(all) != 6 {
 		t.Fatalf("GetAll len=%d want 6", len(all))
 	}
-	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pull_request.status", deployment.Name} {
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", deployment.Name} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
 		}
@@ -64,8 +64,11 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if !strings.Contains(got, `"name": "pull_request.review"`) {
 		t.Fatalf("expected pull_request.review in constructs: %q", got)
 	}
-	if !strings.Contains(got, `"name": "pull_request.status"`) {
-		t.Fatalf("expected pull_request.status in constructs: %q", got)
+	if !strings.Contains(got, `"name": "pr.check"`) {
+		t.Fatalf("expected pr.check in constructs: %q", got)
+	}
+	if !strings.Contains(got, `"system_check": true`) {
+		t.Fatalf("expected system_check on verification tools: %q", got)
 	}
 	out, err := f.Get("asset.change").Run(map[string]string{"target": "1"})
 	if err != nil {
@@ -115,9 +118,10 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	capability.RegisterDefaults(f, capability.Deps{Assets: memAssets{"1": "alive"}})
 
 	var constructs []struct {
-		Name   string       `json:"name"`
-		Input  []spec.Field `json:"input"`
-		Output []spec.Field `json:"output"`
+		Name        string       `json:"name"`
+		SystemCheck bool         `json:"system_check"`
+		Input       []spec.Field `json:"input"`
+		Output      []spec.Field `json:"output"`
 	}
 	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
 		t.Fatalf("constructs are not the documented JSON: %v", err)
@@ -127,11 +131,19 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	}
 	inputs := map[string][]spec.Field{}
 	outputs := map[string][]spec.Field{}
+	systemCheck := map[string]bool{}
 	for _, c := range constructs {
 		if len(c.Input) == 0 || len(c.Output) == 0 {
 			t.Errorf("%s arrives with %d input(s) / %d output(s)", c.Name, len(c.Input), len(c.Output))
 		}
 		inputs[c.Name], outputs[c.Name] = c.Input, c.Output
+		systemCheck[c.Name] = c.SystemCheck
+	}
+	if !systemCheck["pr.check"] || !systemCheck["deployment.monitor"] {
+		t.Fatalf("system verification tools must be marked: %v", systemCheck)
+	}
+	if systemCheck["pull_request.review"] || systemCheck["code_edit"] {
+		t.Fatalf("review and work capabilities are not verification tools: %v", systemCheck)
 	}
 
 	// Where a plan step goes wrong when the declaration is missing: the field
@@ -149,7 +161,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		// task-15's shape: name the pull request by its url, read its reviews
 		// (the capability never merges — a human does that).
 		{"pull_request.review", "pr", "pr_url", false, "reviews"},
-		{"pull_request.status", "pr", "pr_url", true, "exists"},
+		{"pr.check", "pr", "pr_url", true, "exists"},
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},

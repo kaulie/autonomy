@@ -9,7 +9,7 @@ import (
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
-func TestPullRequestStatusObservesExistenceAndState(t *testing.T) {
+func TestPRCheckObservesExistenceAndState(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -18,7 +18,7 @@ func TestPullRequestStatusObservesExistenceAndState(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/reviews") {
-			t.Error("status capability must not list reviews")
+			t.Error("PR_Check must not list reviews")
 		}
 		if !strings.HasSuffix(r.URL.Path, "/pulls/70") {
 			http.NotFound(w, r)
@@ -28,7 +28,7 @@ func TestPullRequestStatusObservesExistenceAndState(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := sd.PullRequestStatus{APIURL: srv.URL, Token: "test-token"}
+	c := sd.PRCheck{APIURL: srv.URL, Token: "test-token"}
 	out, err := c.Run(map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/70"})
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestPullRequestStatusObservesExistenceAndState(t *testing.T) {
 		t.Fatalf("out=%v", out)
 	}
 	if _, ok := out["reviews"]; ok {
-		t.Fatalf("status must not report reviews: %v", out)
+		t.Fatalf("PR_Check must not report reviews: %v", out)
 	}
 	for _, p := range paths {
 		if strings.Contains(p, "/reviews") {
@@ -49,13 +49,13 @@ func TestPullRequestStatusObservesExistenceAndState(t *testing.T) {
 	}
 }
 
-func TestPullRequestStatusMissingPullRequest(t *testing.T) {
+func TestPRCheckMissingPullRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
 
-	c := sd.PullRequestStatus{APIURL: srv.URL, Token: "test-token"}
+	c := sd.PRCheck{APIURL: srv.URL, Token: "test-token"}
 	out, err := c.Run(map[string]string{"pr": "https://github.com/kaulie/autonomy/pull/404"})
 	if err != nil {
 		t.Fatalf("err=%v, want exists=false rather than an error", err)
@@ -68,8 +68,8 @@ func TestPullRequestStatusMissingPullRequest(t *testing.T) {
 	}
 }
 
-func TestPullRequestStatusRequiresAPullRequest(t *testing.T) {
-	c := sd.PullRequestStatus{Token: "test-token"}
+func TestPRCheckRequiresAPullRequest(t *testing.T) {
+	c := sd.PRCheck{Token: "test-token"}
 	if _, err := c.Run(map[string]string{}); err == nil {
 		t.Fatal("empty input must be refused")
 	}
