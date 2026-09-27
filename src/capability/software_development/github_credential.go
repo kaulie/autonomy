@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/githubauth"
 )
 
 // Where the credential for a GitHub call comes from, in order: the caller's own
@@ -55,6 +57,28 @@ func (c PullRequestReview) credential(explicit string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// tokenForRepo prefers a GitHub App installation token scoped to this
+// repository when the runtime has GITHUB_APP_* — that is the per-account
+// path. Host GITHUB_TOKEN / gh login stay as fallback until the App is set.
+func (c PullRequestReview) tokenForRepo(repo string) (string, error) {
+	if token := strings.TrimSpace(c.Token); token != "" {
+		return token, nil
+	}
+	cfg, err := githubauth.FromEnv()
+	if err != nil {
+		return "", err
+	}
+	if cfg.Configured() {
+		token, _, err := cfg.Mint(context.Background(), []string{repo})
+		if err != nil {
+			return "", err
+		}
+		return token, nil
+	}
+	token, _ := c.credential("")
+	return token, nil
 }
 
 // noCredential is the refusal when no source had a token: it names every place one

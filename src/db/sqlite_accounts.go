@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS provider_accounts (
   base_url       TEXT NOT NULL DEFAULT '',
   model          TEXT NOT NULL DEFAULT '',
   workspace_root TEXT NOT NULL DEFAULT '',
+  git_repos      TEXT NOT NULL DEFAULT '',
+  git_token      TEXT NOT NULL DEFAULT '',
   enabled        INTEGER NOT NULL DEFAULT 1,
   is_default     INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
@@ -31,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_provider_accounts_harness
   ON provider_accounts(harness, vendor, enabled);
 `
 
-const accountCols = `account_id, harness, vendor, label, api_key, base_url, model, workspace_root, enabled, is_default, created_at, updated_at`
+const accountCols = `account_id, harness, vendor, label, api_key, base_url, model, workspace_root, git_repos, git_token, enabled, is_default, created_at, updated_at`
 
 // accountsWorkspaceIndex makes "one account per root" a fact of the schema as well as a check
 // in the writes below. It is created separately from the table because an older database may
@@ -63,12 +65,14 @@ func scanAccount(sc interface{ Scan(...any) error }) (Account, error) {
 	var (
 		account          Account
 		created, updated string
+		gitRepos         string
 	)
 	if err := sc.Scan(&account.ID, &account.Harness, &account.Vendor, &account.Label, &account.APIKey,
-		&account.BaseURL, &account.Model, &account.WorkspaceRoot, &account.Enabled, &account.IsDefault,
-		&created, &updated); err != nil {
+		&account.BaseURL, &account.Model, &account.WorkspaceRoot, &gitRepos, &account.GitToken,
+		&account.Enabled, &account.IsDefault, &created, &updated); err != nil {
 		return Account{}, err
 	}
+	account.GitRepos = DecodeGitRepos(gitRepos)
 	account.CreatedAt = parseTime(created)
 	account.UpdatedAt = parseTime(updated)
 	return account, nil
@@ -160,10 +164,10 @@ func (s *SQLiteStore) CreateAccount(account Account) (Account, error) {
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO provider_accounts (`+accountCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO provider_accounts (`+accountCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		account.ID, account.Harness, account.Vendor, account.Label, account.APIKey, account.BaseURL,
-		account.Model, account.WorkspaceRoot, account.Enabled, account.IsDefault,
-		formatTime(account.CreatedAt), formatTime(account.UpdatedAt)); err != nil {
+		account.Model, account.WorkspaceRoot, EncodeGitRepos(account.GitRepos), account.GitToken,
+		account.Enabled, account.IsDefault, formatTime(account.CreatedAt), formatTime(account.UpdatedAt)); err != nil {
 		return Account{}, fmt.Errorf("create account: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -205,6 +209,12 @@ func (s *SQLiteStore) UpdateAccount(id string, patch AccountPatch) (Account, err
 	if patch.WorkspaceRoot != nil {
 		next.WorkspaceRoot = *patch.WorkspaceRoot
 	}
+	if patch.GitRepos != nil {
+		next.GitRepos = *patch.GitRepos
+	}
+	if patch.GitToken != nil {
+		next.GitToken = *patch.GitToken
+	}
 	if patch.Enabled != nil {
 		next.Enabled = *patch.Enabled
 	}
@@ -235,9 +245,10 @@ func (s *SQLiteStore) UpdateAccount(id string, patch AccountPatch) (Account, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE provider_accounts SET harness = ?, vendor = ?, label = ?, api_key = ?, base_url = ?,
-		 model = ?, workspace_root = ?, enabled = ?, is_default = ?, updated_at = ? WHERE account_id = ?`,
+		 model = ?, workspace_root = ?, git_repos = ?, git_token = ?, enabled = ?, is_default = ?, updated_at = ? WHERE account_id = ?`,
 		next.Harness, next.Vendor, next.Label, next.APIKey, next.BaseURL, next.Model,
-		next.WorkspaceRoot, next.Enabled, next.IsDefault, formatTime(next.UpdatedAt), next.ID); err != nil {
+		next.WorkspaceRoot, EncodeGitRepos(next.GitRepos), next.GitToken, next.Enabled, next.IsDefault,
+		formatTime(next.UpdatedAt), next.ID); err != nil {
 		return Account{}, fmt.Errorf("update account: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

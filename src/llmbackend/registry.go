@@ -67,11 +67,13 @@ type Harness struct {
 // Creds is what a probe (and a session) may need to reach a provider: the credential a pool
 // account carries, not an environment variable.
 type Creds struct {
-	Harness string
-	Vendor  string
-	APIKey  string
-	BaseURL string
-	Model   string
+	Harness  string
+	Vendor   string
+	APIKey   string
+	BaseURL  string
+	Model    string
+	GitToken string
+	GitRepos []string
 }
 
 // ProbeResult says what a probe found: what it did (Load: bridge handshaken; Live: a turn was

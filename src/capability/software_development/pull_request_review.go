@@ -188,7 +188,10 @@ func (c PullRequestReview) Run(in map[string]string) (map[string]string, error) 
 	if repo == "" {
 		return nil, fmt.Errorf("%s: missing repository (pass \"repo\":\"owner/name\", or set %s / %s)", ReviewName, EnvRepository, EnvGitRepoURL)
 	}
-	token, _ := c.credential(c.Token)
+	token, err := c.tokenForRepo(repo)
+	if err != nil {
+		return nil, err
+	}
 	if token == "" {
 		return nil, noCredential()
 	}

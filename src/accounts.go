@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaulie/autonomy/src/githubauth"
 	"github.com/kaulie/autonomy/src/llmbackend"
 )
 
@@ -40,7 +41,13 @@ type Account struct {
 	Model string `json:"model,omitempty"`
 	// WorkspaceRoot is where agents on this account work ("" = the runtime's default).
 	WorkspaceRoot string `json:"agentRootWorkspace,omitempty"`
-	Enabled       bool   `json:"enabled"`
+	// GitRepos is the owner/name list this account may push to. Empty = no extra
+	// restriction beyond the GitHub App installation (src/githubauth).
+	GitRepos []string `json:"gitRepos,omitempty"`
+	// GitToken is an optional fine-grained PAT for this account. Empty = mint a
+	// one-hour GitHub App token when the runtime has GITHUB_APP_*. Never rendered.
+	GitToken string `json:"-"`
+	Enabled  bool   `json:"enabled"`
 	// IsDefault makes this the pool's first choice for its harness.
 	IsDefault bool      `json:"isDefault"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -112,6 +119,8 @@ func NormalizeAccount(account Account) (Account, error) {
 	account.APIKey = strings.TrimSpace(account.APIKey)
 	account.BaseURL = strings.TrimSpace(account.BaseURL)
 	account.Model = strings.TrimSpace(account.Model)
+	account.GitRepos = githubauth.ParseRepos(strings.Join(account.GitRepos, ","))
+	account.GitToken = strings.TrimSpace(account.GitToken)
 	// The workspace root is exclusive: cleaned, so "…/a/" and "…/a" are the same claim, and
 	// empty is itself a claim ("the runtime's default root") that only one account may make
 	// (src/db/sqlite_accounts.go).
@@ -157,6 +166,16 @@ func MaskAPIKey(apiKey string) string {
 		return "••••"
 	}
 	return raw[:4] + "…" + raw[len(raw)-4:]
+}
+
+// EncodeGitRepos stores the allowlist as a single TEXT column.
+func EncodeGitRepos(repos []string) string {
+	return strings.Join(githubauth.ParseRepos(strings.Join(repos, ",")), ",")
+}
+
+// DecodeGitRepos reads that TEXT column back.
+func DecodeGitRepos(raw string) []string {
+	return githubauth.ParseRepos(raw)
 }
 
 // NewAccountID mints one account id.

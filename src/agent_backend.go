@@ -1,11 +1,13 @@
 package autonomy
 
-import "github.com/kaulie/autonomy/src/llmbackend"
-
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+
+	"github.com/kaulie/autonomy/src/githubauth"
+	"github.com/kaulie/autonomy/src/llmbackend"
 )
 
 // This file is the runtime's door onto llmbackend: an agent's turns go through one
@@ -68,7 +70,39 @@ func (a *Agent) ensureLLMSession(ctx context.Context, model, cwd string, mode Re
 		a.Persist()
 	}
 	id, _, err := a.llmSession().Attach(ctx, llmMode(mode))
+	if err == nil && plan.Account != nil {
+		a.installGitAuth(ctx, plan.Account.WorkspaceRoot)
+	}
 	return id, err
+}
+
+// installGitAuth writes a per-account git token under the account root so this
+// agent's workspace (and siblings) pick it up by walking up from cwd. Missing
+// App/PAT is not a refusal: the host gh login still works until one is set.
+func (a *Agent) installGitAuth(ctx context.Context, accountRoot string) {
+	if a == nil {
+		return
+	}
+	root := strings.TrimSpace(accountRoot)
+	if root == "" {
+		root = strings.TrimSpace(a.Workspace)
+	}
+	if root == "" {
+		return
+	}
+	token, src, err := githubauth.TokenFor(ctx, a.credential.GitToken, a.credential.GitRepos, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] git auth for %s: %v\n", a.Name, err)
+		return
+	}
+	if token == "" {
+		return
+	}
+	if err := githubauth.WriteAccountToken(root, token); err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] git auth write %s: %v\n", root, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[autonomy] git auth for %s from %s under %s\n", a.Name, src, root)
 }
 
 // PromptLLMStream runs one prompt on the agent's backend and reports neutral LLMEvents as
