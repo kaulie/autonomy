@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -64,7 +65,7 @@ func SwapCodexClient(next *codexsdk.Client) *codexsdk.Client {
 // account names).
 func newCodexClient(workspace string) *codexsdk.Client {
 	return codexsdk.NewClient(
-		codexsdk.WithSystemPrompt(defaultCodexSystemPrompt()),
+		codexsdk.WithSystemPrompt(codexSystemPrompt()),
 		codexsdk.WithWorkspace(workspace),
 	)
 }
@@ -80,17 +81,20 @@ func agentWorkspace() string {
 // which leaves the choice to the CLI (the Codex SDK's own behaviour).
 func CodexDefaultModel() string { return "" }
 
-// defaultCodexSystemPrompt is the thread's instructions. The Codex SDK has no system-prompt
+// codexSystemPrompt is the thread's instructions. The Codex SDK has no system-prompt
 // option, so the bridge prefixes this to a fresh thread's first turn (a resumed thread
-// already carries it); AUTONOMY_CODEX_SYSTEM_PROMPT overrides it.
-func defaultCodexSystemPrompt() string {
+// already carries it). What it says is a **file** (src/agent_policy/CODEX_SYSTEM.md,
+// docs/prompt.md) — this package keeps no prompt text — and AUTONOMY_CODEX_SYSTEM_PROMPT
+// overrides the file.
+func codexSystemPrompt() string {
 	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_SYSTEM_PROMPT")); p != "" {
 		return p
 	}
-	return "You are an autonomous coding agent running inside the autonomy runtime. " +
-		"Work inside the workspace of the current task, use the available tools to " +
-		"complete it, verify your work, and finish with a concise summary of what you " +
-		"changed and why."
+	text, err := llmbackend.PromptFile(llmbackend.CodexSystemPromptRel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] codex system prompt: %v\n", err)
+	}
+	return text
 }
 
 // CodexModeFor maps an autonomy reasoning mode onto a Codex session mode. The bridge turns

@@ -1,6 +1,7 @@
 package cline
 
 import (
+	"fmt"
 	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
@@ -52,7 +53,7 @@ func CloseClineClient() error {
 // The pool is the runtime's only source of keys — nothing here reads the environment.
 func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
-		clinesdk.WithSystemPrompt(defaultClineSystemPrompt()),
+		clinesdk.WithSystemPrompt(clineSystemPrompt()),
 		clinesdk.WithWorkspace(workspace),
 	)
 }
@@ -68,19 +69,22 @@ func agentWorkspace() string {
 // which leaves the choice to the bridge (it resolves one from the saved cline auth).
 func ClineDefaultModel() string { return "" }
 
-// defaultClineSystemPrompt is the session system prompt. The llmbackend.Cline SDK requires
-// one, and autonomy's own instructions ride on the prompt itself, so this is
-// deliberately generic; AUTONOMY_CLINE_SYSTEM_PROMPT overrides it.
-func defaultClineSystemPrompt() string {
+// clineSystemPrompt is the session system prompt. The llmbackend.Cline SDK requires one;
+// what it says is a **file** (src/agent_policy/CLINE_SYSTEM.md, docs/prompt.md) — this
+// package keeps no prompt text — and AUTONOMY_CLINE_SYSTEM_PROMPT overrides the file.
+func clineSystemPrompt() string {
 	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_SYSTEM_PROMPT")); p != "" {
 		return p
 	}
-	return "You are an autonomous coding agent running inside the autonomy runtime. " +
-		"Work inside the workspace of the current task, use the available tools to " +
-		"complete it, verify your work, and finish with a concise summary of what you " +
-		"changed and why."
+	text, err := llmbackend.PromptFile(llmbackend.ClineSystemPromptRel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] cline system prompt: %v\n", err)
+	}
+	return text
 }
 
+// The line this replaced was a Go string; the wording is a file now, so what is left here is
+// nothing (kept for the diff: the old default said the same thing as CLINE_SYSTEM.md).
 // defaultAgentBackend resolves which LLM backend acquired agents use:
 // AUTONOMY_LLM_BACKEND=cursor (default) or =cline.
 func DefaultBackend() llmbackend.Backend {

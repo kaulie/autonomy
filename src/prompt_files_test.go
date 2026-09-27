@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaulie/autonomy/src/llmbackend"
 )
 
 // The two halves of the reasoning prompt are files, and this is what that means: editing the file
@@ -62,5 +64,70 @@ func TestTheReasoningPromptIsTheFileItComesFrom(t *testing.T) {
 	}
 	if !strings.Contains(fallback, "## Decision Cycle 3") {
 		t.Fatalf("the embedded template should have been used\n%s", fallback)
+	}
+}
+
+// 别处的提示词也是文件 —— 包括以前写在 Go 里的那些：两个 harness 的 system prompt、
+// chat 模式的守卫、重启简报自己的话、探活那句。改文件 = 改它们说的话；文件不在则由
+// 构建里带的那份顶上（长跑的 agent 不该因为一个文件没在，就没话可说 / 少一道守卫）。
+func TestTheOtherPromptsAreTheFilesTheyComeFrom(t *testing.T) {
+	root := preparePolicyRoot(t)
+	t.Setenv("PROJECT_ROOT", root)
+	policyDir := filepath.Join(root, "src", "agent_policy")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(policyDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("CLINE_SYSTEM.md", "CLINE-FROM-FILE")
+	write("CODEX_SYSTEM.md", "CODEX-FROM-FILE")
+	write("PROBE.md", "PROBE-FROM-FILE")
+	write("CHAT_MODE.md", "GUARD-FROM-FILE")
+	write("BRIEFING_NOTE.md", "BRIEFING-FROM-FILE")
+	write("INTERRUPTED_NOTE.md", " INTERRUPTED-FROM-FILE")
+
+	// harness 的 system prompt：读的人（cline / codex）通过 llmbackend.PromptFile 读同一个文件。
+	for _, one := range []struct {
+		rel  string
+		want string
+	}{
+		{llmbackend.ClineSystemPromptRel, "CLINE-FROM-FILE"},
+		{llmbackend.CodexSystemPromptRel, "CODEX-FROM-FILE"},
+		{llmbackend.ProbePromptRel, "PROBE-FROM-FILE"},
+	} {
+		got, err := llmbackend.PromptFile(one.rel)
+		if err != nil || got != one.want {
+			t.Fatalf("%s = %q (%v), want %q", one.rel, got, err, one.want)
+		}
+	}
+
+	// chat 模式的守卫：那段话在文件里，用户的话跟在后面。
+	guard, err := chatPlannerInput("  hello  ")
+	if err != nil {
+		t.Fatalf("chat planner input: %v", err)
+	}
+	if !strings.HasPrefix(guard, "GUARD-FROM-FILE") || !strings.HasSuffix(guard, "User: hello") {
+		t.Fatalf("chat planner input should be the file's guard plus the user's words:\n%s", guard)
+	}
+
+	// 简报的两个 note：briefing 是块自己的话，interrupted 是拼在它后面的那一句（开头那个空格是原文）。
+	if got, err := loadPromptFile(briefingNoteRel); err != nil || strings.TrimSpace(got) != "BRIEFING-FROM-FILE" {
+		t.Fatalf("briefing note = %q (%v)", got, err)
+	}
+	if got, err := loadPromptFile(interruptedNoteRel); err != nil || strings.TrimRight(got, "\n") != " INTERRUPTED-FROM-FILE" {
+		t.Fatalf("interrupted note = %q (%v)", got, err)
+	}
+
+	// 文件不在：构建里带的那份顶上，读的人照旧有话可说。
+	t.Setenv("PROJECT_ROOT", "")
+	got, err := llmbackend.PromptFile(llmbackend.ClineSystemPromptRel)
+	if err != nil || !strings.Contains(got, "autonomous coding agent") {
+		t.Fatalf("the embedded cline system prompt should answer without PROJECT_ROOT: %q (%v)", got, err)
+	}
+	guard, err = chatPlannerInput("hi")
+	if err != nil || !strings.Contains(guard, "CHAT MODE") {
+		t.Fatalf("the embedded chat-mode guard should answer without PROJECT_ROOT: %q (%v)", guard, err)
 	}
 }

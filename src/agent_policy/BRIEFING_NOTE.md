@@ -1,0 +1,1 @@
+This is your own record on this task from before this run: the runtime kept your plans, the steps they ran and what those steps produced, so a restart does not lose them. It is the same conversation, not this cycle's work — continue from what these rounds already delivered instead of doing it again, and check state.open_criteria for what is still missing.

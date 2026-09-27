@@ -76,7 +76,7 @@ func (c *codexSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 		APIKey:          creds.APIKey,
 		BaseURL:         creds.BaseURL,
 		CWD:             cwd,
-		SystemPrompt:    defaultCodexSystemPrompt(),
+		SystemPrompt:    codexSystemPrompt(),
 		Mode:            mode,
 		ResumeSessionID: resume,
 		NetworkAccess:   &network,

@@ -1,0 +1,1 @@
+ Your newest round was cut by a restart of the runtime instead of ending by itself: state.interrupted says where it stopped (and the restart it belonged to), and the steps of that round which never ran are the ones to continue with. What it already produced is done, not to be redone.

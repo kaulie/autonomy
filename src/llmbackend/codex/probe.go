@@ -45,7 +45,11 @@ func probeCodex(ctx context.Context, creds llmbackend.Creds, live bool) (llmback
 		return result, fmt.Errorf("create codex thread: %w", err)
 	}
 	defer func() { _ = agent.Close(ctx) }()
-	run, err := agent.Send(ctx, probePrompt)
+	prompt, err := probePrompt()
+	if err != nil {
+		return result, err
+	}
+	run, err := agent.Send(ctx, prompt)
 	if err != nil {
 		return result, fmt.Errorf("codex send: %w", err)
 	}
@@ -60,9 +64,12 @@ func probeCodex(ctx context.Context, creds llmbackend.Creds, live bool) (llmback
 	return result, nil
 }
 
-// probePrompt is what a live probe asks: one word, so the cost is a round trip and nothing
-// else.
-const probePrompt = "Reply with exactly: OK"
+// probePrompt is what a live probe asks: one line, so the cost is a round trip and nothing
+// else. It is a **file** like every other prompt (src/agent_policy/PROBE.md,
+// docs/prompt.md): this package keeps no prompt text.
+func probePrompt() (string, error) {
+	return llmbackend.PromptFile(llmbackend.ProbePromptRel)
+}
 
 // probeWorkspace is where a probe's throwaway thread runs. A probe must not touch any
 // agent's workspace.

@@ -35,13 +35,17 @@ func parseUserMessageKind(mode string) (AgentMessageKind, error) {
 	}
 }
 
-// chatPlannerInput is what the planner sees for a chat message: the user's
-// words plus a hard instruction that this turn must not touch the plan.
-func chatPlannerInput(user string) string {
+// chatPlannerInput is what the planner sees for a chat message: the user's words plus
+// the hard instruction that this turn must not touch the plan. That instruction is a **file**
+// (src/agent_policy/CHAT_MODE.md, docs/prompt.md); unreadable means this turn cannot be run
+// safely, so it reports that instead of answering without the guard.
+func chatPlannerInput(user string) (string, error) {
 	text := strings.TrimSpace(user)
-	return "CHAT MODE — planner conversation only. Reply to the user in reason/need. " +
-		"Do not create, revise, replace, or execute any plan. The existing plan must stay exactly as it is. " +
-		"Never return type plan or done.\n\nUser: " + text
+	guard, err := loadPromptFile(chatModeRel)
+	if err != nil {
+		return "", fmt.Errorf("chat mode prompt: %w", err)
+	}
+	return strings.TrimSpace(guard) + "\n\nUser: " + text, nil
 }
 
 // processChat is one chat message: the planner may answer, but the runtime
@@ -83,6 +87,10 @@ func (r *Autonomy) processChat(ctx context.Context, cancel context.CancelFunc, a
 	// "what have you done so far?" is answered from the record rather than from a
 	// session that a restart may have taken away.
 	brief := r.taskBriefing(task.ID)
-	_, err := agent.decide(ctx, 1, nil, chatPlannerInput(msg.Content), brief)
+	input, err := chatPlannerInput(msg.Content)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	_, err = agent.decide(ctx, 1, nil, input, brief)
 	return TurnResult{}, err
 }
