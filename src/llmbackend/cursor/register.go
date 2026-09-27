@@ -12,6 +12,7 @@ func init() {
 		New:          func(host llmbackend.Host) llmbackend.SessionImpl { return newCursorSession(host) },
 		Adapter:      cursorStreamAdapter{},
 		Vendors:      cursorVendors,
+		Models:       cursorModels,
 		DefaultModel: DefaultCursorModel,
 		CloseClient:  func() error { return CloseCursorClient() },
 	})
