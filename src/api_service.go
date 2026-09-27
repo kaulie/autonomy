@@ -35,6 +35,10 @@ type AcceptTaskRequest struct {
 	// leaves the choice to the pool (the harness's default account). It is how a caller
 	// configures which account an agent works with, per task.
 	AccountID string `json:"account_id,omitempty"`
+	// Model is a per-task override of that account's stored model. Empty keeps the
+	// account's (or the harness default). The account still decides harness, vendor,
+	// credential and workspace; this only names which model the session opens with.
+	Model string `json:"model,omitempty"`
 }
 
 // AcceptTaskResponse is returned as soon as the instruction is accepted: its task
@@ -438,6 +442,9 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	// The account the request named (already validated above) is what this task's runs resolve:
 	// it is recorded on the agent row, so the choice survives a restart (src/agent_account.go).
 	r.applyAccount(agent, account)
+	// A model on the instruction overrides the account's stored default for this
+	// task's agent — same row, so a restart keeps the choice (src/agent_runtime.go).
+	r.applyRequestedModel(agent, req.Model)
 	return task, agent, msg, nil
 }
 
@@ -473,6 +480,20 @@ func (r *Autonomy) applyAccount(agent *Agent, account *Account) {
 		return
 	}
 	agent.adoptAccount(account)
+	agent.Persist()
+}
+
+// applyRequestedModel records a per-task model on the agent. Empty is a no-op
+// (the account or the harness default stays). The account's credential is kept;
+// only the model the session opens with changes.
+func (r *Autonomy) applyRequestedModel(agent *Agent, model string) {
+	model = strings.TrimSpace(model)
+	if agent == nil || model == "" {
+		return
+	}
+	agent.SetModel(model)
+	agent.credential.Model = model
+	agent.runtimePolicy.RequestedModel = model
 	agent.Persist()
 }
 

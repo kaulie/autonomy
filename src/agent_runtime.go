@@ -82,10 +82,14 @@ func assignAgentRuntime(agent *Agent, policy agentRuntimePolicy) (agentRuntimePl
 			why += " → harness " + string(harness)
 		}
 	}
-	// The model: the account's, else what the caller asked for, else the harness's own default
-	// ("" for a harness that asks its bridge or CLI, "composer-2" for cursor).
+	// The model: a task-level choice already recorded on the agent (POST /api/tasks
+	// `model`, when it differs from the account's stored default), else the account's,
+	// else what the caller asked for, else the harness's own default ("" for a harness
+	// that asks its bridge or CLI, "composer-2" for cursor).
 	model := ""
 	switch {
+	case strings.TrimSpace(agent.Model) != "" && (account == nil || strings.TrimSpace(agent.Model) != strings.TrimSpace(account.Model)):
+		model = strings.TrimSpace(agent.Model)
 	case account != nil && strings.TrimSpace(account.Model) != "":
 		model = strings.TrimSpace(account.Model)
 	case strings.TrimSpace(policy.RequestedModel) != "":
