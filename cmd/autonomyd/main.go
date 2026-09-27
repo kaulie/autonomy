@@ -8,6 +8,7 @@
 //
 //	go run ./cmd/autonomyd                                  # serves on :4300
 //	AUTONOMY_HTTP_ADDR=127.0.0.1:4300 go run ./cmd/autonomyd
+//	AUTONOMY_HTTP_ADDR=0.0.0.0:4300 go run ./cmd/autonomyd   # remote box; prefer scripts/start.sh
 //
 // Its client counterpart is cmd/autonomy:
 //
