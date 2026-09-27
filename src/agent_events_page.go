@@ -1,9 +1,9 @@
 package autonomy
 
 // agentEventsHTML is the live event stream of one agent, served at GET /agents/{agentID}/events and
-// embedded by the UI shell (src/ui_home_page.go). One event per line, oldest at the top, and it
-// keeps its place: the poll carries the cursor the API hands back (next_poll_after_seq), so a line
-// is never rendered twice.
+// embedded by the UI shell (src/ui_home_page.go). Each event is its own terminal-style section
+// (header + body), oldest at the top. The poll carries the cursor the API hands back
+// (next_poll_after_seq), so an event is never rendered twice.
 //
 // The page is self-contained like every other page here, and it takes the two things it needs from
 // its own URL: the task whose conversation is being tailed (?task=) and how often to poll
@@ -22,16 +22,15 @@ const agentEventsHTML = `<!DOCTYPE html>
   .sub { color: #667085; margin-bottom: 10px; }
   .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: #475467; }
   button { font: inherit; padding: 3px 9px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; }
-  #log { background: #0b1020; color: #d7e0ff; border-radius: 8px; padding: 10px 12px; height: calc(100vh - 140px); overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
-  .t { color: #7c8db5; }
-  .k { color: #7ee787; }
-  .role-user { color: #79c0ff; }
-  .role-assistant { color: #e6edf3; }
-  .role-tool { color: #d2a8ff; }
-  .role-system { color: #8b949e; }
-  .err { color: #ff7b72; }
-  .empty { color: #7c8db5; }
+  #events { height: calc(100vh - 140px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
+  .event-section { border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #0b1020; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .event-header { padding: 6px 10px; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #161b22; color: #8b949e; border-bottom: 1px solid #30363d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .event-body { padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #d7e0ff; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; }
+  .role-user .event-body { color: #79c0ff; }
+  .role-assistant .event-body { color: #e6edf3; }
+  .role-tool .event-body { color: #d2a8ff; }
+  .role-system .event-body { color: #8b949e; }
+  .empty { color: #7c8db5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 12px; }
 </style>
 </head>
 <body>
@@ -42,7 +41,7 @@ const agentEventsHTML = `<!DOCTYPE html>
   <button id="clear">clear</button>
   <span id="state">…</span>
 </div>
-<div id="log"><div class="line empty">waiting for events…</div></div>
+<div id="events"><div class="empty">waiting for events…</div></div>
 <script>
 // A module embedded in the UI shell drops its own title (?embed=1).
 if (new URLSearchParams(location.search).has("embed")) document.body.classList.add("embedded");
@@ -52,23 +51,19 @@ const AGENT_ID = (location.pathname.match(/\/agents\/(\d+)\/events/) || [])[1] |
 const TASK_ID = params.get("task") || "";
 // every=0 turns auto-refresh off (the shell's control); anything else is the seconds between polls.
 const EVERY = params.has("every") ? Number(params.get("every")) : 5;
-const MAX_LINES = 500;
+const MAX_SECTIONS = 500;
 
-const log = document.getElementById("log");
+const eventsEl = document.getElementById("events");
 let after = 0;
 let tailing = true;
 let timer = null;
 
-function line(text, cls) {
-  const div = document.createElement("div");
-  div.className = "line " + (cls || "");
-  div.textContent = text;
-  log.appendChild(div);
-  while (log.children.length > MAX_LINES) log.removeChild(log.firstChild);
+function trimSections() {
+  while (eventsEl.children.length > MAX_SECTIONS) eventsEl.removeChild(eventsEl.firstChild);
 }
 
 function atBottom() {
-  return log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  return eventsEl.scrollHeight - eventsEl.scrollTop - eventsEl.clientHeight < 40;
 }
 
 function stamp(iso) {
@@ -76,11 +71,30 @@ function stamp(iso) {
   return isNaN(d) ? "" : d.toTimeString().slice(0, 8);
 }
 
-function eventLine(ev) {
-  const parts = [stamp(ev.created_at), "seq " + ev.message_seq, ev.role || "", ev.status || ""].filter(Boolean);
-  let text = [ev.content, ev.normalized_content].filter(Boolean).join(" ");
-  text = text.replace(/\s+/g, " ").trim();
-  return parts.join(" · ") + (text ? "  " + text : "");
+function eventHeader(ev) {
+  return [stamp(ev.created_at), "seq " + ev.message_seq, ev.role || "", ev.status || ""].filter(Boolean).join(" · ");
+}
+
+function eventBody(ev) {
+  let text = [ev.content, ev.normalized_content].filter(Boolean).join("\n");
+  return text.replace(/\r\n/g, "\n").trim();
+}
+
+function appendEvent(ev) {
+  const role = ev.role || "system";
+  const section = document.createElement("section");
+  section.className = "event-section role-" + role;
+  const header = document.createElement("div");
+  header.className = "event-header";
+  header.textContent = eventHeader(ev);
+  const body = document.createElement("div");
+  body.className = "event-body";
+  const text = eventBody(ev);
+  body.textContent = text || "(empty)";
+  section.appendChild(header);
+  section.appendChild(body);
+  eventsEl.appendChild(section);
+  trimSections();
 }
 
 async function poll() {
@@ -95,13 +109,18 @@ async function poll() {
     const data = await res.json();
     const events = data.events || [];
     const stick = atBottom();
-    if (after === 0) log.innerHTML = "";
-    for (const ev of events) line(eventLine(ev), "role-" + (ev.role || "system"));
-    if (!events.length && after === 0) line("no events yet", "empty");
+    if (after === 0) eventsEl.innerHTML = "";
+    for (const ev of events) appendEvent(ev);
+    if (!events.length && after === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "no events yet";
+      eventsEl.appendChild(empty);
+    }
     after = data.next_poll_after_seq || after;
     document.getElementById("state").textContent = "agent " + AGENT_ID + " · task " + TASK_ID + " · " + after + " messages" +
       (EVERY ? " · every " + EVERY + "s" : " · auto-refresh off");
-    if (stick && tailing) log.scrollTop = log.scrollHeight;
+    if (stick && tailing) eventsEl.scrollTop = eventsEl.scrollHeight;
   } catch (err) {
     document.getElementById("state").textContent = "poll failed: " + err.message;
   }
@@ -121,7 +140,7 @@ document.getElementById("tail").addEventListener("click", (event) => {
 });
 
 document.getElementById("clear").addEventListener("click", () => {
-  log.innerHTML = "";
+  eventsEl.innerHTML = "";
 });
 
 document.getElementById("title").textContent = "Agent " + (AGENT_ID || "?") + " events";
