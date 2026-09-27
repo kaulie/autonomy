@@ -68,6 +68,7 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// the page a human opens that polls it and renders a table with auto-refresh
 		// (src/agent_dashboard.go). Both are read-only.
 		{"GET /api/agents", s.handleAgentStatusList},
+		{"GET /api/agents/{agentID}/runtime", s.handleAgentRuntime},
 		{"GET /api/agents/{agentID}/messages", s.handleAgentMessages},
 		// The UI itself: GET / is the shell a human opens, and the modules below it are pages
 		// it embeds (src/ui_home_page.go). Both spellings stay: a module is reachable directly.
@@ -1047,6 +1048,34 @@ func (s *HTTPServer) handleAccountModels(w http.ResponseWriter, req *http.Reques
 		vendor = DefaultVendorFor(harness)
 	}
 	writeJSON(w, http.StatusOK, accountCatalogueResponse{Harness: harness, Vendor: vendor, Models: models})
+}
+
+// handleAgentRuntime resolves which LLM model and provider back one agent (src/agent_runtime_resolve.go).
+//
+// @Summary  解析 agent 背后的模型与 harness（assignAgentRuntime 的只读视图）
+// @Tags     agents
+// @Produce  json
+// @Param    agentID  path      integer  true  "agent id"
+// @Success  200      {object}  autonomy.AgentRuntimeResponse  "backend / llm_provider / model / account / why"
+// @Failure  400      {object}  errResponse                    "agent id 不合法"
+// @Failure  404      {object}  errResponse                    "没有这只 agent"
+// @Router   /api/agents/{agentID}/runtime [get]
+func (s *HTTPServer) handleAgentRuntime(w http.ResponseWriter, req *http.Request) {
+	agentID, err := strconv.ParseInt(req.PathValue("agentID"), 10, 64)
+	if err != nil || agentID == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid agent_id")
+		return
+	}
+	info, err := s.Autonomy.AgentRuntime(agentID)
+	switch {
+	case errors.Is(err, errAgentNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 // handleAgentMessages reads one agent's message log: what was addressed to it (its inbox: a user
