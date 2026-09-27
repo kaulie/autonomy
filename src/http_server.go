@@ -745,8 +745,8 @@ func (s *HTTPServer) handleAgentStatusList(w http.ResponseWriter, req *http.Requ
 
 // handleAgentDashboard serves the page a human opens to watch the fleet: one HTML
 // file that polls GET /api/agents on a timer and renders the agents as a table
-// with auto-refresh (src/agent_dashboard_page.go). It is self-contained — no build
-// step, no external asset — because the page's whole job is to render one JSON feed.
+// with auto-refresh (src/agent_dashboard_page.go, dashboard/templates). Markup is
+// embedded html/template; the page's job is to render one JSON feed client-side.
 //
 // @Summary  agent 状态监控页（轮询 /api/agents 自动刷新）
 // @Tags     agents
@@ -756,7 +756,7 @@ func (s *HTTPServer) handleAgentStatusList(w http.ResponseWriter, req *http.Requ
 func (s *HTTPServer) handleAgentDashboard(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, agentDashboardHTML)
+	_ = writeAgentDashboard(w)
 }
 
 // handleAccountsPage serves the pool's own UI: the page a human opens to add, edit, verify,
