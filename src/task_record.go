@@ -40,22 +40,6 @@ const (
 	taskRecordVerdicts = 12
 )
 
-// taskBriefingNote is what the block is, in words. The planner has to know that these
-// rounds are its own record from *before* this run — not this run's work — or a
-// continuation reads them as a plan it never made and starts the task over.
-const taskBriefingNote = "This is your own record on this task from before this run: the runtime kept " +
-	"your plans, the steps they ran and what those steps produced, so a restart does not lose them. " +
-	"It is the same conversation, not this cycle's work — continue from what these rounds already " +
-	"delivered instead of doing it again, and check state.open_criteria for what is still missing."
-
-// interruptedNote is added when the newest round was not finished but *cut*: the runtime
-// itself took the run out (a restart), and this run is the continuation of it. The work
-// the round already produced is done — the steps that never ran are the ones to do.
-const interruptedNote = " Your newest round was cut by a restart of the runtime instead of ending by " +
-	"itself: state.interrupted says where it stopped (and the restart it belonged to), and the steps of " +
-	"that round which never ran are the ones to continue with. What it already produced is done, not " +
-	"to be redone."
-
 // TaskInterruption says the task's newest round was cut by the runtime itself. It comes
 // from the task row's stop reason (src/stop_reason.go) — the runtime's own record of who
 // stopped it — so a run that resumes the task knows it is continuing a cut round, and
@@ -177,10 +161,21 @@ func (r *Autonomy) taskBriefing(taskID string) *TaskBriefing {
 		Verdicts:     r.taskVerdicts(taskID),
 		OpenCriteria: r.openCriteria(taskID),
 	}
-	note := taskBriefingNote
+	// The block's own words are files too (docs/prompt.md). Unreadable (and not in this
+	// build either) means the block says less about itself — the data it carries is still
+	// there — so it is reported, not turned into a failed run.
+	note, noteErr := loadPromptFile(briefingNoteRel)
+	if noteErr != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] task briefing note: %v\n", noteErr)
+	}
+	note = strings.TrimSpace(note)
 	if cut := r.taskInterruption(taskID, &last); cut != nil {
 		state.Interrupted = cut
-		note += interruptedNote
+		if extra, err := loadPromptFile(interruptedNoteRel); err != nil {
+			fmt.Fprintf(os.Stderr, "[autonomy] interrupted note: %v\n", err)
+		} else {
+			note += strings.TrimRight(extra, "\n")
+		}
 	}
 	return &TaskBriefing{
 		Note:          note,

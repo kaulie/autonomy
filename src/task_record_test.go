@@ -191,8 +191,14 @@ func TestTaskBriefingReportsTheCriteriaStillOpen(t *testing.T) {
 // prompt: the worker is handed one job by the delegating cycle, and every delegation
 // would pay for the task's whole record.
 func TestBriefingReachesThePromptAndNotAWorkers(t *testing.T) {
+	// 那段话现在是文件（src/agent_policy/BRIEFING_NOTE.md），测试读同一个来源。
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+	note, err := loadPromptFile(briefingNoteRel)
+	if err != nil {
+		t.Fatal(err)
+	}
 	brief := &TaskBriefing{
-		Note:  taskBriefingNote,
+		Note:  note,
 		State: &TaskState{OpenCriteria: []string{"dashboard_running"}},
 		EarlierRounds: []TaskRound{{
 			PlanID: 7, Cycle: 1, Decision: "plan", Reason: "deliver it", Status: "ok",
