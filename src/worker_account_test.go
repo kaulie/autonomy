@@ -271,16 +271,19 @@ func TestADelegatedStepRunsItsWorkerOnTheTasksAccount(t *testing.T) {
 		t.Fatalf("steps=%v err=%v", steps, err)
 	}
 	interactions, err := store.ListExecutionStepInteractions(steps[0].ID)
-	if err != nil || len(interactions) != 1 {
+	// The worker's own session gave its first prompt (the frame) before the delegated run, so
+	// the step's last interaction is the run that answered it.
+	if err != nil || len(interactions) != 2 {
 		t.Fatalf("interactions=%v err=%v", interactions, err)
 	}
+	last := interactions[len(interactions)-1]
 	// The run that answered the step is the codex one (the task's account), not a cline one.
-	if got := interactions[0].Provider; got != string(llmbackend.ProviderCodex) {
+	if got := last.Provider; got != string(llmbackend.ProviderCodex) {
 		t.Fatalf("delegated run provider=%q want codex (the task's account), not the process default", got)
 	}
 
 	var agentID int64
-	if err := store.RawDB().QueryRow(`SELECT agent_id FROM reason_turns WHERE id = ?`, interactions[0].ReasonTurnID).Scan(&agentID); err != nil {
+	if err := store.RawDB().QueryRow(`SELECT agent_id FROM reason_turns WHERE id = ?`, last.ReasonTurnID).Scan(&agentID); err != nil {
 		t.Fatal(err)
 	}
 	worker := agents.Get(fmt.Sprintf("agent-%d", agentID))

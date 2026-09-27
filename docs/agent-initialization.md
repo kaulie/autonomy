@@ -7,7 +7,8 @@
 
 ```
 1. 初始化 agent                AgentInitializer.Initialize / Autonomy.InitializeAgent
-2. 给出 system prompt          AgentInitOptions.SystemPrompt → Agent.GiveSystemPrompt
+2. 给出第一条 prompt           Autonomy.InitializeAgent → LLMSession.GiveFirstPrompt
+                              （frame = AgentInitOptions.SystemPrompt + 策略；**会话在这里建立**）
 3. 接受 task                   Autonomy.AcceptTask / POST /api/tasks（accept 把 agent 与本 task 配对）
 4. 先出方案并等待确认           Agent.RequirePlanApproval：run 停在第一个 plan 上（status awaiting_approval）
 5. 确认后才进入实现             AcceptTaskRequest.Approve（inbox kind = approval）释放该 plan 并执行
@@ -20,8 +21,9 @@
 - **初始化先于 task，task 配对的是这只被初始化的 agent。** `resumeAgentForTask` 在需要新建 agent 时，
   先看有没有一只已初始化、尚未绑定 task 的 planner（`AgentFactory.forInitialization`），有就用它，
   没有才 `Create` 一只新的。
-- **system prompt 属于 frame。** 它是稳定的、每个 session 只发一次的那一半
-  （`buildReasoningFrame`），排在 agent policy 之前，所以它先于 task 进入会话。为空则不写这一段。
+- **system prompt 属于 frame，而 frame 是第一条 prompt。** 它是稳定的、每个 session 只发一次的那一半
+  （`buildReasoningFrame`），排在 agent policy 之前，并且**在 agent 创建时就注入**（`GiveFirstPrompt`）——
+  所以它先于 task 进入会话；task 的话只走 task prompt（delta），规则不重发。为空则不写这一段。
 - **plan 先确认、再实现。** `RequirePlanApproval` 的 agent 的第一条 `plan` 不会被执行：
   它经 `Runtime.RecordPlanOnly` 写成计划记录后 run 暂停（`awaiting_approval`），
   计划在、`execution_step` 不在——正是 [execution-loop.md](execution-loop.md) 里

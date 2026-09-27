@@ -8,74 +8,141 @@ import (
 	"testing"
 )
 
-// A reasoning session is multi-turn (the Cline session / Cursor agent keeps the
-// conversation), so the AGENT_V2 frame — the instructions that do not change per
-// cycle — is sent once per session, and every later decision cycle sends only the
-// delta (current task / context entity / world / runtime context). These tests
-// pin that contract; see docs/execution-loop.md.
+// An agent's life has **two prompt injections**, in this order:
+//
+//	agent created → its first prompt: the frame  (LLMSession.GiveFirstPrompt)
+//	              → the task's prompt: the delta (LLMSession.Say / reasoningPrompt)
+//
+// These tests pin that contract: the frame is never part of a task's prompt, and a session is
+// given the frame before it is asked anything about a task. See docs/prompt.md.
 
-func TestReasoningPromptSendsFrameOncePerSession(t *testing.T) {
+// The task prompt is the delta alone: the current task / context entity / world / runtime
+// context and the cycle it is. The instructions that do not change per cycle are not in it —
+// they went out as the session's first prompt.
+func TestTaskPromptIsTheDeltaAndCarriesNoFrame(t *testing.T) {
 	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
 
 	agent := &Agent{ID: 8801, Name: "agent-8801", Lifecycle: AgentLifecycleEphemeral, Workspace: t.TempDir()}
 	ctx := DecisionContext{
 		Task:  &Task{ID: "t-frame", Description: "add a /healthz endpoint", GoalType: GoalType_FEATURE},
 		Agent: agent,
-		Cycle: 1,
+		Cycle: 2,
 	}
 
-	first, sentFrame, err := reasoningPrompt(ctx, ReasoningInput{})
+	taskPrompt, err := reasoningPrompt(ctx, ReasoningInput{})
 	if err != nil {
-		t.Fatalf("cycle 1: %v", err)
+		t.Fatalf("task prompt: %v", err)
 	}
-	if !sentFrame {
-		t.Fatal("cycle 1 of a new session must carry the frame")
+	if !strings.Contains(taskPrompt, "## Decision Cycle 2") {
+		t.Fatalf("the task prompt must be this cycle's delta:\n%s", taskPrompt)
 	}
-	if !strings.Contains(first, "# Autonomy Bootstrap Prompt") {
-		t.Fatalf("cycle 1 must carry the AGENT_V2 frame:\n%s", first)
+	if !strings.Contains(taskPrompt, `"id": "t-frame"`) {
+		t.Fatalf("the task prompt must carry the current task:\n%s", taskPrompt)
 	}
-	if !strings.Contains(first, "## Decision Cycle 1") {
-		t.Fatalf("cycle 1 must carry its delta:\n%s", first)
+	if strings.Contains(taskPrompt, "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the task prompt must not carry the frame:\n%s", taskPrompt)
 	}
 
-	// The session answered, so the frame is delivered for good.
-	agent.markLLMFrameSent()
-
-	second, sentFrame2, err := reasoningPrompt(ctx, ReasoningInput{})
+	// The first prompt is the frame, and it renders **without a task**: the per-cycle values
+	// are marked as coming with the task prompt, which is why initialization can give it
+	// before anything has been accepted for the agent.
+	firstPrompt, err := buildReasoningFrame(DecisionContext{Agent: agent}, ReasoningInput{})
 	if err != nil {
-		t.Fatalf("cycle 2: %v", err)
+		t.Fatalf("first prompt: %v", err)
 	}
-	if sentFrame2 {
-		t.Fatal("cycle 2 on the same session must not repeat the frame")
+	if !strings.Contains(firstPrompt, "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the first prompt is where the policy rides:\n%s", firstPrompt)
 	}
-	if strings.Contains(second, "# Autonomy Bootstrap Prompt") {
-		t.Fatalf("cycle 2 must not repeat the frame:\n%s", second)
+	if !strings.Contains(firstPrompt, reasoningDeltaMarker) {
+		t.Fatalf("the first prompt must mark where the per-cycle values come from:\n%s", firstPrompt)
 	}
-	if !strings.Contains(second, "## Decision Cycle 1") {
-		t.Fatalf("cycle 2 must still carry the delta:\n%s", second)
+	if strings.Contains(firstPrompt, "## Decision Cycle") {
+		t.Fatalf("the first prompt must not carry a decision cycle:\n%s", firstPrompt)
 	}
-	if len(second) >= len(first)/2 {
-		t.Fatalf("cycle 2 (%d bytes) must be a fraction of cycle 1 (%d bytes)", len(second), len(first))
+	if strings.Contains(firstPrompt, `"id": "t-frame"`) {
+		t.Fatalf("the first prompt must not carry a task's values:\n%s", firstPrompt)
+	}
+}
+
+// recordingSession is an agent's backend with the prompts it was given kept in order: what a
+// session actually received, without a provider in the loop.
+type recordingSession struct{ prompts []string }
+
+func (r *recordingSession) Attach(context.Context, llmbackend.Mode) (string, bool, error) {
+	return "sess-recording", false, nil
+}
+
+func (r *recordingSession) Prompt(_ context.Context, text string, _ llmbackend.Mode, _ func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
+	r.prompts = append(r.prompts, text)
+	return `{"type":"need_input","reason":"no task yet"}`, llmbackend.RunResult{Status: llmbackend.StatusFinished}, nil
+}
+
+func (r *recordingSession) PromptText(ctx context.Context, text string, mode llmbackend.Mode) (string, error) {
+	out, _, err := r.Prompt(ctx, text, mode, nil)
+	return out, err
+}
+
+func (r *recordingSession) Dispose(context.Context)   {}
+func (r *recordingSession) ProviderSessionID() string { return "sess-recording" }
+func (r *recordingSession) Resumed() bool             { return false }
+func (r *recordingSession) ResumedFrom() string       { return "" }
+func (r *recordingSession) Mode() string              { return "" }
+
+// A session's first prompt is the frame, and it goes out before the task's prompt: an agent
+// that was created and then handed a task is never asked about the task first. It is sent
+// once per session — a session created later (a restart, a mode change) asks for it again,
+// and gets it before whatever prompted it.
+func TestFirstPromptIsTheFrameAndGoesBeforeTheTaskPrompt(t *testing.T) {
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("AUTONOMY_CLINE_PROVIDER", "deepseek")
+	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+
+	backend := &recordingSession{}
+	agent := &Agent{
+		ID: 8804, Name: "agent-8804", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral,
+		Backend: llmbackend.Cline, Workspace: t.TempDir(), llm: backend,
 	}
 
-	// The delta follows the state: next cycle, plus what the last one did.
-	ctx.Cycle = 2
-	ctx.History = []Result{{Message: "executed 1 action(s): code_edit"}}
-	third, sentFrame3, err := reasoningPrompt(ctx, ReasoningInput{})
+	sess := NewLLMSession(nil, agent, SessionOpts{})
+	sent, err := sess.GiveFirstPrompt(context.Background())
 	if err != nil {
-		t.Fatalf("cycle 3: %v", err)
+		t.Fatalf("first prompt: %v", err)
 	}
-	if sentFrame3 {
-		t.Fatal("cycle 3 must not repeat the frame either")
+	if !sent {
+		t.Fatal("a fresh session must be given its first prompt")
 	}
-	if !strings.Contains(third, "## Decision Cycle 2") {
-		t.Fatalf("cycle 3 delta must name its cycle:\n%s", third)
+	if len(backend.prompts) != 1 || !strings.Contains(backend.prompts[0], "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the first prompt must be the frame, got %d prompts: %q", len(backend.prompts), backend.prompts)
 	}
-	if !strings.Contains(third, "previous_actions") {
-		t.Fatalf("cycle 3 delta must carry previous_actions:\n%s", third)
+	if agent.needsLLMFrame() {
+		t.Fatal("the session was given the frame: it must not ask for it again")
 	}
-	if !strings.Contains(third, `"id": "t-frame"`) {
-		t.Fatalf("cycle 3 delta must carry the current task:\n%s", third)
+
+	// Idempotent: asking again sends nothing.
+	again, err := sess.GiveFirstPrompt(context.Background())
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if again || len(backend.prompts) != 1 {
+		t.Fatalf("the first prompt is once per session, prompts=%q", backend.prompts)
+	}
+
+	// A session created later has been told nothing: the frame goes again, ahead of the prompt
+	// that needed the session (here a task's prompt).
+	agent.resetLLMFrame()
+	if _, err := sess.Say(context.Background(), "## Decision Cycle 1 — current values", 1); err != nil {
+		t.Fatalf("say: %v", err)
+	}
+	if len(backend.prompts) != 3 {
+		t.Fatalf("want the task prompt sent after a fresh frame, got %d prompts: %q", len(backend.prompts), backend.prompts)
+	}
+	if !strings.Contains(backend.prompts[1], "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("a session's first prompt must be the frame:\n%s", backend.prompts[1])
+	}
+	if !strings.Contains(backend.prompts[2], "## Decision Cycle 1") || strings.Contains(backend.prompts[2], "# Autonomy Bootstrap Prompt") {
+		t.Fatalf("the turn the caller asked for must be the task prompt alone:\n%s", backend.prompts[2])
 	}
 }
 

@@ -1,7 +1,9 @@
 package autonomy
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -121,10 +123,46 @@ func needsPlanApproval(agent *Agent, decision Decision) bool {
 const decisionPlanType = "plan"
 
 // InitializeAgent initializes an agent through a running Autonomy — the entry
-// point onto the process's factory and store.
-func (r *Autonomy) InitializeAgent(opts AgentInitOptions) (*Agent, error) {
+// point onto the process's factory and store — and gives it its **first prompt**:
+// the agent is created first, then told who it is and how it works (the frame), and
+// only a task arriving later is told what to do (the task prompt). That is the two
+// injections an agent's life has, in that order (docs/prompt.md).
+//
+// Giving the first prompt is what opens the agent's session, so an agent that was
+// initialized is already reachable: the task that arrives next is a *second* prompt
+// on a conversation that exists, not the thing that starts it.
+func (r *Autonomy) InitializeAgent(ctx context.Context, opts AgentInitOptions) (*Agent, error) {
 	if r == nil || r.AgentFactory == nil {
 		return nil, fmt.Errorf("autonomy not initialized")
 	}
-	return NewAgentInitializer(r.AgentFactory).Initialize(opts)
+	agent, err := NewAgentInitializer(r.AgentFactory).Initialize(opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.giveFirstPrompt(ctx, agent); err != nil {
+		// The agent exists and is bound to nothing, so a provider hiccup here must not
+		// undo the initialization. The first prompt is not marked delivered either, so the
+		// turn that needs the agent sends it before anything else (LLMSession.Say).
+		fmt.Fprintf(os.Stderr, "[autonomy] agent %s initialized without its first prompt: %v\n", agent.Name, err)
+	}
+	return agent, nil
+}
+
+// giveFirstPrompt gives a freshly created agent the first of its two prompts: the frame
+// (its own system prompt + the agent policy), on a session opened here — no task exists
+// yet, and none is needed (buildReasoningFrame marks the per-cycle values as coming with
+// the task prompt). A backend with no session to prompt (local) has nothing to send it to.
+func (r *Autonomy) giveFirstPrompt(ctx context.Context, agent *Agent) error {
+	if agent == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sess := NewLLMSession(r.Runtime, agent, SessionOpts{})
+	if !sess.promptable() {
+		return nil
+	}
+	_, err := sess.GiveFirstPrompt(ctx)
+	return err
 }

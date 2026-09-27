@@ -345,7 +345,8 @@ func TestRunStopsWhenTheDecisionConcludesTheTask(t *testing.T) {
 			}
 
 			var turns int
-			if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, taskID).Scan(&turns); err != nil {
+			// One more turn than decisions: the session's first prompt (the frame) is a turn too.
+			if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ? AND input NOT LIKE '%Autonomy Bootstrap Prompt%'`, taskID).Scan(&turns); err != nil {
 				t.Fatal(err)
 			}
 			if turns != 1 {
@@ -402,7 +403,8 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 	}
 
 	var turns int
-	if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ?`, req.ID).Scan(&turns); err != nil {
+	// One more turn than decisions: the session's first prompt (the frame) is a turn too.
+	if err := store.RawDB().QueryRow(`SELECT count(*) FROM reason_turns WHERE task_id = ? AND input NOT LIKE '%Autonomy Bootstrap Prompt%'`, req.ID).Scan(&turns); err != nil {
 		t.Fatal(err)
 	}
 	if turns != 4 {
@@ -529,11 +531,13 @@ func TestAStepRecordsTheAgentItAcquiredAsAnInteraction(t *testing.T) {
 	if err != nil || len(steps) != 1 {
 		t.Fatalf("steps=%v err=%v", steps, err)
 	}
+	// The worker's own session gave its first prompt (the frame) before the delegated run, so
+	// the step's last interaction is the run this step talked to.
 	interactions, err := store.ListExecutionStepInteractions(steps[0].ID)
-	if err != nil || len(interactions) != 1 {
-		t.Fatalf("interactions=%v err=%v, want the worker run recorded on the step", interactions, err)
+	if err != nil || len(interactions) != 2 {
+		t.Fatalf("interactions=%v err=%v, want the worker's first prompt and its run on the step", interactions, err)
 	}
-	got := interactions[0]
+	got := interactions[len(interactions)-1]
 	if got.Kind != InteractionLLM || got.Provider != string(llmbackend.Cline) || got.ReasonTurnID == 0 {
 		t.Fatalf("interaction=%+v, want the LLM run this step talked to", got)
 	}

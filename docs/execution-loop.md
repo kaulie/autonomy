@@ -84,10 +84,12 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   为什么必须有它：**provider 会话会随进程走**（Cline bridge 的会话活在 bridge 进程里），会话没了以后，`previous_actions` 是空的、`task.status` 只写着本次受理的 `pending` —— 没有 briefing，一次续做就是「从头开始」：重开 PR、重部署。`note` 明说这些轮次是**本次 run 之前**的记录，`state.open_criteria` 是契约里还没有 `pass` 的判据（还差什么）。
   一个 step 计划了却没跑（`execution_step_plan` 有行、`execution_step` 没有）在这里是 `status: pending` + 计划原文的 input —— 「上一轮停在哪一步」因此是看得见的。
   当上一个进程是**被重启切断**的，`state.interrupted` 会明说这件事（`{reason, stopped_at_step, next_step}`，来自 runtime 自己写的停止原因），`note` 也多一句「这一轮是被重启切断的，没跑的 step 才是要接着做的」——开机自愈续起来的 run 因此知道自己在接着谁做（[graceful-restart.md](graceful-restart.md)）。worker 的 Runtime Context **不带** briefing：委托方那一轮已经说清，每次委托不该背上 task 全史。
-- **消息是增量的**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），所以 AGENT_V2 的
-  **frame**（Agent / Role / Delegation / Output Schema / Goal Type / Completion Principles / Constructs）只在
-  **一个会话的第一轮**发送；之后每轮只发 **delta**（当前 Task / Context Entity / World / Runtime Context /
-  Constraints，Runtime Context 里已经带着 `cycle` 与 `previous_actions`），以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
+- **两条 prompt，不是一个消息的两个半**：推理会话本来就是多轮的（Cline session / Cursor agent 保留上下文），
+  所以 AGENT_V2 的 **frame**（Agent / Role / Delegation / Output Schema / Goal Type / Completion Principles /
+  Constructs）是**这条会话的第一条 prompt** —— **agent 创建时就注入**（`GiveFirstPrompt`），换会话时以同一个
+  身份再来一次；**task 到了**才开始发 **task prompt**：每轮一条 **delta**（当前 Task / Context Entity /
+  World / Runtime Context / Constraints，Runtime Context 里已经带着 `cycle` 与 `previous_actions`），
+  以及"本轮是第几个 cycle、按已知 schema 回答"这一句。
   **谁是它自己（`{{AGENT}}`：role / id / name / backend / model / lifecycle / workspace）属于 frame**：
   这些东西整个会话不变，而"这一轮是第几轮"（`cycle`）每轮都变、留在 delta —— 见 [agent.md](agent.md)。
   frame 里的 per-cycle 占位符渲染成 `reasoningDeltaMarker`，所以 frame 整段字节不变、能吃到 prompt cache。

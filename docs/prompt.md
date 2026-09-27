@@ -5,15 +5,19 @@
 
 ## 两个半：初始化（frame）与每轮（delta）
 
-一次推理会话是多轮的（[session.md](session.md)）：会话**第一次**决策轮把「不变的那些」一次说完，
-之后每一轮只发**变了的值**。这就是两个文件：
+一只 agent 的一生有**两次 prompt 注入**，顺序是定死的：**先建 agent，再给它第一条 prompt，然后才有 task 的那条**。
+这就是两个文件：
 
-| 文件 | 是什么 | 什么时候发 |
+| 文件 | 是哪条 prompt | 什么时候注入 |
 |---|---|---|
-| `REASONING_FRAME.md` | **初始化提示词**：`{{SYSTEM_PROMPT}}`（这只 agent 被初始化时给的 system prompt，可空）+ `{{AGENT_POLICY}}`（策略文件 `AGENT_V2.md` 渲染后的全文） | 一个会话的**第一轮**（以及任何换会话的时刻：新会话、换 mode/cwd、桥重启 —— 见 `Agent.needsLLMFrame()`） |
-| `REASONING_DELTA.md` | **每轮提示词**：轮次标题、`{{DELTA_MARKER}}` 那句「这些值本轮给你」、可选的 `{{BRIEFING_NOTE}}`（重启续做的说明）、`{{PAYLOAD}}`（当前 Task / Runtime Context / Context Entity / World / Constraints 的 JSON） | **每一轮** |
+| `REASONING_FRAME.md` | **第一条 prompt（agent 自己的）**：`{{SYSTEM_PROMPT}}`（这只 agent 被初始化时给的 system prompt，可空）+ `{{AGENT_POLICY}}`（策略文件 `AGENT_V2.md` 渲染后的全文） | **agent 创建时**（`Autonomy.InitializeAgent` → `LLMSession.GiveFirstPrompt`）；之后任何换会话的时刻（新会话、换 mode/cwd、桥重启）也以「那条会话的第一条 prompt」的身份再来一次 —— 见 `Agent.needsLLMFrame()` |
+| `REASONING_DELTA.md` | **task prompt（task 那条）**：轮次标题、`{{DELTA_MARKER}}` 那句「这些值本轮给你」、可选的 `{{BRIEFING_NOTE}}`（重启续做的说明）、`{{PAYLOAD}}`（当前 Task / Runtime Context / Context Entity / World / Constraints 的 JSON） | **task 到了之后**：task 到来后的那一轮起，每个决策轮一条 |
 
-拆分的原因写在 `src/prompt.go` 的注释里，简单说：会话自己记着 frame，所以每轮只该付 delta 的
+**两条互不拼接**：frame 不再是「首轮那条消息的前半段」——`reasoningPrompt` 只渲染 delta。而一条会话的
+**第一条 prompt 永远是 frame**（`LLMSession.Say` 在接手任何 prompt 前先 `GiveFirstPrompt`），所以没有任何一轮
+会在没被告知规则的情况下跑；task 的话只走 delta，换 task、换 cycle 都不重发规则。
+
+两条各自为什么长这样，写在 `src/prompt.go` 的注释里，简单说：会话自己记着 frame，所以每轮只该付 delta 的
 token；而「frame 里的值不会变」这条，是靠把每轮会变的占位符在 frame 里替换成
 `{{DELTA_MARKER}}` 那句话来保证的（`reasoningDeltaPlaceholders`）。
 
