@@ -54,6 +54,10 @@ Task Owner → Coding Agent → Research Agent → …
     写 `0` / `off` / `false` / `no` 关掉，关掉后 worker 就回到「取 capability 要的那个 provider，
     再由池子解析它」的老行为）。
     capability 的显式选择**优先于**部署的默认（`src/worker_account.go`：`workerExtendsPlannerAgent`）
+- **身份按 (task, purpose) 复用**：账号继承解决的是「花谁的额度」；「是不是同一只 agent」是另一件事。
+  持久 worker 在 `Release` 时 park（idle、provider 会话不拆），下一次同一 task、同一 purpose 的
+  `AcquireAgent` 还是它 —— 同一个 workspace、同一段对话。两次 `code_edit` 因此落在同一份沙箱里，
+  而不是每步一只新 agent。正在干活的、不同 purpose 的、`Ephemeral` 的，都不复用。见 [agent.md](agent.md)
 - **账号的解析位置因此只有两处**：委派时按上面的规则继承一次，每轮 `ensureLLMSession` 再确认一次
 - **会话是同一个**：worker 拿到的 session 与 runtime 给 planner 的**是同一种**（`src/llm_session.go`）——
   capability 看到的只是它的窄视图（`ID` / `Workspace` / `Prompt` / `Release`）。它这一轮的 `mode=agent`、

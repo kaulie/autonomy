@@ -49,6 +49,230 @@ func TestRuntimeAcquireLocalAgentRegistersInFactory(t *testing.T) {
 	}
 }
 
+// TestAReleasedWorkerIsReacquiredForTheSameTaskAndPurpose: a persistent worker is
+// the specialist for one (task, purpose). Release parks it; the next acquisition
+// of that pair is the same agent, in the same workspace — not a newly registered
+// one. That is what "kept so it is worth coming back to" actually does.
+func TestAReleasedWorkerIsReacquiredForTheSameTaskAndPurpose(t *testing.T) {
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+	opts := broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-reuse", Backend: string(llmbackend.Local),
+	}
+	first, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, workspace := first.ID(), first.Workspace()
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	parked := f.Get(id)
+	if parked == nil {
+		t.Fatal("the worker was dropped after Release")
+	}
+	if parked.IsRunning() {
+		t.Fatal("a parked worker must be idle")
+	}
+
+	second, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Release(ctx) }()
+	if second.ID() != id {
+		t.Fatalf("second acquire id=%q want the parked worker %q", second.ID(), id)
+	}
+	if second.Workspace() != workspace {
+		t.Fatalf("workspace=%q want the parked worker's %q", second.Workspace(), workspace)
+	}
+	if names := workerNames(f, "task-reuse", "code_edit"); len(names) != 1 {
+		t.Fatalf("workers for this job=%v, want exactly the one specialist", names)
+	}
+}
+
+// A worker still on loan is not stolen: a second acquire for the same job while
+// the first has not been released registers a new agent, so two overlapping
+// steps do not share a conversation.
+func TestABusyWorkerIsNotReused(t *testing.T) {
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+	opts := broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-busy", Backend: string(llmbackend.Local),
+	}
+	first, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Release(ctx) }()
+	second, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Release(ctx) }()
+	if first.ID() == second.ID() {
+		t.Fatalf("overlapping loans shared %s", first.ID())
+	}
+}
+
+func TestAWorkerForADifferentPurposeOrTaskIsNotReused(t *testing.T) {
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+	code, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-a", Backend: string(llmbackend.Local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := code.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{
+		Purpose: "deployment.monitor", TaskID: "task-a", Backend: string(llmbackend.Local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = monitor.Release(ctx) }()
+	if monitor.ID() == code.ID() {
+		t.Fatal("a different purpose must not take the code_edit specialist")
+	}
+
+	otherTask, err := rt.AcquireAgent(ctx, broker.AcquireAgentOpts{
+		Purpose: "code_edit", TaskID: "task-b", Backend: string(llmbackend.Local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = otherTask.Release(ctx) }()
+	if otherTask.ID() == code.ID() {
+		t.Fatal("a different task must not take the other task's specialist")
+	}
+}
+
+func TestAnEphemeralWorkerIsNeverReused(t *testing.T) {
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+	opts := broker.AcquireAgentOpts{
+		Purpose: "one_shot", TaskID: "task-eph", Backend: string(llmbackend.Local), Ephemeral: true,
+	}
+	first, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := first.ID()
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.Get(name) != nil {
+		t.Fatal("an ephemeral worker must be dropped on Release")
+	}
+	second, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Release(ctx) }()
+	if second.ID() == name {
+		t.Fatal("an ephemeral worker must not be reacquired")
+	}
+}
+
+func workerNames(f *AgentFactory, taskID, purpose string) []string {
+	var names []string
+	for _, agent := range f.snapshot() {
+		if agent == nil || agent.Role != AgentRoleWorker || agent.Purpose != purpose {
+			continue
+		}
+		if agent.CurrentTask == nil || agent.CurrentTask.ID != taskID {
+			continue
+		}
+		names = append(names, agent.Name)
+	}
+	return names
+}
+
+// A parked worker keeps the provider session the last loan attached: Release does
+// not tear it down, so the next acquire for that job does not re-attach and does
+// not resend the frame. Its own rounds keep counting.
+func TestAParkedWorkerKeepsItsProviderSessionAndRound(t *testing.T) {
+	installFakeClineClient(t)
+	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
+	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
+
+	store, err := openStore(t, filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prev := _store
+	t.Cleanup(func() { _store = prev })
+	_store = store
+
+	ctx := context.Background()
+	f := NewAgentFactory()
+	rt := NewRuntime(f)
+	opts := broker.AcquireAgentOpts{Purpose: "code_edit", TaskID: "task-park"}
+	first, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Prompt(ctx, "hello"); err != nil {
+		t.Fatalf("first prompt: %v", err)
+	}
+	id := first.ID()
+	worker := f.Get(id)
+	if worker == nil || worker.llm == nil || worker.llm.ProviderSessionID() == "" {
+		t.Fatal("the first loan did not attach a provider session")
+	}
+	sessionID := worker.llm.ProviderSessionID()
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if worker.llm == nil || worker.llm.ProviderSessionID() != sessionID {
+		t.Fatal("Release tore down the provider session of a persistent worker")
+	}
+	if worker.needsLLMFrame() {
+		t.Fatal("a parked worker must not forget that the frame was sent")
+	}
+
+	second, err := rt.AcquireAgent(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Release(ctx) }()
+	if second.ID() != id {
+		t.Fatalf("second acquire id=%q want %q", second.ID(), id)
+	}
+	if worker.llm == nil || worker.llm.ProviderSessionID() != sessionID {
+		t.Fatal("the second loan re-attached instead of keeping the parked session")
+	}
+	if _, err := second.Prompt(ctx, "again"); err != nil {
+		t.Fatalf("second prompt: %v", err)
+	}
+
+	rows, err := store.RawDB().Query(`SELECT cycle FROM reason_turns WHERE task_id = 'task-park' AND input NOT LIKE '%Autonomy Bootstrap Prompt%' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var cycles []int
+	for rows.Next() {
+		var cycle int
+		if err := rows.Scan(&cycle); err != nil {
+			t.Fatal(err)
+		}
+		cycles = append(cycles, cycle)
+	}
+	if len(cycles) != 2 || cycles[0] != 1 || cycles[1] != 2 {
+		t.Fatalf("cycles=%v, want the worker's rounds to continue [1 2] across loans", cycles)
+	}
+}
+
 // TestAcquiredWorkerIsKeptUnlessAskedToBeThrowaway: a worker is kept like any
 // other agent — its row, its resumable provider session — unless the capability
 // asked for a throwaway one. The opt-out deletes; the default does not.

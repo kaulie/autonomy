@@ -152,6 +152,48 @@ func (f *AgentFactory) ForTask(taskID string) *Agent {
 	return nil
 }
 
+// idleWorker is the specialist this factory already holds for one delegated job:
+// a persistent worker of `purpose` on `taskID` that is not currently on loan.
+// The next AcquireAgent for that pair comes back to it instead of registering a
+// new agent — same workspace, same provider session, same conversation. A
+// capability that asked for a directory of its own only matches a worker already
+// in that directory; otherwise the worker's own sandbox is the one being reused.
+//
+// Both task and purpose have to be named: an acquisition with neither cannot
+// claim a specialist, and a worker still running is already on loan to another
+// step. The lowest id wins when more than one idle worker qualifies (two
+// overlapping loans that both parked), so the choice is stable.
+func (f *AgentFactory) idleWorker(taskID, purpose, workspace string) *Agent {
+	taskID = strings.TrimSpace(taskID)
+	purpose = strings.TrimSpace(purpose)
+	if f == nil || taskID == "" || purpose == "" {
+		return nil
+	}
+	workspace = strings.TrimSpace(workspace)
+	var best *Agent
+	for _, agent := range f.agents {
+		if agent == nil || agent.Role != AgentRoleWorker || agent.IsEphemeral() {
+			continue
+		}
+		if agent.IsRunning() {
+			continue
+		}
+		if strings.TrimSpace(agent.Purpose) != purpose {
+			continue
+		}
+		if agent.CurrentTask == nil || agent.CurrentTask.ID != taskID {
+			continue
+		}
+		if workspace != "" && strings.TrimSpace(agent.Workspace) != workspace {
+			continue
+		}
+		if best == nil || agent.ID < best.ID {
+			best = agent
+		}
+	}
+	return best
+}
+
 // forInitialization returns an agent that was initialized (AgentInitializer) and
 // is not yet bound to a task — the agent a task accepted *after* initialization is
 // paired with. Initialization happens first and the task arrives second, so the
@@ -274,6 +316,10 @@ type Agent struct {
 	// (Role) is what makes its turns plan turns or delegated turns, so there is no
 	// second kind of session to pick from.
 	Session *LLMSession
+	// sessionRound is the last round a parked worker's session numbered, so the
+	// next loan continues the worker's own cycle count instead of restarting at 1.
+	// Runtime state, like Role: it only lives as long as this handle does.
+	sessionRound int
 
 	// llm is this agent's provider session — **the llmbackend.Session interface**, not a
 	// concrete backend: which implementation answers is decided when it is built (the
@@ -409,9 +455,12 @@ func (a *Agent) IsEphemeral() bool {
 // while an ephemeral one is deleted (soft-deleted in the store, dropped from the
 // factory) because nothing is meant to come back to it.
 //
-// Every agent ends here, whichever door it came in through: the task's own agent when
-// its run is over, a delegated worker when the capability releases its session. There
-// is nothing in it that depends on who the agent was, which is why there is one of it.
+// Every agent that is actually ended goes through here: process teardown
+// (Autonomy.Close), an agent that never attached, an ephemeral worker the
+// capability released. A persistent worker's Release does not: it parks the
+// agent idle with its provider session intact so the next AcquireAgent for
+// that task and purpose continues the same conversation. There is nothing in
+// closeAgent that depends on who the agent was, which is why there is one of it.
 func closeAgent(agent *Agent, factory *AgentFactory, ctx context.Context) {
 	if agent == nil {
 		return

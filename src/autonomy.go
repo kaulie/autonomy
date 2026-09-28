@@ -331,12 +331,14 @@ func (r *Autonomy) taskForMessage(msg AgentMessage) *Task {
 }
 
 // drainedAgent is the inbox telling the runtime that an agent has nothing left to
-// process. The agent stays resident: it is only marked idle — not stopped, its
-// provider session stays open — so the next message continues the same conversation
-// on the same session, with no re-attach and no frame to send again. An agent ends
-// when it is explicitly ended: a worker when the capability that acquired it
-// releases the session, an agent that never attached at all. Nothing ends it just
-// because a run finished.
+// process. The agent stays resident: it is only marked idle, its provider session
+// stays open — so the next message continues the same conversation on the same
+// session, with no re-attach and no frame to send again. An agent ends when it is
+// explicitly ended: an ephemeral worker when the capability releases it, a
+// backend that never attached, process teardown. A persistent worker's Release
+// is the same park as this (idle, session intact) so the next AcquireAgent for
+// that task and purpose comes back to it. Nothing ends an agent just because a
+// run finished.
 func (r *Autonomy) drainedAgent(agent *Agent) {
 	if agent == nil {
 		return
@@ -601,9 +603,9 @@ func failTask(task *Task, err error) {
 }
 
 // finishAgent ends the agent the run was for. Ending an agent's life — stop, tear
-// down its provider sessions, delete it or keep it — is the same wherever the agent
-// came from, so it is one function (closeAgent) that both this and a released worker
-// session go through.
+// down its provider sessions, delete it or keep it — is closeAgent: process
+// teardown and an ephemeral worker's Release both go through it. A persistent
+// worker's Release does not (it parks).
 func (r *Autonomy) finishAgent(agent *Agent) {
 	closeAgent(agent, r.AgentFactory, context.Background())
 }
