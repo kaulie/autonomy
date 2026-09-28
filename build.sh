@@ -66,31 +66,58 @@ cp -R "${ROOT}/src/agent_policy/." "${OUT}/src/agent_policy/"
 # cursor bridge: the runtime spawns it (src/cursorsdk), so the release package carries it
 # — scripts/start.sh then points CURSOR_SDK_BRIDGE_BIN at ${RUNTIME_DIR}/bin/cursor-sdk-bridge.
 # The binary is a pinned download (gitignored), so a build without it fetches it: from the
-# build-machine cache first — keyed by the pinned version, so a bump cannot pick up a stale
-# binary — then by running scripts/fetch-bridge.sh. Failing both is a warning, not an
+# build-machine cache first — keyed by the pinned version *and* the target platform, so
+# neither a bump nor a change of target machine can pick up a stale/foreign binary — then by
+# running scripts/fetch-bridge.sh (which honours GOOS/GOARCH). Failing both is a warning, not an
 # error: which bridge a deployment needs is decided by its *selected* backend, and
 # scripts/start.sh's pre-start self-check refuses a deploy whose backend has no bridge —
 # loudly, at deploy time, instead of every task failing at run time.
-BRIDGE="${ROOT}/third_party/bin/cursor-sdk-bridge"
-if [ ! -x "${BRIDGE}" ]; then
-  CURSOR_BRIDGE_VERSION="$(bash "${ROOT}/scripts/fetch-bridge.sh" --print-version 2>/dev/null || echo unknown)"
-  BRIDGE_CACHE="${AUTONOMY_CACHE_DIR:-${HOME}/.cache/autonomy}/cursor-sdk-bridge/${CURSOR_BRIDGE_VERSION}"
-  if [ ! -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ] && [ "${AUTONOMY_SKIP_FETCH_CURSOR_BRIDGE:-0}" != "1" ]; then
-    echo "[build] checkout 里没有 cursor bridge，取 v${CURSOR_BRIDGE_VERSION} 到构建机缓存"
-    bash "${ROOT}/scripts/fetch-bridge.sh" --dest "${BRIDGE_CACHE}" || true
-  fi
-  if [ -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ]; then
+#
+# 跨平台打包（控制面给别的平台的部署机器打包时会注入 GOOS/GOARCH）必须取**目标平台**的
+# bridge：构建机自己那份（third_party/bin，本机开发跑与测试用的）在目标平台上是另一种可执行
+# 格式，带过去只会让部署在启动自检/运行时炸掉，所以那种情况下既不采用它、也不往里写。
+BRIDGE_VERSION="$(bash "${ROOT}/scripts/fetch-bridge.sh" --print-version 2>/dev/null || echo unknown)"
+TARGET_PLATFORM="$(bash "${ROOT}/scripts/fetch-bridge.sh" --print-platform 2>/dev/null || echo unknown)"
+BUILD_PLATFORM="$(env -u GOOS -u GOARCH bash "${ROOT}/scripts/fetch-bridge.sh" --print-platform 2>/dev/null || echo unknown)"
+if [ "${TARGET_PLATFORM}" != "${BUILD_PLATFORM}" ]; then
+  echo "[build] 目标平台 ${TARGET_PLATFORM}（构建机 ${BUILD_PLATFORM}）：取目标平台的 cursor bridge"
+fi
+BRIDGE_CACHE_ROOT="${AUTONOMY_CACHE_DIR:-${HOME}/.cache/autonomy}/cursor-sdk-bridge/${BRIDGE_VERSION}"
+BRIDGE_CACHE="${BRIDGE_CACHE_ROOT}/${TARGET_PLATFORM}"
+# 老缓存没有平台段（那时只按 uname 取，取到的就是构建机平台）：把它的内容搬进本机平台的
+# 子目录，省一次下载。只搬老布局的那几个条目 —— 根目录下现在也可能已经有别的平台的子目录
+# （新布局），整目录 mv 会把它们一起搬进本机平台的目录里、之后再也找不到。
+if [ ! -e "${BRIDGE_CACHE}" ] && [ "${TARGET_PLATFORM}" = "${BUILD_PLATFORM}" ] && [ -x "${BRIDGE_CACHE_ROOT}/bin/cursor-sdk-bridge" ]; then
+  mkdir -p "${BRIDGE_CACHE}"
+  for entry in bin proto manifest.json .version .platform; do
+    if [ -e "${BRIDGE_CACHE_ROOT}/${entry}" ]; then mv "${BRIDGE_CACHE_ROOT}/${entry}" "${BRIDGE_CACHE}/"; fi
+  done
+  echo "[build] cursor bridge 缓存加上平台段：${BRIDGE_CACHE_ROOT} → ${BRIDGE_CACHE}"
+fi
+
+CHECKOUT_BRIDGE="${ROOT}/third_party/bin/cursor-sdk-bridge"
+BRIDGE_SRC=""
+if [ "${TARGET_PLATFORM}" = "${BUILD_PLATFORM}" ] && [ -x "${CHECKOUT_BRIDGE}" ]; then
+  BRIDGE_SRC="${CHECKOUT_BRIDGE}"
+fi
+if [ -z "${BRIDGE_SRC}" ] && [ ! -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ] && [ "${AUTONOMY_SKIP_FETCH_CURSOR_BRIDGE:-0}" != "1" ]; then
+  echo "[build] checkout 里没有 ${TARGET_PLATFORM} 的 cursor bridge，取 v${BRIDGE_VERSION} 到构建机缓存"
+  bash "${ROOT}/scripts/fetch-bridge.sh" --dest "${BRIDGE_CACHE}" || true
+fi
+if [ -z "${BRIDGE_SRC}" ] && [ -x "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" ]; then
+  BRIDGE_SRC="${BRIDGE_CACHE}/bin/cursor-sdk-bridge"
+fi
+if [ -n "${BRIDGE_SRC}" ]; then
+  cp "${BRIDGE_SRC}" "${OUT}/bin/cursor-sdk-bridge"
+  echo "[build] cursor bridge 随包发出（${TARGET_PLATFORM}）：$(du -h "${OUT}/bin/cursor-sdk-bridge" | cut -f1)"
+  if [ "${TARGET_PLATFORM}" = "${BUILD_PLATFORM}" ] && [ "${BRIDGE_SRC}" != "${CHECKOUT_BRIDGE}" ]; then
     mkdir -p "${ROOT}/third_party/bin"
     # Also leave it where a dev run and the tests look for it (third_party/bin), which is
     # what src/cursorsdk's default bridge path resolves to.
-    cp "${BRIDGE_CACHE}/bin/cursor-sdk-bridge" "${BRIDGE}"
+    cp "${BRIDGE_SRC}" "${CHECKOUT_BRIDGE}"
   fi
-fi
-if [ -x "${BRIDGE}" ]; then
-  cp "${BRIDGE}" "${OUT}/bin/cursor-sdk-bridge"
-  echo "[build] cursor bridge 随包发出：$(du -h "${OUT}/bin/cursor-sdk-bridge" | cut -f1)"
 else
-  echo "[build][警告] 没有 ${BRIDGE}（scripts/fetch-bridge.sh 也没取到）；发版包不自带 cursor bridge，" >&2
+  echo "[build][警告] 没有 ${TARGET_PLATFORM} 的 cursor bridge（scripts/fetch-bridge.sh 也没取到）；发版包不自带 cursor bridge，" >&2
   echo "[build][警告] 用 cursor 后端部署时 scripts/start.sh 的启动自检会拒绝启动（用 cline 后端不受影响）。" >&2
 fi
 
