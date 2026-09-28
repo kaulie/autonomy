@@ -7,7 +7,7 @@
 | `autonomyd.service` | 远程机器的 systemd 单元（`Type=forking` 调 `start.sh`）。本机平台不用它 |
 | `stop.sh` | TERM → 等待 → KILL |
 | `restart.sh` | 控制面默认 `restartCmd`（`stop` 然后 `start`） |
-| `fetch-bridge.sh` | Download the pinned `cursor-sdk-bridge` standalone binary (Cursor backend)。`--print-version` 打印 pin 的版本（**版本只 pin 在它这一处**，`build.sh` 问它而不是自己知道），`--dest DIR` 下到别处（build.sh 用它填构建机缓存） |
+| `fetch-bridge.sh` | Download the pinned `cursor-sdk-bridge` standalone binary (Cursor backend)。`--print-version` 打印 pin 的版本（**版本只 pin 在它这一处**，`build.sh` 问它而不是自己知道），`--print-platform` 打印**目标平台**（`darwin-x64` / `linux-x64`…，`GOOS`/`GOARCH` 优先、否则构建机自己的平台 —— 归一化也只在这一处，`build.sh` 拿它当缓存 key），`--dest DIR` 下到别处（build.sh 用它填构建机缓存） |
 | `install-codex-bridge.sh` | `npm install` the Codex bridge's dependencies (`@openai/codex-sdk`) under `src/codexsdk/bridge/` (Codex backend) — 开发机上跑一次；打包时 `build.sh` 自己会装并把依赖压进发版包 |
 | `install-cline-bridge.sh` | `npm install` the Cline bridge's dependencies (`@cline/sdk`) under `src/clinesdk/bridge/` (Cline backend) — 开发机上跑一次；打包时 `build.sh` 自己会取（优先 checkout 的 `node_modules`，其次构建机缓存 `~/.cache/autonomy/cline-bridge-deps/<lock 的 sha256>.tgz`，最后 `npm ci --omit=dev`），取不到就**构建失败** |
 
@@ -22,4 +22,5 @@
 - 从旧位置（`$TMPDIR/autonomy-build-cache`）**自动搬一次**过来（rename，不触发重下）；`AUTONOMY_BUILD_CACHE` 可指定别处。
 - 万一缓存真的坏了：**删掉这个目录**就是全部修复（代价是一次完整的重新下载 + 重新编译）。
 - 里面还有两个按内容去重的缓存：`cline-bridge-deps/<lock 的 sha256>.tgz`（发版包的 Cline 桥依赖）与
-  `cursor-sdk-bridge/<版本>/`（pin 的 cursor 桥二进制）。
+  `cursor-sdk-bridge/<版本>/<平台>/`（pin 的 cursor 桥二进制，平台如 `darwin-x64` / `linux-x64` ——
+  跨平台打包时每个平台各存一份；没有平台段的老缓存会被本机平台那次构建搬进 `<版本>/<本机平台>/`）。

@@ -42,6 +42,16 @@
 # outputs/src/agent_policy/
 ```
 
+构建机与目标机器**平台不同**时（例如在 macOS 上给 Linux 机器打包），把目标平台交给 `build.sh`：
+
+```bash
+GOOS=linux GOARCH=amd64 ./build.sh    # 产物与随包的 cursor bridge 都是 linux/amd64
+```
+
+`GOOS`/`GOARCH` 会一路传到 Go 编译与 `scripts/fetch-bridge.sh`（按平台下载 release），而构建机自己那份
+`third_party/bin/cursor-sdk-bridge` 不会被采用、也不会被覆盖 —— 它是另一种可执行格式，带过去只会在目标
+机器上起不来。缓存按 `<版本>/<平台>/` 分目录（`--print-platform` 打印平台名）。
+
 拷到远程（rsync / scp，目录可改；下面用 `/opt/autonomy`）：
 
 ```bash
