@@ -26,8 +26,10 @@ type AcquireAgentOpts struct {
 	Backend string
 	// Ephemeral asks for a throwaway worker: one that is let go — soft-deleted in
 	// the store and dropped from the factory — when its session is released,
-	// instead of being kept (the default, see docs/agent.md). Leave it false for
-	// work whose agent is worth coming back to.
+	// instead of being kept (the default, see docs/agent.md). A kept worker is
+	// the specialist for this (TaskID, Purpose): the next AcquireAgent for that
+	// pair comes back to it. Leave Ephemeral false for work whose agent is
+	// worth coming back to.
 	Ephemeral bool
 	// ExtendsPlannerAgent says this worker is an *extension* of the agent that delegated to
 	// it: it runs on that agent's account — the same harness, credential, model and workspace

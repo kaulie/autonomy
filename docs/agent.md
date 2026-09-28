@@ -76,6 +76,31 @@ planner 拿到 planner 的，被委托的 worker 拿到 worker 的，委托方�
 
 一条指令不是直接「跑这个 task」，而是**放进这只 agent 的 inbox**（`instruction` 消息），由它自己按顺序处理 —— 见 [inbox.md](inbox.md)。
 
+## Planner 与 Worker 怎么复用
+
+两条轴，不要混：
+
+| 轴 | Planner（任务自己的 agent） | Worker（capability `AcquireAgent`） |
+|---|---|---|
+| **身份** | 一条 Task 一只：`resumeAgentForTask` → `ForTask` / 行 / `Create` | 一个 `(task, purpose)` 一只：`AcquireAgent` → `idleWorker` / `registerWorker` |
+| **账号 / harness / 工作区根** | 任务点名的账号，否则该 harness 的默认账号 | 默认继承委托方（`ExtendsPlannerAgent`，部署开关 `AUTONOMY_WORKER_EXTENDS_PLANNER_AGENT`）—— **继承的是账号，不是身份** |
+| **Workspace** | `{账号 root}/{planner name}/` | 自己的 `{账号 root}/{worker name}/`，**不进 planner 的沙箱**；同一只 specialist 下次委托还在这个目录里 |
+| **会话类型** | `LLMSession` | 同一种 `LLMSession`（差别只在 `Role`） |
+| **提示词词表** | `promptPlaceholders` | 同一份 frame（`WorkerFramePlaceholders`），按 worker 自己的身份渲染 |
+| **Release / 一轮结束** | inbox 排空 → `drainedAgent`：idle，provider 会话留着 | 持久 worker 的 `Release` 也是 park（idle，会话留着）；只有 `Ephemeral` 才 `closeAgent` |
+
+以前的缺口：worker 默认 `persistent`、Release 之后也留在 factory 里，但下一次 `AcquireAgent` **总是 `NewAgent`**，所以「留着以便回来」从未发生。结果是同一次 task 里两次 `code_edit` 会得到两只 worker、两份空沙箱，第二次看不到第一次的改动。现在 `(task, purpose)` 对上且对方空闲，就还那一只。
+
+仍不复用的：
+
+- 正在干活的 worker（重叠的两步不会抢同一段对话）
+- 不同 purpose（`code_edit` 不是 `deployment.monitor`）
+- 不同 task
+- `Ephemeral` 的 throwaway
+- **跨进程**：`Role` / `Purpose` 仍是 runtime state、不落库，重启后 factory 是空的，worker 按现在的规则会新建（planner 仍走 `tasks.agent_id`）。那是下一步，不是这一步。
+
+实现：`src/agent.go`（`idleWorker`）、`src/runtime.go`（`AcquireAgent` / `lendWorker` / `registerWorker`）、`src/llm_session.go`（`Release` park）。
+
 ## 不变式
 
 1. 身份动态：今天可以是 Task Owner，明天可以是 Specialist。

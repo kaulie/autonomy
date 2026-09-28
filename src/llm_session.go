@@ -345,9 +345,22 @@ func (s *LLMSession) Prompt(ctx context.Context, prompt string) (string, error) 
 	return res.Text, nil
 }
 
-// Release hands the agent back (broker.AgentSession) — which is Close: a capability
-// that was lent an agent is done with it, and that is when its life ends.
+// Release hands the agent back (broker.AgentSession). A throwaway worker ends
+// here (Close). A persistent one is only parked: idle, still in the factory, its
+// provider session still open — so the next AcquireAgent for the same task and
+// purpose continues that conversation in the same workspace, the way a planner
+// stays resident between instructions (Autonomy.drainedAgent). closeAgent is the
+// other door: ephemeral workers, a backend that never attached, process teardown.
 func (s *LLMSession) Release(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if agent := s.agent; agent != nil && !agent.IsEphemeral() {
+		agent.sessionRound = s.round
+		agent.Stop()
+		s.agent = nil
+		return nil
+	}
 	return s.Close(ctx)
 }
 

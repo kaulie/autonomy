@@ -204,8 +204,6 @@ func (r *Runtime) executePlan(decision Decision, planID int64, planned []Executi
 	return result, nil
 }
 
-// AcquireAgent registers an agent via AgentFactory and attaches the requested backend.
-
 // recordPlan writes the decision's plan and its steps, and returns the plan's id
 // with the planned steps in order. A decision with no actions still gets its row:
 // done / blocked / need_input are answers too, and they are worth finding later by
@@ -445,10 +443,56 @@ func planHash(actions []Action) string {
 }
 
 // Capabilities call this instead of creating Cursor clients themselves.
+//
+// A persistent worker is a specialist for one (task, purpose): the first
+// acquisition registers it, Release parks it (idle, provider session intact),
+// and the next acquisition for that pair comes back to the same agent — same
+// workspace, same conversation. A throwaway worker (Ephemeral) is never reused.
 func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
 	if r == nil || r.agents == nil {
 		return nil, fmt.Errorf("runtime agent factory not ready")
 	}
+	if !opts.Ephemeral {
+		if agent := r.agents.idleWorker(opts.TaskID, opts.Purpose, opts.Workspace); agent != nil {
+			return r.lendWorker(ctx, agent, opts)
+		}
+	}
+	return r.registerWorker(ctx, opts)
+}
+
+// lendWorker is the reuse half of AcquireAgent: an idle persistent worker of this
+// task and purpose is already in the factory, so this loan is that agent again.
+// The provider session is still open after the last Release (park, not close);
+// a turn re-attaches if it is not. A new LLMSession wrapper is the loan — its
+// turns belong to this step — and it continues the worker's own round count.
+func (r *Runtime) lendWorker(ctx context.Context, agent *Agent, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
+	policy := agentRuntimePolicy{
+		RequestedBackend:    opts.Backend,
+		RequestedModel:      opts.Model,
+		ExtendsPlannerAgent: opts.ExtendsPlannerAgent,
+		DelegatingAgent:     r.delegatingAgent(),
+	}
+	agent.runtimePolicy = policy
+	plan, err := assignAgentRuntime(agent, policy)
+	if err != nil {
+		return nil, err
+	}
+	agent.applyAgentRuntime(plan)
+	if ws := strings.TrimSpace(opts.Workspace); ws != "" {
+		agent.Workspace = ws
+	}
+	if agent.llm == nil {
+		if err := attachWorkerBackend(ctx, agent, plan); err != nil {
+			return nil, err
+		}
+	}
+	return r.workerSession(agent, opts, plan), nil
+}
+
+// registerWorker is the first-acquisition half of AcquireAgent: no idle specialist
+// for this (task, purpose) is in the factory, so a new worker is registered,
+// planned, attached and lent.
+func (r *Runtime) registerWorker(ctx context.Context, opts broker.AcquireAgentOpts) (broker.AgentSession, error) {
 	agent := r.agents.NewAgent()
 	// Acquired for one delegated job: the capability named what it is for, and
 	// that purpose is what the agent's own prompt says it is (## Agent).
@@ -500,37 +544,39 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		// applyAgentRuntime took the account's root; the capability's own directory outranks it.
 		agent.Workspace = ws
 	}
+	if err := attachWorkerBackend(ctx, agent, plan); err != nil {
+		r.releaseRegistered(agent)
+		return nil, err
+	}
+	return r.workerSession(agent, opts, plan), nil
+}
+
+// attachWorkerBackend opens the provider session the plan named. Local is a
+// no-op: there is no LLM to attach. A reused worker whose session is still open
+// does not come through here.
+func attachWorkerBackend(ctx context.Context, agent *Agent, plan agentRuntimePlan) error {
 	switch plan.Backend {
 	case llmbackend.Cursor:
-		if err := agent.AttachCursor(ctx, plan.Model); err != nil {
-			r.releaseRegistered(agent)
-			return nil, err
-		}
+		return agent.AttachCursor(ctx, plan.Model)
 	case llmbackend.Cline:
-		if err := agent.AttachCline(ctx); err != nil {
-			r.releaseRegistered(agent)
-			return nil, err
-		}
+		return agent.AttachCline(ctx)
 	case llmbackend.Codex:
-		if err := agent.AttachCodex(ctx); err != nil {
-			r.releaseRegistered(agent)
-			return nil, err
-		}
+		return agent.AttachCodex(ctx)
 	case llmbackend.Claude:
-		if _, _, err := agent.llmSession().Attach(ctx, llmbackend.ModeAgent); err != nil {
-			r.releaseRegistered(agent)
-			return nil, err
-		}
+		_, _, err := agent.llmSession().Attach(ctx, llmbackend.ModeAgent)
+		return err
 	case llmbackend.Local:
-		// Local-only session: no LLM attach; Prompt is unsupported.
+		return nil
 	default:
-		r.releaseRegistered(agent)
-		return nil, fmt.Errorf("unknown agent backend %q", plan.Backend)
+		return fmt.Errorf("unknown agent backend %q", plan.Backend)
 	}
+}
+
+// workerSession is the loan a capability is handed: a new LLMSession wrapper on
+// the worker, continuing that worker's own round count, recorded on the in-flight
+// step when there is one.
+func (r *Runtime) workerSession(agent *Agent, opts broker.AcquireAgentOpts, plan agentRuntimePlan) *LLMSession {
 	agent.Start()
-	// Who is handing this worker its work: the agent that delegated, named on every
-	// message it gets (the capability is the hand, the planner is the agent that
-	// asked for the job — see docs/delegation.md).
 	delegatedBy := ""
 	if from := r.delegatingAgent(); from != nil {
 		delegatedBy = from.Name
@@ -546,13 +592,12 @@ func (r *Runtime) AcquireAgent(ctx context.Context, opts broker.AcquireAgentOpts
 		DelegatedBy: delegatedBy,
 		Inbox:       r.inbox,
 	})
+	sess.round = agent.sessionRound
 	agent.Session = sess
-	// Inside a cycle, this acquisition belongs to the step that made it; the step
-	// records it as one of its interactions (see recordStep).
 	if r.cycle != nil {
 		r.stepSessions = append(r.stepSessions, sess)
 	}
-	return sess, nil
+	return sess
 }
 
 // delegatingAgent is the agent whose cycle this runtime is inside — the one a capability's

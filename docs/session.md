@@ -41,11 +41,14 @@
 
 capability 看到的只是 `broker.AgentSession` 那个窄视图（`ID` / `Workspace` / `Prompt` / `Release`）—— 它们不编号 round，也没见过 mode；宿主（planner 那一侧）看到的是 `Say(prompt, round)`，因为**决策轮由 runtime 数**。
 
-## 结束：一个函数
+## 结束：两扇门
 
-`Close`（= capability 侧看到的 `Release`）走 `closeAgent`（`src/agent.go`）：停、拆掉 provider 会话，然后按 `Lifecycle` 决定**留**（`persistent`，**默认**：行与 session id 留着，下一条指令还能 Resume，见 [agent.md](agent.md)）还是**删**（`ephemeral`：软删 + 从 factory 摘掉；只有明确要一个用完即弃的 worker 才这样，`broker.AcquireAgentOpts.Ephemeral`）。
+| 门 | 谁走 | 做什么 |
+|---|---|---|
+| `Release`（持久 worker） | capability 还完这次贷款 | **park**：idle、留在 factory、provider 会话不拆。下一次同一 `(task, purpose)` 的 `AcquireAgent` 还是这只 agent、同一段对话、同一个 workspace |
+| `Close` / `closeAgent` | ephemeral worker 的 `Release`、后端没挂上、进程退出 | 停、拆掉 provider 会话；ephemeral 再软删 + 从 factory 摘掉；persistent 的行留着给跨进程 Resume（planner） |
 
-注意**一次运行结束不走这里**：agent 常驻，一次运行结束只是标 `idle`（`Autonomy.drainedAgent`），会话留着给下一条消息复用 —— 走 `closeAgent` 的是真正的结束：worker 的 `Release`、后端没挂上、进程退出。**结束一只 agent 与它是谁无关**，所以只有一份实现。
+注意**一次运行结束不走 `closeAgent`**：agent 常驻，一次运行结束只是标 `idle`（`Autonomy.drainedAgent`），会话留着给下一条消息复用。持久 worker 的 `Release` 与这是同一件事。**真正结束一只 agent** 才走 `closeAgent`，与它是谁无关，所以只有一份实现。
 
 ## 不变式
 
@@ -71,7 +74,7 @@ agent 行上的 llm_agent_id（= 上一个进程的 plan 会话 id）
 1. `start({config:{sessionId}})` **不会**加载那个会话的历史——它是「以这个 id 开一个新会话」，还会**覆盖**那个 id 原来的 transcript；
 2. 新会话带上 `initialMessages: readMessages(旧 id)` **确实**接上了对话（端到端验过：旧会话里说过的数字，在另一个进程里被答了出来）。
 
-读不到 transcript（第一次、被 retention 清掉、被删）不是错误：那是「没有对话可续」，新会话从零开始，run 不受影响。**记录层（briefing）仍然是兜底**：它保证即使对话丢了也不会把续做当成新任务。worker 的会话不续（它属于一次委托，prompt 自己带足了上下文）；`llm_agent_id` 里更老的值是 bridge 自己的 handle（`cls_…`，随 bridge 进程一起死），不是会话，会被忽略。
+读不到 transcript（第一次、被 retention 清掉、被删）不是错误：那是「没有对话可续」，新会话从零开始，run 不受影响。**记录层（briefing）仍然是兜底**：它保证即使对话丢了也不会把续做当成新任务。**进程内** worker 的会话会续：同一 `(task, purpose)` 的下一次委托还是那只 specialist、同一段 provider 对话。**跨进程** worker 目前不续（`Role` / `Purpose` 不落库，重启后 factory 是空的；prompt 自己带足这一次的上下文）；planner 仍按 `tasks.agent_id` Resume。`llm_agent_id` 里更老的值是 bridge 自己的 handle（`cls_…`，随 bridge 进程一起死），不是会话，会被忽略。
 
 ## 关系
 
