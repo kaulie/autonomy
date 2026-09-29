@@ -106,15 +106,3 @@ func TestTheWorkerPromptIsStillTheWorkersOwn(t *testing.T) {
 		}
 	}
 }
-
-// Harness session system prompts are the other initialization injection for
-// cline / codex. They must point at the same project-root AGENT.md the planner
-// policy and the code_edit worker already name.
-func TestHarnessSystemPromptsPreferProjectAgentMD(t *testing.T) {
-	want := "prefer `AGENT.md` at the repository root"
-	for _, name := range []string{"CLINE_SYSTEM.md", "CODEX_SYSTEM.md"} {
-		if body := readShippedPolicy(t, name); !strings.Contains(body, want) {
-			t.Errorf("%s no longer tells the session to %q", name, want)
-		}
-	}
-}

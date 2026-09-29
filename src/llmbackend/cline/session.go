@@ -77,7 +77,6 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 		APIKey:          creds.APIKey,
 		BaseURL:         creds.BaseURL,
 		CWD:             cwd,
-		SystemPrompt:    clineSystemPrompt(),
 		Mode:            mode,
 		ResumeSessionID: resume,
 	})

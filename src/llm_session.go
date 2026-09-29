@@ -217,11 +217,12 @@ func (s *LLMSession) workspaceOrCwd() string {
 // it is, and hands back the answer with where it was recorded. round is the round to
 // record it as (RoundAuto: the session's next one).
 //
-// **A session's first prompt is always the frame** — the agent's own system prompt and the
-// policy (buildReasoningFrame): the instructions that do not change per task. A session that
-// has not been given it yet gets it first, as its own turn, and only then does the caller's
-// prompt go out. So an agent is told who it is before it is told what to do, and a task's
-// words never have to carry the rules (docs/prompt.md).
+// **A session's first prompt is always the frame** — that *is* the system prompt, for every
+// harness (buildReasoningFrame). Whether a provider has a native "system" field does not
+// change the words: the frame goes out as the first turn. A session that has not been given
+// it yet gets it first, as its own turn, and only then does the caller's prompt go out. So
+// an agent is told who it is before it is told what to do, and a task's words never have to
+// carry the rules (docs/prompt.md).
 //
 // A turn the model's output limit cut off is the one failed run worth another turn:
 // the session is intact, nothing of the truncated turn ran, and the agent can be told

@@ -1,8 +1,6 @@
 package codex
 
 import (
-	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -65,7 +63,6 @@ func SwapCodexClient(next *codexsdk.Client) *codexsdk.Client {
 // account names).
 func newCodexClient(workspace string) *codexsdk.Client {
 	return codexsdk.NewClient(
-		codexsdk.WithSystemPrompt(codexSystemPrompt()),
 		codexsdk.WithWorkspace(workspace),
 	)
 }
@@ -80,22 +77,6 @@ func agentWorkspace() string {
 // CodexDefaultModel is what a codex agent runs on when its account names no model: empty,
 // which leaves the choice to the CLI (the Codex SDK's own behaviour).
 func CodexDefaultModel() string { return "" }
-
-// codexSystemPrompt is the thread's instructions. The Codex SDK has no system-prompt
-// option, so the bridge prefixes this to a fresh thread's first turn (a resumed thread
-// already carries it). What it says is a **file** (src/agent_policy/CODEX_SYSTEM.md,
-// docs/prompt.md) — this package keeps no prompt text — and AUTONOMY_CODEX_SYSTEM_PROMPT
-// overrides the file.
-func codexSystemPrompt() string {
-	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CODEX_SYSTEM_PROMPT")); p != "" {
-		return p
-	}
-	text, err := llmbackend.PromptFile(llmbackend.CodexSystemPromptRel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[autonomy] codex system prompt: %v\n", err)
-	}
-	return text
-}
 
 // CodexModeFor maps an autonomy reasoning mode onto a Codex session mode. The bridge turns
 // it into a sandbox: a planner's cycle decides read-only, everything else may write the

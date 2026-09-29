@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-	DEFAULT_SYSTEM_PROMPT,
 	MODE_AGENT,
 	MODE_PLAN,
 	PROTOCOL,
@@ -100,10 +99,6 @@ test("usage is normalized, or absent when the provider said nothing", () => {
 		output_tokens: 2,
 		total_tokens: 3,
 	});
-});
-
-test("the default system prompt says what an autonomy worker is", () => {
-	assert.match(DEFAULT_SYSTEM_PROMPT, /autonomous coding agent/);
 });
 
 test("a thread is opened with its mode's sandbox, and the network the runtime asked for", () => {

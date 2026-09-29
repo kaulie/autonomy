@@ -67,9 +67,9 @@ func TestTheReasoningPromptIsTheFileItComesFrom(t *testing.T) {
 	}
 }
 
-// 别处的提示词也是文件 —— 包括以前写在 Go 里的那些：两个 harness 的 system prompt、
-// chat 模式的守卫、重启简报自己的话、探活那句。改文件 = 改它们说的话；文件不在则由
-// 构建里带的那份顶上（长跑的 agent 不该因为一个文件没在，就没话可说 / 少一道守卫）。
+// 别处的提示词也是文件 —— 包括以前写在 Go 里的那些：chat 模式的守卫、重启简报自己的话、
+// 探活那句。改文件 = 改它们说的话；文件不在则由构建里带的那份顶上。
+// 初始化 system prompt 不是 harness 文件：它是会话的第一条 prompt（frame）。
 func TestTheOtherPromptsAreTheFilesTheyComeFrom(t *testing.T) {
 	root := preparePolicyRoot(t)
 	t.Setenv("PROJECT_ROOT", root)
@@ -81,26 +81,14 @@ func TestTheOtherPromptsAreTheFilesTheyComeFrom(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("CLINE_SYSTEM.md", "CLINE-FROM-FILE")
-	write("CODEX_SYSTEM.md", "CODEX-FROM-FILE")
 	write("PROBE.md", "PROBE-FROM-FILE")
 	write("CHAT_MODE.md", "GUARD-FROM-FILE")
 	write("BRIEFING_NOTE.md", "BRIEFING-FROM-FILE")
 	write("INTERRUPTED_NOTE.md", " INTERRUPTED-FROM-FILE")
 
-	// harness 的 system prompt：读的人（cline / codex）通过 llmbackend.PromptFile 读同一个文件。
-	for _, one := range []struct {
-		rel  string
-		want string
-	}{
-		{llmbackend.ClineSystemPromptRel, "CLINE-FROM-FILE"},
-		{llmbackend.CodexSystemPromptRel, "CODEX-FROM-FILE"},
-		{llmbackend.ProbePromptRel, "PROBE-FROM-FILE"},
-	} {
-		got, err := llmbackend.PromptFile(one.rel)
-		if err != nil || got != one.want {
-			t.Fatalf("%s = %q (%v), want %q", one.rel, got, err, one.want)
-		}
+	got, err := llmbackend.PromptFile(llmbackend.ProbePromptRel)
+	if err != nil || got != "PROBE-FROM-FILE" {
+		t.Fatalf("probe = %q (%v), want PROBE-FROM-FILE", got, err)
 	}
 
 	// chat 模式的守卫：那段话在文件里，用户的话跟在后面。
@@ -122,9 +110,9 @@ func TestTheOtherPromptsAreTheFilesTheyComeFrom(t *testing.T) {
 
 	// 文件不在：构建里带的那份顶上，读的人照旧有话可说。
 	t.Setenv("PROJECT_ROOT", "")
-	got, err := llmbackend.PromptFile(llmbackend.ClineSystemPromptRel)
-	if err != nil || !strings.Contains(got, "autonomous coding agent") {
-		t.Fatalf("the embedded cline system prompt should answer without PROJECT_ROOT: %q (%v)", got, err)
+	got, err = llmbackend.PromptFile(llmbackend.ProbePromptRel)
+	if err != nil || strings.TrimSpace(got) == "" {
+		t.Fatalf("the embedded probe should answer without PROJECT_ROOT: %q (%v)", got, err)
 	}
 	guard, err = chatPlannerInput("hi")
 	if err != nil || !strings.Contains(guard, "CHAT MODE") {

@@ -1,13 +1,12 @@
 package cline
 
 import (
-	"fmt"
-	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/kaulie/autonomy/src/clinesdk"
+	"github.com/kaulie/autonomy/src/llmbackend"
 )
 
 // Shared llmbackend.Cline SDK client (single bridge process). Every cline-backed agent
@@ -53,7 +52,6 @@ func CloseClineClient() error {
 // The pool is the runtime's only source of keys — nothing here reads the environment.
 func newClineClient(workspace string) *clinesdk.Client {
 	return clinesdk.NewClient(
-		clinesdk.WithSystemPrompt(clineSystemPrompt()),
 		clinesdk.WithWorkspace(workspace),
 	)
 }
@@ -69,23 +67,7 @@ func agentWorkspace() string {
 // which leaves the choice to the bridge (it resolves one from the saved cline auth).
 func ClineDefaultModel() string { return "" }
 
-// clineSystemPrompt is the session system prompt. The llmbackend.Cline SDK requires one;
-// what it says is a **file** (src/agent_policy/CLINE_SYSTEM.md, docs/prompt.md) — this
-// package keeps no prompt text — and AUTONOMY_CLINE_SYSTEM_PROMPT overrides the file.
-func clineSystemPrompt() string {
-	if p := strings.TrimSpace(os.Getenv("AUTONOMY_CLINE_SYSTEM_PROMPT")); p != "" {
-		return p
-	}
-	text, err := llmbackend.PromptFile(llmbackend.ClineSystemPromptRel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[autonomy] cline system prompt: %v\n", err)
-	}
-	return text
-}
-
-// The line this replaced was a Go string; the wording is a file now, so what is left here is
-// nothing (kept for the diff: the old default said the same thing as CLINE_SYSTEM.md).
-// defaultAgentBackend resolves which LLM backend acquired agents use:
+// DefaultBackend resolves which LLM backend acquired agents use:
 // AUTONOMY_LLM_BACKEND=cursor (default) or =cline.
 func DefaultBackend() llmbackend.Backend {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AUTONOMY_LLM_BACKEND"))) {

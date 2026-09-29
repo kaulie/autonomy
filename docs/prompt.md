@@ -10,12 +10,18 @@
 
 | 文件 | 是哪条 prompt | 什么时候注入 |
 |---|---|---|
-| `REASONING_FRAME.md` | **第一条 prompt（agent 自己的）**：`{{SYSTEM_PROMPT}}`（这只 agent 被初始化时给的 system prompt，可空）+ `{{AGENT_POLICY}}`（策略文件 `AGENT_V2.md` 渲染后的全文） | **agent 创建时**（`Autonomy.InitializeAgent` → `LLMSession.GiveFirstPrompt`）；之后任何换会话的时刻（新会话、换 mode/cwd、桥重启）也以「那条会话的第一条 prompt」的身份再来一次 —— 见 `Agent.needsLLMFrame()` |
+| `REASONING_FRAME.md` | **第一条 prompt（也就是 system prompt）**：`{{SYSTEM_PROMPT}}`（这只 agent 被初始化时给的附加说明，可空）+ `{{AGENT_POLICY}}`（策略文件 `AGENT_V2.md` 渲染后的全文） | **agent 创建时**（`Autonomy.InitializeAgent` → `LLMSession.GiveFirstPrompt`）；之后任何换会话的时刻（新会话、换 mode/cwd、桥重启）也以「那条会话的第一条 prompt」的身份再来一次 —— 见 `Agent.needsLLMFrame()` |
 | `REASONING_DELTA.md` | **task prompt（task 那条）**：轮次标题、`{{DELTA_MARKER}}` 那句「这些值本轮给你」、可选的 `{{BRIEFING_NOTE}}`（重启续做的说明）、`{{PAYLOAD}}`（当前 Task / Runtime Context / Context Entity / World / Constraints 的 JSON） | **task 到了之后**：task 到来后的那一轮起，每个决策轮一条 |
 
 **两条互不拼接**：frame 不再是「首轮那条消息的前半段」——`reasoningPrompt` 只渲染 delta。而一条会话的
 **第一条 prompt 永远是 frame**（`LLMSession.Say` 在接手任何 prompt 前先 `GiveFirstPrompt`），所以没有任何一轮
 会在没被告知规则的情况下跑；task 的话只走 delta，换 task、换 cycle 都不重发规则。
+
+**不按 harness 再写一份 system prompt。** Cursor / Cline / Codex / Claude 的初始化词是同一条：
+`GiveFirstPrompt` 发出的 frame（worker 则是 `CODE_EDIT.md` 等委托模板）。某个 SDK 若要求
+`systemPrompt` 字段非空（Cline 会在 `undefined` 上 `.trim()` 崩），桥只填一个无语义的 stub，
+不承载政策。Codex 没有原生 system-prompt API，以前把 `CODEX_SYSTEM.md` 拼进第一轮，等于
+和 frame 叠了两份 —— 那条路径已去掉。
 
 两条各自为什么长这样，写在 `src/prompt.go` 的注释里，简单说：会话自己记着 frame，所以每轮只该付 delta 的
 token；而「frame 里的值不会变」这条，是靠把每轮会变的占位符在 frame 里替换成
@@ -30,11 +36,12 @@ token；而「frame 里的值不会变」这条，是靠把每轮会变的占位
 | `TURN_TRUNCATED.md` | 一轮被截断时的追加重试提示（`src/llm_turn_retry.go`） |
 | `CHAT_MODE.md` | chat 那一轮的硬约束（「只回话、别碰计划」）—— 拼在用户的话前面（`src/chat_mode.go`） |
 | `BRIEFING_NOTE.md` / `INTERRUPTED_NOTE.md` | 重启续做时那块「你自己的记录」自己的话（`src/task_record.go`；后者拼在前者后面） |
-| `CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` | **harness 自己的 system prompt**：cline / codex 建会话时告诉 provider 的那句（`src/llmbackend/*/client.go`，读法见下）；工作区是项目检出时优先读根目录 `AGENT.md` |
 | `PROBE.md` | 探活只问的那一句（`src/llmbackend/*/probe.go`） |
 | `CONSTRAINTS.json` | 运行时自己的事实与边界（不是提示词文字，而是 `{{CONSTRAINTS}}` 的值，见 [policy.md](policy.md)） |
 
-**这一条现在没有例外**：以前写在 Go 字符串里的那几句（两个 harness 的 system prompt、chat 守卫、两个 note、探活那句）都成了上表里的文件 —— 起因是 review 时发现「每一句提示词都来自文件」这句话当时并不成立。
+**这一条现在没有例外**：chat 守卫、两个 note、探活那句都是文件。曾经按 harness 各写一份
+`CLINE_SYSTEM.md` / `CODEX_SYSTEM.md`，那是把「SDK 有没有 systemPrompt 字段」误当成了
+「agent 的初始化词要分后端写」—— 已删除。
 
 ## 怎么被加载
 
@@ -43,10 +50,10 @@ token；而「frame 里的值不会变」这条，是靠把每轮会变的占位
 - **读不到就退回二进制里带的那份**：所有这些文件都用 `//go:embed` 打进 binary。一个长跑的会话不该
   因为某个文件不在了，就让后面的决策轮失败。
   （策略 `AGENT_V2.md` 仍然是「只读磁盘」：它本来就是部署要改的那个文件。）
-- **harness 读自己的提示词走 `llmbackend.PromptFile`**（`src/llmbackend/prompt_file.go`）：同一个规则
+- **harness 读探活那句走 `llmbackend.PromptFile`**（`src/llmbackend/prompt_file.go`）：同一个规则
   （先读 `$PROJECT_ROOT` 的文件，再退回构建里带的那份），但读的人在**子包**里 —— `//go:embed` 到不了
   父目录，所以由 package autonomy 在 `init` 里把内嵌副本注册进去（`SetPromptFallback`）。
-  文件的相对路径在 `llmbackend` 里命名（`ClineSystemPromptRel` 等），文件与读它的人不会各写一份。
+  相对路径在 `llmbackend` 里命名（`ProbePromptRel`）。
 - **占位符就是一张表**：`{{TASK}}`、`{{WORLD}}`、`{{CONSTRUCTS}}`… 名字在 `src/prompt.go` 的
   `promptPlaceholders`；planner 的策略与 worker 的提示词**共用同一套名字**（一处定义，四处用）。
 - **模板尾部空行会被裁掉**（`applyPromptTemplate`）：文件常以换行结尾，而值自带结尾 ——

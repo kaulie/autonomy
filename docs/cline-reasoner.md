@@ -54,7 +54,6 @@ runtime → bridge
 | `AUTONOMY_CLINE_MODEL` | 空 → 用 `cline auth` 保存的 model | 模型 id，如 `deepseek-v4-pro`。**注意**：`AUTONOMY_LLM_MODEL` 是默认(Cursor)后端的模型，不会用于 Cline |
 | `AUTONOMY_CLINE_API_KEY` | 空 → 用 `cline auth` 保存的凭据 | provider key；通常不用设 |
 | `AUTONOMY_CLINE_BASE_URL` | 空 | 兼容 OpenAI 的自建端点等 |
-| `AUTONOMY_CLINE_SYSTEM_PROMPT` | 见下 | 覆盖 session system prompt（SDK **必须**有非空 system prompt） |
 | `AUTONOMY_CLINE_INTERACTIVE` | `1` | 新建 session 是否以 interactive 启动。**默认 `1`，这是"常驻会话"的前提**：SDK 对 **非** interactive session 是"单次 run"语义 —— run 一结束就 `finalizeSingleRun` → `shutdownSession`（`sessions.delete` + emit `ended`），下一次 `send` 直接 `session_not_found: session not found: cls-…`；interactive session 则 `completeInteractiveTurn` → idle 保留。这里没有 UI，**桥就是 host**：自己驱动 `send`，autonomy 的 prompt 是自足的（agent 的 yolo preset `enableAskQuestion=false`，不会等人）。设 `0` / `off` / `false` 回到单次 run 语义（只用来复现上面那个报错） |
 | `AUTONOMY_CLINE_TRACE` | `0` | 桥 stderr 的 trace 级别：**`0`（默认）= 静默**（可读日志在 autonomy 侧，见"日志"一节）；`signal` = 只打里程碑（thinking 块、tool-call，带内容）；`1`（或 `AUTONOMY_LLM_DEBUG=1`）= 全量，每个事件一行（含 `chunk` 回声）。显式设了 `AUTONOMY_CLINE_TRACE` 时它优先于 `AUTONOMY_LLM_DEBUG` |
 | `AUTONOMY_CLINE_TRACE_MAX` | `600` | 桥 `signal` 行里**每个字段**（thinking 文本、工具入参/输出）的字符预算，超出截断并标 `…(+Nch)` |
@@ -206,8 +205,9 @@ go run ./cmd/autonomyd                     # LLMReasoner 与 code_edit 现在都
 | run 日志 / 边跑边写消息（`TestLLMTraceLiveMessages`，2026-09-14 实测） | 桥只打 `info:` 行（默认静默），autonomy 侧打：`[autonomy] llm seq=0 user: Use the shell tool to run exactly: echo hi-from-llm-trace — …` → `seq=1 thinking (1.013s): The user wants me to run exactly: echo hi-from-llm-trace using shell tool, then reply with just the output. I need to use run_commands with the command. Let me do that.` → `seq=2 tool run_commands call=call_00_axoqJCMiuCepDERsElk08340 args={"commands":["echo hi-from-llm-trace"]} -> [{"query":"echo hi-from-llm-trace","result":"hi-from-llm-trace\n","success":true}]` → `seq=3 assistant: hi-from-llm-trace`；**这 4 行在 run 期间就写进 `llm_messages`**（不是 `Finish` 之后才出现） |
 
 坑（已修）：SDK 在 **没有 system prompt** 时会内部 `undefined.trim()` 抛错（`Cannot read
-properties of undefined (reading 'trim')`），所以桥会兜底一个通用 prompt，autonomy 侧
-`defaultClineSystemPrompt()` 也会给默认值。
+properties of undefined (reading 'trim')`）。桥因此只填一个无语义 stub（`.`），**不是**
+agent 的初始化词。真正的第一条 prompt 一律是 runtime 的 frame（`GiveFirstPrompt`），
+与 Cursor / Claude 相同。
 
 ## 排查"零事件卡死"
 
