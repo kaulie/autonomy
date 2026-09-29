@@ -2,6 +2,8 @@
 
 A goal-driven agent runtime for autonomous action, world-state awareness, capability composition, and self-verification.
 
+后续在本仓库开发的 agent 从 [`AGENT.md`](AGENT.md) 进，按 [`project_map/`](project_map/README.md) 理解现状（定位 / 架构 / 栈 / 部署 / 发布 / 开发流程）。概念定义仍在 [`docs/`](docs/README.md)。
+
 Autonomy is an experimental Agent Runtime built from first principles.
 
 The goal is simple:
@@ -74,9 +76,9 @@ Full principle set: [`docs/principles.md`](docs/principles.md)
 
 ## Status
 
-Early-stage experimental project.
+Experimental project: the ontology is still allowed to evolve, but the runnable system is already the HTTP runtime, not only a hello loop.
 
-**Current focus:** flat Go core under `src/` aligned with the architecture baseline — entities vs behavior interfaces — plus a runnable hello loop.
+**Current shape:** flat Go core under `src/` (entities vs behavior interfaces) plus `cmd/autonomyd` — store, agents, world, task/data APIs, account pool, and UI. `cmd/hello` remains the small verification-first demo. Operational map: [`project_map/`](project_map/README.md).
 
 Entity objects: `Task`, `Agent`, `Asset`, `Action`, `Event`.  
 Behavior interfaces: `DecisionMaker` (on Agent), `Capability`, `Runtime`, `Verifier`, `World`.
