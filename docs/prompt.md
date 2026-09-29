@@ -25,12 +25,12 @@ token；而「frame 里的值不会变」这条，是靠把每轮会变的占位
 
 | 文件 | 给谁 |
 |---|---|
-| `AGENT_V2.md` | planner 的策略（Output Schema、规则、完成契约的写法…）—— frame 的主体 |
-| `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md` | 被委托出去的 worker（`code_edit` / `deployment.monitor`）各自的提示词 |
+| `AGENT_V2.md` | planner 的策略（Output Schema、规则、完成契约的写法…）—— frame 的主体；初始化时要求优先用目标仓库根目录 `AGENT.md` 建立项目认知 |
+| `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md` | 被委托出去的 worker（`code_edit` / `deployment.monitor`）各自的提示词；`CODE_EDIT.md` 同样要求优先读项目根 `AGENT.md` |
 | `TURN_TRUNCATED.md` | 一轮被截断时的追加重试提示（`src/llm_turn_retry.go`） |
 | `CHAT_MODE.md` | chat 那一轮的硬约束（「只回话、别碰计划」）—— 拼在用户的话前面（`src/chat_mode.go`） |
 | `BRIEFING_NOTE.md` / `INTERRUPTED_NOTE.md` | 重启续做时那块「你自己的记录」自己的话（`src/task_record.go`；后者拼在前者后面） |
-| `CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` | **harness 自己的 system prompt**：cline / codex 建会话时告诉 provider 的那句（`src/llmbackend/*/client.go`，读法见下） |
+| `CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` | **harness 自己的 system prompt**：cline / codex 建会话时告诉 provider 的那句（`src/llmbackend/*/client.go`，读法见下）；工作区是项目检出时优先读根目录 `AGENT.md` |
 | `PROBE.md` | 探活只问的那一句（`src/llmbackend/*/probe.go`） |
 | `CONSTRAINTS.json` | 运行时自己的事实与边界（不是提示词文字，而是 `{{CONSTRAINTS}}` 的值，见 [policy.md](policy.md)） |
 

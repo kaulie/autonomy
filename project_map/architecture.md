@@ -49,8 +49,9 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 |---|---|
 | `REASONING_FRAME.md` | 初始化：system + policy（只在 session 的第一次 prompt） |
 | `REASONING_DELTA.md` | 每轮：当前 Task / Context / World / Runtime Context |
-| `AGENT_V2.md` | policy 正文（frame 携带） |
-| `CODE_EDIT.md` | `code_edit` worker |
+| `AGENT_V2.md` | policy 正文（frame 携带）。初始化时要求 planner **优先用目标仓库根目录 `AGENT.md`** 建立项目认知 |
+| `CODE_EDIT.md` | `code_edit` worker。同样要求优先读工作区 / clone 根上的 `AGENT.md` |
+| `CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` | 对应 harness 建会话时的 system prompt；工作区是项目检出时同样指向根目录 `AGENT.md` |
 | `DEPLOYMENT_MONITOR.md` | `deployment.monitor` worker |
 | `CONSTRAINTS.json` | 运行时约束（`src/policy.go`），不是写死在 renderer 里的句子 |
 
