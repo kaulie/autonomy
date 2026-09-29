@@ -294,6 +294,10 @@ type Agent struct {
 	// before any task exists for it. It is carried in the reasoning frame, so it
 	// reaches the agent's session ahead of the task's own words (buildReasoningFrame).
 	SystemPrompt string
+	// rolePrompt is the first system prompt waiting to be placed: it locates this
+	// agent's role. A harness that injects at session create reads it via Facts.
+	// Runtime state; not persisted.
+	rolePrompt string
 	// RequirePlanApproval makes the agent plan first and wait: the run pauses on the
 	// first plan it makes (status awaiting_approval) and only a confirmation
 	// (MessageKindApproval) lets that plan execute, so implementation starts after
@@ -365,7 +369,8 @@ func (a *Agent) Facts() llmbackend.Facts {
 		SessionID: a.LLMAgentID,
 		FrameSent: a.llmFrameSent,
 		Ephemeral: a.IsEphemeral(),
-		Creds:     a.credential,
+		Creds:      a.credential,
+		RolePrompt: a.rolePrompt,
 	}
 }
 

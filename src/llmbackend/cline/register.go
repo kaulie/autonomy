@@ -9,6 +9,7 @@ func init() {
 	llmbackend.Register(llmbackend.Harness{
 		Backend:      llmbackend.Cline,
 		Provider:     llmbackend.ProviderCline,
+		SystemInject: llmbackend.SystemInjectSession,
 		New:          func(host llmbackend.Host) llmbackend.SessionImpl { return newClineSession(host) },
 		Adapter:      ClineStreamAdapter{},
 		DefaultModel: ClineDefaultModel,

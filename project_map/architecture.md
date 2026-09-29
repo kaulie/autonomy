@@ -56,7 +56,9 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 
 改措辞改文件即可；文件缺失则该次委托失败。占位符由 `src/prompt.go` 与 `src/capability/broker` 渲染。`{{CONSTRUCTS}}` 来自已注册能力的 `spec.Declared`（含 input/output），**不含** provider——谁执行是 runtime 的决定。
 
-一只 agent 的生命里只有两次注入顺序：先 frame（`GiveFirstPrompt`），再 task 到达后的 delta。新 session（换 cwd、桥重启、Cursor Create）会再给一次 frame，frame 从不拼进 task prompt。**第一条 prompt 就是 system prompt**，对所有 harness 相同；Cline 桥若必须填 SDK 的 `systemPrompt` 字段，只放无语义 stub，不再另写一份政策。
+一只 agent 的生命里只有两次注入顺序：先 frame（`GiveFirstPrompt`），再 task 到达后的 delta。新 session（换 cwd、桥重启、Cursor Create）会再给一次 frame，frame 从不拼进 task prompt。
+
+**第一条 system 定位角色，与 harness 无本质区别。** 各后端只是注入时机不同（`llmbackend.SystemInject`）：Cline 在建会话时写入同一份 frame；Cursor / Claude / Codex 把它当作第一条 turn。不要按 harness 再写一套政策。
 
 ## 内置能力（`src/capability/register.go`）
 

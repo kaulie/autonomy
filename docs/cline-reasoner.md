@@ -204,10 +204,9 @@ go run ./cmd/autonomyd                     # LLMReasoner 与 code_edit 现在都
 | autonomy 层（`TestClineAgentLive`） | `text="pong"`，usage in 1671/out 32/cost 0.0755¢；事件 channel 分布 assistant=3 / thought=30 / meta=5 / status=2 / result=1 |
 | run 日志 / 边跑边写消息（`TestLLMTraceLiveMessages`，2026-09-14 实测） | 桥只打 `info:` 行（默认静默），autonomy 侧打：`[autonomy] llm seq=0 user: Use the shell tool to run exactly: echo hi-from-llm-trace — …` → `seq=1 thinking (1.013s): The user wants me to run exactly: echo hi-from-llm-trace using shell tool, then reply with just the output. I need to use run_commands with the command. Let me do that.` → `seq=2 tool run_commands call=call_00_axoqJCMiuCepDERsElk08340 args={"commands":["echo hi-from-llm-trace"]} -> [{"query":"echo hi-from-llm-trace","result":"hi-from-llm-trace\n","success":true}]` → `seq=3 assistant: hi-from-llm-trace`；**这 4 行在 run 期间就写进 `llm_messages`**（不是 `Finish` 之后才出现） |
 
-坑（已修）：SDK 在 **没有 system prompt** 时会内部 `undefined.trim()` 抛错（`Cannot read
-properties of undefined (reading 'trim')`）。桥因此只填一个无语义 stub（`.`），**不是**
-agent 的初始化词。真正的第一条 prompt 一律是 runtime 的 frame（`GiveFirstPrompt`），
-与 Cursor / Claude 相同。
+Cline 的原生 `systemPrompt` 是 **同一份角色 frame 的注入时机**（建会话时），不是另一套政策。
+SDK 在字段为 `undefined` 时会 `.trim()` 崩：只有探活 / 尚未给出 frame 的 attach 才用无语义
+stub（`.`）。`GiveFirstPrompt` 会在开会话前把 frame 放进 `Facts.RolePrompt`。
 
 ## 排查"零事件卡死"
 
