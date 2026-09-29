@@ -11,6 +11,12 @@ workspace above.
 
 {{AGENT}}
 
+## Project Orientation
+
+Before you invent a picture of this repository, **prefer `AGENT.md` at the project root** (the checkout root in this workspace, or the root after you clone). It is the operating guide for agents on this project and points at `project_map/` for positioning, architecture, stack, deploy, release, and workflow.
+
+Read it first when you need project cognition. Follow it when it matches what you see in the code. If it is stale or wrong, update it or raise the mismatch — do not default to the document over the facts.
+
 ## Code Edit Workspace Policy
 
 You are responsible for implementing the assigned coding task in the provided

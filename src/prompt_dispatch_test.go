@@ -31,6 +31,8 @@ func TestThePlannerPolicyDispatchesOnCapabilities(t *testing.T) {
 
 	for _, want := range []string{
 		"## Capability Dispatch",
+		"## Project Orientation",
+		"prefer `AGENT.md` at that project's repository root",
 		"Steps: Capability + Input",
 		"the only moves a plan has",
 		"{{CONSTRUCTS}}",
@@ -94,9 +96,25 @@ func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
 // own identity and sandbox — not a plan that names agents.
 func TestTheWorkerPromptIsStillTheWorkersOwn(t *testing.T) {
 	policy := readShippedPolicy(t, "CODE_EDIT.md")
-	for _, want := range []string{"{{WORKSPACE}}", "{{GOAL}}", "{{AGENT}}", "{{CONSTRUCTS}}"} {
+	for _, want := range []string{
+		"{{WORKSPACE}}", "{{GOAL}}", "{{AGENT}}", "{{CONSTRUCTS}}",
+		"## Project Orientation",
+		"prefer `AGENT.md` at the project root",
+	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the worker prompt no longer carries %q", want)
+		}
+	}
+}
+
+// Harness session system prompts are the other initialization injection for
+// cline / codex. They must point at the same project-root AGENT.md the planner
+// policy and the code_edit worker already name.
+func TestHarnessSystemPromptsPreferProjectAgentMD(t *testing.T) {
+	want := "prefer `AGENT.md` at the repository root"
+	for _, name := range []string{"CLINE_SYSTEM.md", "CODEX_SYSTEM.md"} {
+		if body := readShippedPolicy(t, name); !strings.Contains(body, want) {
+			t.Errorf("%s no longer tells the session to %q", name, want)
 		}
 	}
 }

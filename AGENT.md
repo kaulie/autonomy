@@ -16,6 +16,8 @@
 | 开发在 task workspace、分支带 task id、测试按 `docs/testing.md` | [project_map/development.md](project_map/development.md)、[BRANCHING.md](BRANCHING.md) |
 | 栈是 Go 1.25 + 可插拔 DB engine + Cursor/Cline/Codex/Claude harness + 服务端 HTML | [project_map/tech-stack.md](project_map/tech-stack.md) |
 
+Runtime 会在 planner 的初始化 frame（`src/agent_policy/AGENT_V2.md`）和 worker 的初始化提示（`CODE_EDIT.md`，以及 Cline / Codex 的 harness system prompt）里要求：**优先读目标仓库根目录的 `AGENT.md`** 来建立项目认知。你正在读的就是那份文件。
+
 **禁止**只凭根 `README.md` 的「Early-stage / hello loop」或 `docs/README.md` 里过期的「下一里程碑」来理解现状。那两处曾经把系统写成骨架；与代码不符时以 `project_map` + 代码为准，并履行下面第 3、4 节。
 
 概念词（Task、Capability、Verification、Inbox…）仍以 `docs/` 为定义。`project_map` 描述仓库怎么落地。两者冲突时进入第 4 节，不要各读各的。
