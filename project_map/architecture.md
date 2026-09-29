@@ -51,13 +51,12 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `REASONING_DELTA.md` | 每轮：当前 Task / Context / World / Runtime Context |
 | `AGENT_V2.md` | policy 正文（frame 携带）。初始化时要求 planner **优先用目标仓库根目录 `AGENT.md`** 建立项目认知 |
 | `CODE_EDIT.md` | `code_edit` worker。同样要求优先读工作区 / clone 根上的 `AGENT.md` |
-| `CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` | 对应 harness 建会话时的 system prompt；工作区是项目检出时同样指向根目录 `AGENT.md` |
 | `DEPLOYMENT_MONITOR.md` | `deployment.monitor` worker |
 | `CONSTRAINTS.json` | 运行时约束（`src/policy.go`），不是写死在 renderer 里的句子 |
 
 改措辞改文件即可；文件缺失则该次委托失败。占位符由 `src/prompt.go` 与 `src/capability/broker` 渲染。`{{CONSTRUCTS}}` 来自已注册能力的 `spec.Declared`（含 input/output），**不含** provider——谁执行是 runtime 的决定。
 
-一只 agent 的生命里只有两次注入顺序：先 frame（`GiveFirstPrompt`），再 task 到达后的 delta。新 session（换 cwd、桥重启、Cursor Create）会再给一次 frame，frame 从不拼进 task prompt。
+一只 agent 的生命里只有两次注入顺序：先 frame（`GiveFirstPrompt`），再 task 到达后的 delta。新 session（换 cwd、桥重启、Cursor Create）会再给一次 frame，frame 从不拼进 task prompt。**第一条 prompt 就是 system prompt**，对所有 harness 相同；Cline 桥若必须填 SDK 的 `systemPrompt` 字段，只放无语义 stub，不再另写一份政策。
 
 ## 内置能力（`src/capability/register.go`）
 

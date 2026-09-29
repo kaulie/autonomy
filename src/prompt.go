@@ -29,13 +29,12 @@ const defaultAgentPolicyRel = "src/agent_policy/AGENT_V2.md"
 const (
 	reasoningFrameRel = "src/agent_policy/REASONING_FRAME.md"
 	reasoningDeltaRel = "src/agent_policy/REASONING_DELTA.md"
-	// The prompts that used to be Go strings. They are files now, like the rest: the harness
-	// system prompts (read through llmbackend.PromptFile, inside the harness), the chat-mode
-	// guard, the restart briefing's own words, and the live probe's one line.
+	// The prompts that used to be Go strings. They are files now, like the rest: the
+	// chat-mode guard, the restart briefing's own words, and the live probe's one line.
+	// There is no per-harness "system prompt" file: the first prompt is the frame.
 	chatModeRel        = "src/agent_policy/CHAT_MODE.md"
 	briefingNoteRel    = "src/agent_policy/BRIEFING_NOTE.md"
 	interruptedNoteRel = "src/agent_policy/INTERRUPTED_NOTE.md"
-	// 三个 harness 用的（两个 system prompt + 探活那句）在 llmbackend 里命名，两边引用同一常量。
 )
 
 // promptPlaceholders is the placeholder vocabulary a policy or a delegated
@@ -168,18 +167,12 @@ var embeddedBriefingNote string
 //go:embed agent_policy/INTERRUPTED_NOTE.md
 var embeddedInterruptedNote string
 
-//go:embed agent_policy/CLINE_SYSTEM.md
-var embeddedClineSystemPrompt string
-
-//go:embed agent_policy/CODEX_SYSTEM.md
-var embeddedCodexSystemPrompt string
-
 //go:embed agent_policy/PROBE.md
 var embeddedProbePrompt string
 
 // SetPromptFallback is registered from here: package autonomy is the one that can embed
-// src/agent_policy, so the harnesses that read their own system prompt through
-// llmbackend.PromptFile get this build's copies from here (src/llmbackend/prompt_file.go).
+// src/agent_policy, so the harnesses that read prompt files through llmbackend.PromptFile
+// (the live probe) get this build's copies from here (src/llmbackend/prompt_file.go).
 func init() {
 	llmbackend.SetPromptFallback(func(rel string) (string, bool) {
 		text := embeddedPrompt(rel)
@@ -200,10 +193,6 @@ func embeddedPrompt(rel string) string {
 		return embeddedBriefingNote
 	case interruptedNoteRel:
 		return embeddedInterruptedNote
-	case llmbackend.ClineSystemPromptRel:
-		return embeddedClineSystemPrompt
-	case llmbackend.CodexSystemPromptRel:
-		return embeddedCodexSystemPrompt
 	case llmbackend.ProbePromptRel:
 		return embeddedProbePrompt
 	}

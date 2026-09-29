@@ -9,13 +9,11 @@ import (
 )
 
 const (
-	// ClineSystemPromptRel / CodexSystemPromptRel / ProbePromptRel are the prompts a harness
-	// itself is told or asks with: its system prompt (what the provider works from) and the
-	// live probe one line. Named here so the file and its readers cannot drift — package
-	// autonomy embeds the same files (docs/prompt.md).
-	ClineSystemPromptRel = "src/agent_policy/CLINE_SYSTEM.md"
-	CodexSystemPromptRel = "src/agent_policy/CODEX_SYSTEM.md"
-	ProbePromptRel       = "src/agent_policy/PROBE.md"
+	// ProbePromptRel is the one-line live probe a harness asks with. Named here so the
+	// file and its readers cannot drift — package autonomy embeds the same file
+	// (docs/prompt.md). An agent's first prompt is not a harness file: it is the
+	// runtime frame (GiveFirstPrompt), the same for every backend.
+	ProbePromptRel = "src/agent_policy/PROBE.md"
 )
 
 // PromptFile reads one prompt file — `src/agent_policy/<name>.md` — the way every prompt in
@@ -23,9 +21,9 @@ const (
 // the copy this build carries as the last resort (the same rule package autonomy follows in
 // src/prompt.go, docs/prompt.md).
 //
-// It exists so a harness can be told its system prompt without that harness keeping prompt
-// text in Go: `src/llmbackend/cline` and `src/llmbackend/codex` call this, and the wording
-// lives in a file like everything else an agent is told.
+// It exists so a harness can read a prompt file (today: the live probe) without keeping
+// prompt text in Go. An agent's initialization words are not read here — they go out as
+// the session's first turn (docs/prompt.md).
 //
 // The build's own copies are embedded in package autonomy (it is the package that owns
 // src/agent_policy), so it registers them here at init — see SetPromptFallback.

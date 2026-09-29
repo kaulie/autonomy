@@ -42,7 +42,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 
-import { DEFAULT_MODE, DEFAULT_SYSTEM_PROMPT, PROTOCOL, coerceText, errorReason, interactiveSession, messageOf, resolveClineDefaults, runResultErrorEvent, withErrorReason } from "./config.mjs";
+import { DEFAULT_MODE, SDK_SYSTEM_PROMPT_STUB, PROTOCOL, coerceText, errorReason, interactiveSession, messageOf, resolveClineDefaults, runResultErrorEvent, withErrorReason } from "./config.mjs";
 import { continuationSeed } from "./resume.mjs";
 import { eventLabel, signalLine, traceLevel, traceWidth } from "./trace.mjs";
 
@@ -321,7 +321,7 @@ function createAgent(params) {
 			// Mirrors web-cursor: no sub-agents/teams for a single task agent.
 			enableSpawnAgent: false,
 			enableAgentTeams: false,
-			systemPrompt: (params.systemPrompt ?? "").trim() || DEFAULT_SYSTEM_PROMPT,
+			systemPrompt: (params.systemPrompt ?? "").trim() || SDK_SYSTEM_PROMPT_STUB,
 		},
 	};
 	agents.set(agentId, handle);

@@ -19,10 +19,8 @@ export const PROTOCOL = "codex-bridge/1";
 /** The model the CLI uses when the caller names none (the CLI's own default). */
 export const DEFAULT_MODEL = "";
 
-export const DEFAULT_SYSTEM_PROMPT =
-	"You are an autonomous coding agent working inside the configured workspace. " +
-	"Use the available tools to complete the task, verifying your work, and finish " +
-	"with a concise summary of what you changed and why.";
+// Codex has no native system-prompt API. The agent's first prompt is the first
+// turn (the runtime frame). Do not invent a second default here.
 
 /** The reasoning modes the runtime asks for. */
 export const MODE_PLAN = "plan";

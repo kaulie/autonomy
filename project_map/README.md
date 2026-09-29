@@ -28,5 +28,6 @@
 1. **多篇 `docs/` 仍写根包下的 `src/sqlite_*.go` / `src/postgres_*.go`。** 引擎实现已迁到 `src/db/`（见 `src/db/doc.go`）。本轮已改 `store.md`、`inbox.md`、`broadcast.md`、`execution-step.md`、`llm-message.md`、`llm-event-stream.md` 里的路径。
 2. **`docs/accounts.md` 仍写三个 harness。** `src/llmbackend/all` 已链接 `cursor` / `cline` / `codex` / `claude`。本轮已把账号池文档补上 `claude`。
 3. **根 `README.md`「Status」与 `docs/README.md`「当前阶段 / 下一里程碑」偏旧。** 仍把项目写成「骨架 + hello 闭环」。事实是：`cmd/autonomyd` 已是带任务 API、数据 API、账号池、自包含 UI、多 harness、优雅重启和发版包装的 runtime。hello 仍在 `cmd/hello`，但它不是系统的主形态。本目录按后者描述；`docs/README.md` 的里程碑段落本轮改为指向现状，避免把后续 agent 锁在过期阶段叙事里。
+4. **`CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` 把 system prompt 按 harness 分了两份。** 事实：初始化词就是会话的第一条 prompt（`GiveFirstPrompt` 的 frame），与后端无关。Cline 的 `systemPrompt` 字段只是 SDK 不能收 `undefined` 的运输要求；Codex 没有原生 system-prompt，以前把文件拼进第一轮等于叠了两份。已删除那两个文件，Cline 桥只留无语义 stub。
 
 后续 agent 若发现上述条目已被新代码推翻，删除或改写它们，不要累积过期异议。
