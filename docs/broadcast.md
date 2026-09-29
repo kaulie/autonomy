@@ -82,7 +82,7 @@
 | 关注点 | 文件 |
 |---|---|
 | 广播（范围解析 / 投递 / 报告） | `src/broadcast.go` |
-| 目标从哪来（`ListTasks` 端口） | `src/store.go`、`src/sqlite_query.go` |
+| 目标从哪来（`ListTasks` 端口） | `src/store.go`、`src/db/sqlite_query.go` |
 | 一条指令消息怎么来的（广播复用同一条路） | `src/autonomy.go`（`instruction`）、`src/api_service.go` |
 | 消息模型与队列 | `src/message.go`、`src/inbox.go` |
 | HTTP 端点 | `src/http_server.go`（`POST /api/broadcast`） |

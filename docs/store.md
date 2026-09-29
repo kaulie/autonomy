@@ -9,8 +9,8 @@ MySQL …）只是可插拔的 **engine** 实现。切换数据库 = 注册并�
 - **七个端口**：`TaskStore` / `AgentStore` / `InboxStore` / `ConversationStore` / `ExecutionStore` /
   `VerificationStore` / `TurnQueryStore`（同文件）——上层**按需**依赖，而不是整个 `Store`。
 - **引擎 SPI**：`StoreEngine`（`src/store_engine.go`）——一个 engine 对应一种数据库/方言。
-- **内建引擎**：`sqlite`（`src/sqlite_engine.go` + `src/sqlite_*.go`），默认启用。
-- **PostgreSQL 引擎**：`postgres`（`src/postgres_engine.go` + `src/postgres_*.go`）——
+- **内建引擎**：`sqlite`（`src/db/sqlite_engine.go` + `src/db/sqlite_*.go`），默认启用。引擎实现全部在 `src/db`（见该包 `doc.go`），不再放在根包。
+- **PostgreSQL 引擎**：`postgres`（`src/db/postgres_engine.go` + `src/db/postgres_*.go`）——
   同一份 `Store` 契约的第二套实现，靠 `AUTONOMY_STORE_ENGINE=postgres` 启用（见下文「PostgreSQL」）。
 
 ## 分层
@@ -70,7 +70,7 @@ StoreEngine（Name / DefaultDSN / Open）
 
 - **上层只认识端口**，不认识 SQL、方言、表名；所有 DB 访问都经 `activeStore()` 及其端口切片。
 - **engine 独占其 schema 与迁移**：DDL、`ON CONFLICT`、`INSERT OR IGNORE`、占位符（`?` / `$n`）、
-  `PRAGMA`、`RETURNING`、以及「Go 字段 ↔ 列值」的编码（`src/sqlite_encoding.go` / `src/postgres_encoding.go`）
+  `PRAGMA`、`RETURNING`、以及「Go 字段 ↔ 列值」的编码（`src/db/sqlite_encoding.go` / `src/db/postgres_encoding.go`）
   全部封装在 engine 内。
 - **数据模型中立**：`LLMEvent` / `LLMUsage` / `ReasonTurn` / `AgentMessage` 等模型本身与数据库无关，engine 不参与解释。
 - **写者不止一个**：runtime 有多个 goroutine 在写（一轮自己的记录、inbox 消费者在跑同一条 task 的下一条消息）。
@@ -146,7 +146,7 @@ export AUTONOMY_STORE_DSN="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=
 RFC3339 UTC 文本，`cost_cents` 是 NULL 还是 0 仍然区分，`llm_messages` 的 seq 规则（输入 0、聚合 1..N、
 返回 N+1）一致，`completion_contract` 的首写即定稿一致。
 
-测试（`src/postgres_store_test.go`）跑在**真的 PostgreSQL** 上：每个用例自己建一个库、跑完删掉，
+测试（`src/db/postgres_store_test.go`）跑在**真的 PostgreSQL** 上：每个用例自己建一个库、跑完删掉，
 `AUTONOMY_POSTGRES_TEST_DSN` 指定服务器（默认 `postgres://localhost:5432/postgres?sslmode=disable`），
 连不上就 skip。SQL 是这里要测的东西，所以不拿 mock 测。
 
@@ -220,7 +220,7 @@ export AUTONOMY_STORE_READ_DSN="postgres://autonomy:…@127.0.0.1:5433/autonomy?
 
    在 `Open` 里完成该数据库的连接与 **schema 迁移**（迁移属于 engine，不上浮）。
 
-2. 实现 `Store` 的各个方法（可参考 `src/sqlite_store.go`）。
+2. 实现 `Store` 的各个方法（可参考 `src/db/sqlite_store.go`）。
 
 3. 注册并启用：
 

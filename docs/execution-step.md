@@ -177,7 +177,7 @@ select i.seq, i.kind, i.provider, i.reason_turn_id, r.status
 |---|---|
 | 类型与派生结果 | `src/execution.go` |
 | Store 契约 | `src/store.go`（`CreateExecutionPlan` / `AppendExecutionStepPlans` / `AppendExecutionStep` / `AppendExecutionStepInteraction` / `ExecutionPlanOutcome` …） |
-| sqlite 实现 | `src/sqlite_execution.go`（DDL 在 `src/sqlite_store.go`） |
+| sqlite 实现 | `src/db/sqlite_execution.go`（DDL 在 `src/db/sqlite_store.go`） |
 | 写序（先计划、后执行） | `src/runtime.go`（`Execute` / `recordPlan` / `recordStep`） |
 | 入参来源（值与绑定） | `src/plan_input.go`（`StepInput` / 绑定语法）、`src/plan_lineage.go`（校验与解析）、`src/action.go`（解析后调用能力） |
 | 追溯来源 | `src/llm_trace.go`（`Origin`）、`src/reasoner.go`、`src/decision.go`（`DecisionOrigin`） |

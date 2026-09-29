@@ -154,5 +154,5 @@ Finish(res)
 | `Store` 契约 / `LLMMessage` / `LLMMessageRole` / `ReasonTurnHandle` | `src/store.go` |
 | 流式聚合器 + 整条流派生（DB 无关） | `src/llm_message.go` |
 | 每行消息 → 日志（`AUTONOMY_LLM_TRACE` / `_MAX`） | `src/llm_message_log.go` |
-| 表结构 / 读写 / 聚合写入（upsert）/ 回填 | `src/sqlite_store.go` |
+| 表结构 / 读写 / 聚合写入（upsert）/ 回填 | `src/db/sqlite_store.go` |
 | header + 消息写入编排（边跑边写） | `src/llm_trace.go` |

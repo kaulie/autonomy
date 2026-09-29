@@ -175,7 +175,7 @@ LLMTrace.Finish(LLMRunResult)                      → 冲掉未闭合的聚合�
 | header + 事件写入 / 边跑边写的消息编排 | `src/llm_trace.go` |
 | 事件流 → 消息聚合 | `src/llm_message.go`（见 [llm-message.md](llm-message.md)） |
 | 每行消息 → 日志 | `src/llm_message_log.go` |
-| 表结构 & 读写 | `src/sqlite_store.go` |
+| 表结构 & 读写 | `src/db/sqlite_store.go` |
 | 落库调用点 | `src/reasoner.go`（plan 模式）、`src/runtime.go`（agent 模式） |
 
 ## 扩展：接入新的 LLM（一个 harness）

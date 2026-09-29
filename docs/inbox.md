@@ -17,7 +17,7 @@
 广播不是第四种消息：它是**同一个 `user` 指令**同时说给多个 agent（见 [broadcast.md](broadcast.md)）——
 每个目标收到的就是它自己那条 task 的指令，队列里看不出任何差别。
 
-实现：`src/message.go`（模型）、`src/inbox.go`（队列与消费者）、`src/sqlite_inbox.go`（engine 侧的表与读写）。
+实现：`src/message.go`（模型）、`src/inbox.go`（队列与消费者）、`src/db/sqlite_inbox.go`（engine 侧的表与读写）。
 
 ## 一条消息的一生
 
@@ -76,5 +76,5 @@ task 行已有的描述（`tasks.description`）——「这个 task 要做什�
 | 消息模型（sender / kind / status） | `src/message.go` |
 | 队列与消费者（每个 agent 一个） | `src/inbox.go` |
 | 端口 `InboxStore` | `src/store.go` |
-| sqlite 实现（表 / claim / 收尾 / 回收 / 计数） | `src/sqlite_inbox.go` |
+| sqlite 实现（表 / claim / 收尾 / 回收 / 计数） | `src/db/sqlite_inbox.go` |
 | 谁发什么（指令 / 委托 / 停止） | `src/autonomy.go`、`src/api_service.go`、`src/llm_session.go` |

@@ -49,8 +49,6 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 
 ## 当前阶段
 
-从零到一：先定骨架与接口边界。V1 允许「一个 Task + 一个 Owner Agent + 若干固定 Capability」；架构上不得锁死为单 Agent 或固定 Workflow。
+概念边界仍按本文各篇：不得锁死为单 Agent 或固定 Workflow。V1「一个 Task + 一个 Owner Agent + 若干 Capability」是允许的最小形态，不是系统上限。
 
-## 下一里程碑（代码，不在本目录交付）
-
-可运行的 hello 闭环场景预定为：**对假服务做 health check**（假服务 → Owner 调用固定 `service.health_check` → 按 Completion Contract 验证 → Done / Continue）。
+**代码现状不在本目录维护。** Runtime 已是 `cmd/autonomyd`（任务 API、数据 API、账号池、自包含 UI、多 harness、优雅重启）。hello 闭环在 `cmd/hello`，用来演示「能力成功不够、世界状态才算」，不是线上主形态。运行事实、部署与开发流程以根目录 [`project_map/`](../project_map/README.md) 与 [`AGENT.md`](../AGENT.md) 为准；本目录与代码冲突时按 AGENT.md 提出异议并改文档，不要把过期里程碑当现状。
