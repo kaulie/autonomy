@@ -8,6 +8,8 @@
 //     it (Provider), which reasoning mode a turn is (Mode);
 //   - the selection: which backend this process's agents use by default, and the model /
 //     provider defaults each one resolves (backend.go);
+//   - when the first (role) prompt is placed — session create vs first turn
+//     (SystemInject); the wording is the runtime's, not the harness's;
 //   - one provider session per agent: attach (re-attach the session the agent was
 //     recorded with, or open a fresh one when the provider no longer has it), one prompt
 //     stream, and how it is put down (Close — durable state kept — or Delete) (session.go,

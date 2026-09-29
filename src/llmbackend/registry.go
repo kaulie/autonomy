@@ -39,6 +39,9 @@ type Harness struct {
 	Backend Backend
 	// Provider is the LLM provider its sessions talk to.
 	Provider Provider
+	// SystemInject is when this harness places the agent's first (role) prompt.
+	// Empty means first_turn. The wording is the runtime's; only the timing differs.
+	SystemInject SystemInject
 	// New builds the session for one agent. It is called once per agent, lazily, on the
 	// first turn that needs it.
 	New func(host Host) SessionImpl

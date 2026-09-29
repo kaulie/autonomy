@@ -3,9 +3,10 @@
  *
  * The Cline SDK requires an explicit providerId and modelId (it dereferences
  * both while assembling a session) and crashes if `systemPrompt` is undefined
- * (`undefined.trim()`). That is a transport stub, not the agent's first prompt:
- * autonomy always sends the frame as the first turn (docs/prompt.md). The
- * provider credentials themselves are optional: the SDK also reads whatever
+ * (`undefined.trim()`). Autonomy's role frame is the same first system every
+ * harness gets; Cline's difference is only timing — it is written here at
+ * session create. The stub below is for probes / attach before the frame exists.
+ * The provider credentials themselves are optional: the SDK also reads whatever
  * `cline auth` saved, so a machine that already authenticated needs no key here.
  *
  * When the caller does not configure provider/model, the bridge falls back to
@@ -20,7 +21,8 @@ import path from "node:path";
 export const PROTOCOL = "cline-bridge/1";
 export const DEFAULT_MODE = "yolo";
 // SDK_SYSTEM_PROMPT_STUB satisfies Cline's non-empty systemPrompt field. It is
-// not autonomy policy — the session's first turn is the frame.
+// not autonomy policy — the role frame is the same first system every harness
+// gets; Cline writes it at session create when RolePrompt is already set.
 export const SDK_SYSTEM_PROMPT_STUB = ".";
 export const DEFAULT_SYSTEM_PROMPT = SDK_SYSTEM_PROMPT_STUB;
 

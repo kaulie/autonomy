@@ -16,7 +16,7 @@
 | 开发在 task workspace、分支带 task id、测试按 `docs/testing.md` | [project_map/development.md](project_map/development.md)、[BRANCHING.md](BRANCHING.md) |
 | 栈是 Go 1.25 + 可插拔 DB engine + Cursor/Cline/Codex/Claude harness + 服务端 HTML | [project_map/tech-stack.md](project_map/tech-stack.md) |
 
-Runtime 会在 planner 的初始化第一条 prompt（`GiveFirstPrompt` → `AGENT_V2.md` frame）和 worker 的委托提示（`CODE_EDIT.md`）里要求：**优先读目标仓库根目录的 `AGENT.md`** 来建立项目认知。你正在读的就是那份文件。这与 harness 无关：Cline / Codex 不再另有一份 system prompt 文件。
+Runtime 会在 planner 的初始化第一条 system（`GiveFirstPrompt` → `AGENT_V2.md` frame）和 worker 的委托提示（`CODE_EDIT.md`）里要求：**优先读目标仓库根目录的 `AGENT.md`** 来建立项目认知。你正在读的就是那份文件。Harness 只决定注入时机（Cline 建会话时写入，其它后端作为第一条 turn），不另写一套政策。
 
 **禁止**只凭根 `README.md` 的「Early-stage / hello loop」或 `docs/README.md` 里过期的「下一里程碑」来理解现状。那两处曾经把系统写成骨架；与代码不符时以 `project_map` + 代码为准，并履行下面第 3、4 节。
 

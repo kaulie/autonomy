@@ -71,12 +71,17 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	// and a Cline account without a key runs on whatever `cline auth` saved — which is why the
 	// vendor still travels with it (a Cline key means nothing without its maker).
 	creds := c.host.Facts().Creds
+	// The role prompt is the same first system every harness gets. Cline's
+	// injection timing is "at session create" (native systemPrompt). Empty
+	// here is a probe / attach-before-frame: the bridge fills a stub so the
+	// SDK does not crash on undefined.trim().
 	agent, err := clineClient().Agents().Create(ctx, clinesdk.CreateOptions{
 		ProviderID:      creds.Vendor,
 		ModelID:         creds.Model,
 		APIKey:          creds.APIKey,
 		BaseURL:         creds.BaseURL,
 		CWD:             cwd,
+		SystemPrompt:    strings.TrimSpace(c.host.Facts().RolePrompt),
 		Mode:            mode,
 		ResumeSessionID: resume,
 	})

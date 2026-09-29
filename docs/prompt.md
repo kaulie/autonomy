@@ -17,11 +17,15 @@
 **第一条 prompt 永远是 frame**（`LLMSession.Say` 在接手任何 prompt 前先 `GiveFirstPrompt`），所以没有任何一轮
 会在没被告知规则的情况下跑；task 的话只走 delta，换 task、换 cycle 都不重发规则。
 
-**不按 harness 再写一份 system prompt。** Cursor / Cline / Codex / Claude 的初始化词是同一条：
-`GiveFirstPrompt` 发出的 frame（worker 则是 `CODE_EDIT.md` 等委托模板）。某个 SDK 若要求
-`systemPrompt` 字段非空（Cline 会在 `undefined` 上 `.trim()` 崩），桥只填一个无语义的 stub，
-不承载政策。Codex 没有原生 system-prompt API，以前把 `CODEX_SYSTEM.md` 拼进第一轮，等于
-和 frame 叠了两份 —— 那条路径已去掉。
+**上层没有 harness 之分。** 第一条 system 只做一件事：定位这只 agent 的角色（frame）。
+区别仅仅是各 harness **注入时机**（`llmbackend.SystemInject`）：
+
+| 时机 | 谁 | 怎么放同一份 frame |
+|---|---|---|
+| `session` | Cline | 建会话时写入原生 `systemPrompt`；之后第一条 turn 已是 task |
+| `first_turn` | Cursor / Claude / Codex | 没有可用的 system 字段（Codex 桥以前用前缀冒充），作为会话的第一条 Prompt |
+
+Cline SDK 在字段为 `undefined` 时会 `.trim()` 崩：只有 **还没有** frame 的探活 / 提前 attach 才用无语义 stub。不要再为某个后端单写政策文件。
 
 两条各自为什么长这样，写在 `src/prompt.go` 的注释里，简单说：会话自己记着 frame，所以每轮只该付 delta 的
 token；而「frame 里的值不会变」这条，是靠把每轮会变的占位符在 frame 里替换成

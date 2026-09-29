@@ -235,20 +235,17 @@ func (s *LLMSession) Say(ctx context.Context, prompt string, round int) (TurnRes
 	return s.turn(ctx, prompt, round, false)
 }
 
-// GiveFirstPrompt gives this session its **first prompt** — the frame (the agent's own
-// system prompt + the agent policy) — if it has not been given it yet, and reports whether
-// it sent one. These are the two prompt injections an agent's life has:
+// GiveFirstPrompt gives this session its **first prompt** — the frame that locates the
+// agent's role. From above, that *is* the system prompt, for every harness. A harness
+// only differs in *when* it can place those words (llmbackend.SystemInject): Cline
+// absorbs them at session create; Cursor / Claude / Codex receive them as the first
+// turn. The wording is one file (the frame), never a per-harness policy.
 //
-//	agent created  → its first prompt: the frame      (AgentInitializer.Initialize)
-//	               → the task's prompt: the delta     (the task's decision cycles)
+//	agent created  → first system: the frame     (this method)
+//	               → the task prompt: the delta  (the task's decision cycles)
 //
-// It is idempotent per session, and per *session* is the point: a session created later (a
-// new backend session after a restart, a mode or workspace change, a bridge restart) has
-// been told nothing, so the frame goes again — as that session's first prompt, never
-// appended to a task's.
-//
-// A first prompt that failed is not marked delivered: the next turn sends it again rather
-// than running a decision cycle on a session that was never told the rules.
+// It is idempotent per session: a later session (restart, mode/cwd change, bridge
+// restart) has been told nothing, so the frame goes again — never appended to a task.
 func (s *LLMSession) GiveFirstPrompt(ctx context.Context) (bool, error) {
 	if s == nil || s.agent == nil || !s.agent.needsLLMFrame() {
 		return false, nil
@@ -256,6 +253,39 @@ func (s *LLMSession) GiveFirstPrompt(ctx context.Context) (bool, error) {
 	prompt, err := buildReasoningFrame(DecisionContext{Agent: s.agent}, ReasoningInput{})
 	if err != nil {
 		return false, fmt.Errorf("build the agent's first prompt: %w", err)
+	}
+	s.agent.rolePrompt = prompt
+	// Cline (and any session-inject harness) places these words at session
+	// create. Opening the session *is* delivering the first system prompt —
+	// do not also send them as a user turn. The runtime still records the
+	// same first prompt a first-turn harness would: from above it is one
+	// role-locating system, only the injection timing differs.
+	if llmbackend.PlacesSystemAtSession(llmbackend.Backend(s.provider())) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		// Reusing a handle (probe, AcquireAgent) means that session was
+		// created before RolePrompt existed. A new handle absorbs the
+		// words at create — do not also Prompt them (mode/cwd change).
+		prevID := ""
+		if s.agent.llm != nil {
+			prevID = s.agent.llm.ProviderSessionID()
+		}
+		mode, _ := s.turnShape()
+		if _, err := s.agent.ensureLLMSession(ctx, s.model, s.workspaceOrCwd(), mode); err != nil {
+			return false, err
+		}
+		reused := prevID != "" && s.agent.llm != nil && s.agent.llm.ProviderSessionID() == prevID
+		if reused {
+			if _, err := s.turn(ctx, prompt, RoundAuto, true); err != nil {
+				return false, err
+			}
+		} else {
+			trace := s.beginTurn(prompt, RoundAuto, true)
+			trace.Finish(llmbackend.RunResult{Status: llmbackend.StatusFinished})
+		}
+		s.agent.markLLMFrameSent()
+		return true, nil
 	}
 	if _, err := s.turn(ctx, prompt, RoundAuto, true); err != nil {
 		return false, err

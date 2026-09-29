@@ -93,19 +93,19 @@ func (r *recordingSession) Mode() string              { return "" }
 // once per session — a session created later (a restart, a mode change) asks for it again,
 // and gets it before whatever prompted it.
 func TestFirstPromptIsTheFrameAndGoesBeforeTheTaskPrompt(t *testing.T) {
-	installFakeClineClient(t)
-	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
-	t.Setenv("AUTONOMY_CLINE_PROVIDER", "deepseek")
-	t.Setenv("AUTONOMY_CLINE_MODEL", "deepseek-v4-pro")
 	t.Setenv("PROJECT_ROOT", preparePolicyRoot(t))
 
 	backend := &recordingSession{}
 	agent := &Agent{
 		ID: 8804, Name: "agent-8804", Role: AgentRolePlanner, Lifecycle: AgentLifecycleEphemeral,
-		Backend: llmbackend.Cline, Workspace: t.TempDir(), llm: backend,
+		Backend: llmbackend.Cursor, Workspace: t.TempDir(), llm: backend,
 	}
+	// No account pool in this fixture: a local-only plan skips the store. The
+	// session still names cursor so GiveFirstPrompt uses first-turn injection
+	// (the same words Cline would absorb at session create).
+	agent.runtimePolicy.RequestedBackend = string(llmbackend.Local)
 
-	sess := NewLLMSession(nil, agent, SessionOpts{})
+	sess := NewLLMSession(nil, agent, SessionOpts{Provider: string(llmbackend.Cursor)})
 	sent, err := sess.GiveFirstPrompt(context.Background())
 	if err != nil {
 		t.Fatalf("first prompt: %v", err)
@@ -143,6 +143,17 @@ func TestFirstPromptIsTheFrameAndGoesBeforeTheTaskPrompt(t *testing.T) {
 	}
 	if !strings.Contains(backend.prompts[2], "## Decision Cycle 1") || strings.Contains(backend.prompts[2], "# Autonomy Bootstrap Prompt") {
 		t.Fatalf("the turn the caller asked for must be the task prompt alone:\n%s", backend.prompts[2])
+	}
+}
+
+func TestSystemInjectIsTimingNotWording(t *testing.T) {
+	if !llmbackend.PlacesSystemAtSession(llmbackend.Cline) {
+		t.Fatal("cline places the same role prompt at session create")
+	}
+	for _, b := range []llmbackend.Backend{llmbackend.Cursor, llmbackend.Codex, llmbackend.Claude} {
+		if llmbackend.PlacesSystemAtSession(b) {
+			t.Fatalf("%s should inject the role prompt as the first turn, not a second policy", b)
+		}
 	}
 }
 

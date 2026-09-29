@@ -33,6 +33,10 @@ type Facts struct {
 	// place credentials come from (src/accounts.go), so a harness reads its key here and
 	// never out of the environment.
 	Creds Creds
+	// RolePrompt is the first system prompt: it locates the agent's role. A harness
+	// that places the system prompt at session create reads it here (Cline). Others
+	// ignore it and receive the same text as their first Prompt.
+	RolePrompt string
 }
 
 // Host is the autonomy agent a Session belongs to, as a backend needs it: what it must
