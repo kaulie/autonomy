@@ -29,5 +29,6 @@
 2. **`docs/accounts.md` 仍写三个 harness。** `src/llmbackend/all` 已链接 `cursor` / `cline` / `codex` / `claude`。本轮已把账号池文档补上 `claude`。
 3. **根 `README.md`「Status」与 `docs/README.md`「当前阶段 / 下一里程碑」偏旧。** 仍把项目写成「骨架 + hello 闭环」。事实是：`cmd/autonomyd` 已是带任务 API、数据 API、账号池、自包含 UI、多 harness、优雅重启和发版包装的 runtime。hello 仍在 `cmd/hello`，但它不是系统的主形态。本目录按后者描述；`docs/README.md` 的里程碑段落本轮改为指向现状，避免把后续 agent 锁在过期阶段叙事里。
 4. **`CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` 把 system prompt 按 harness 分了两份。** 上层只应有一条「定位角色」的 first system（frame）。区别只是注入时机：Cline 建会话时写入同一份文字，其它后端作为第一条 turn。那两个文件已删；`llmbackend.SystemInject` 是时机，不是第二套政策。
+5. **Context Service 设计文档把 Postgres 实现放在 `context/index/postgres.go`，与 `store_ports_test.go` 的驱动边界冲突。** 事实：只有存储引擎（`src/db/postgres_*.go` / `sqlite_*.go`）可以 import 驱动；上层不得 import `database/sql`。处理：SQL 实现落在 `src/db/postgres_context*.go`，上层只依赖 `src/context` 的 `Repository` 端口与根包 `ContextStore` 端口（`src/context_service.go`）。见 `architecture.md`「Context Service」。
 
 后续 agent 若发现上述条目已被新代码推翻，删除或改写它们，不要累积过期异议。

@@ -11,7 +11,10 @@ import (
 	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	ctxsvc "github.com/kaulie/autonomy/src/context"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -47,6 +50,11 @@ import (
 type PostgresStore struct {
 	db     *sql.DB
 	reader *sql.DB
+
+	// ctxRepo is the Context Service repository over this store's writer, built
+	// lazily by ContextRepository (postgres_context.go).
+	ctxRepo     ctxsvc.Repository
+	ctxRepoOnce sync.Once
 }
 
 // RawDB exposes the engine's underlying connection (the writer). See

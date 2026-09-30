@@ -13,6 +13,7 @@
         ├─ Store 端口     src/store.go（七端口并集）
         │     └─ engine   src/db（sqlite / postgres）
         ├─ Capability     src/capability（RegisterDefaults）
+        ├─ Context        src/context（Context Service）+ src/capability/contextcap（context.*）
         ├─ LLMSession     src/llm_session.go
         │     └─ harness  src/llmbackend/{cursor,cline,codex,claude}
         └─ ContextBuilder src/context_builder + src/context_resolver.go
@@ -71,6 +72,21 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `pull_request.review` | `software_development/pull_request_review.go` | GitHub REST，**不 merge** |
 | `pr.check` | `software_development/pr_check.go` | 系统验真工具：PR 是否存在、状态如何 |
 | `deployment.monitor` | `deployment/monitor.go` | 跟随一次部署；可再委托监控 agent |
+| `context.search` | `contextcap/search.go` | Context Service：全文 + metadata 过滤检索，返回候选 section |
+| `context.get` | `contextcap/get.go` | Context Service：取一个 section 的完整内容与来源 |
+| `context.list` | `contextcap/list.go` | Context Service：列出一个 project 已注册的 context 资源 |
+
+## Context Service（`src/context`）
+
+设计见 `/Users/gaolei/agent-policies/context_service.md` 的 V1 范围。`src/context` 是检索基础设施，不做 reasoning：
+
+- **接口**：`ContextService`（`RegisterResource` / `SyncResource` / `Search` / `GetResource` / `GetSection` / `ListResources`）。Planner / Runtime / Agent 只依赖它，不碰 SQL。
+- **领域**：`Resource`（`ResourceType` = document / repository / service）、`ResourceSource`、`Section`。Markdown 解析按 heading 切分，带 heading path、order、行号区间。
+- **持久化**：`Repository` 端口 + `MemoryRepository`（测试/内嵌）。生产实现在引擎层 `src/db`（`postgres_*.go`）：`PostgresStore.ContextRepository()` 实现根包的 `ContextStore` 端口（`src/context_service.go`），复用同一个 `*sql.DB`，schema 为 `context_resources` / `context_sections` + GIN 全文索引。引擎层之外不 import 驱动（`store_ports_test.go`）；sqlite 未实现该端口，Context Service 保持未配置。
+- **同步**：revision（git SHA）/ checksum（SHA256）变更检测，source 未变不重建索引。
+- **错误**：`RESOURCE_NOT_FOUND` / `PROJECT_NOT_FOUND` / `SOURCE_UNAVAILABLE` / `PARSE_FAILED` / `INDEX_FAILED` / `INVALID_QUERY`，不转成裸 500。
+
+V1 不含 vector DB / embedding / LLM 摘要 / 知识图谱 / agent memory / planner 集成 / 自动爬取。
 
 `service.deploy` 打 `DEPLOYMENT_API_URL`（默认 `http://127.0.0.1:4220`）的 `POST /api/deploy-notify`，并带 `identity_role` / `identity_id`（默认 `agent` / `autonomy`）。返回 `pipeline_id`，观察走 `GET /api/pipelines/<id>` 或 `deployment.monitor`。
 

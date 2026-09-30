@@ -79,8 +79,9 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
-		Assets: worldAssetMutator(),
-		Agents: rt, // capabilities acquire Cursor-backed agents via Runtime
+		Assets:  worldAssetMutator(),
+		Agents:  rt, // capabilities acquire Cursor-backed agents via Runtime
+		Context: buildContextService(store),
 	})
 	rt.SetCapabilities(capabilityFactory.GetAll()...)
 
