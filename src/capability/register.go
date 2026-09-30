@@ -2,8 +2,10 @@ package capability
 
 import (
 	"github.com/kaulie/autonomy/src/capability/broker"
+	ctxcap "github.com/kaulie/autonomy/src/capability/contextcap"
 	"github.com/kaulie/autonomy/src/capability/deployment"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
+	ctxsvc "github.com/kaulie/autonomy/src/context"
 )
 
 // Deps are runtime hooks built-in capabilities need from the Autonomy host.
@@ -15,6 +17,10 @@ type Deps struct {
 	// Optional: when nil the capability builds its own HTTP observer from the
 	// request (or $AUTONOMY_DEPLOYMENT_ENDPOINT).
 	Deployments deployment.Observer
+	// Context is the Context Service the context.search / get / list
+	// capabilities call. Optional: when nil those capabilities are still
+	// registered for the planner but report a typed "not configured" error.
+	Context ctxsvc.Service
 }
 
 // RegisterDefaults registers all built-in capabilities.
@@ -41,4 +47,9 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})
+	// The Context Service's agent-facing surface (spec 13): an agent discovers
+	// project context through these instead of SQL. Deps.Context is the service.
+	f.Register(ctxcap.Search{Svc: deps.Context})
+	f.Register(ctxcap.Get{Svc: deps.Context})
+	f.Register(ctxcap.List{Svc: deps.Context})
 }
