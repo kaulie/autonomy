@@ -54,6 +54,9 @@ func TestSessionThroughRegistry(t *testing.T) {
 	if !strings.Contains(read("args"), "--permission-mode\nplan\n") || !strings.Contains(read("args"), "--model\nsonnet\n") {
 		t.Fatal(read("args"))
 	}
+	if strings.Contains(read("args"), "--setting-sources") {
+		t.Fatal("keyed accounts must keep the CLI's default settings sources")
+	}
 	// A new runtime session uses the provider ID persisted on the host.
 	s = llmbackend.New(h)
 	if _, _, err := s.Prompt(context.Background(), "again", llmbackend.ModePlan, nil); err != nil {
@@ -67,6 +70,29 @@ func TestSessionThroughRegistry(t *testing.T) {
 	}
 	if strings.Contains(read("args"), "--resume") || !strings.Contains(read("args"), "acceptEdits") {
 		t.Fatal(read("args"))
+	}
+}
+
+func TestKeylessAccountUsesClaudeAuth(t *testing.T) {
+	dir := fakeCLI(t, "printf '%s\\n' \"$@\" > args\nprintf '%s\\n' \"${ANTHROPIC_API_KEY-unset}|${ANTHROPIC_AUTH_TOKEN-unset}\" > creds\nprintf '%s\\n' '"+success+"'\n")
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-must-not-leak")
+	h := &probeHost{facts: llmbackend.Facts{Workspace: dir, Creds: llmbackend.Creds{}}}
+	if _, _, err := newSession(h).Prompt(context.Background(), "hello", llmbackend.ModePlan, nil); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--setting-sources\nproject,local\n") {
+		t.Fatalf("keyless account must skip user settings so claude auth is not overridden: %s", args)
+	}
+	creds, err := os.ReadFile(filepath.Join(dir, "creds"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(creds) != "unset|unset\n" {
+		t.Fatalf("keyless account leaked an API credential into the child: %q", creds)
 	}
 }
 

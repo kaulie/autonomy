@@ -80,6 +80,13 @@ func (s *session) args() []string {
 	if model := s.host.Facts().Creds.Model; model != "" {
 		args = append(args, "--model", model)
 	}
+	// A keyless account is claude auth (claude.ai OAuth in ~/.claude). User
+	// settings.json can inject ANTHROPIC_API_KEY, and the CLI then prefers that
+	// key over the saved login. Skip the user settings source so leftover keys
+	// cannot take over a keyless account.
+	if strings.TrimSpace(s.host.Facts().Creds.APIKey) == "" {
+		args = append(args, "--setting-sources", "project,local")
+	}
 	return args
 }
 
