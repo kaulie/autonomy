@@ -10,7 +10,7 @@
 
 | 文件 | 是哪条 prompt | 什么时候注入 |
 |---|---|---|
-| `REASONING_FRAME.md` | **第一条 prompt（也就是 system prompt）**：`{{SYSTEM_PROMPT}}`（这只 agent 被初始化时给的附加说明，可空）+ `{{AGENT_POLICY}}`（策略文件 `AGENT_V2.md` 渲染后的全文） | **agent 创建时**（`Autonomy.InitializeAgent` → `LLMSession.GiveFirstPrompt`）；之后任何换会话的时刻（新会话、换 mode/cwd、桥重启）也以「那条会话的第一条 prompt」的身份再来一次 —— 见 `Agent.needsLLMFrame()` |
+| `REASONING_FRAME.md` | **第一条 prompt（也就是 system prompt）**：`{{SYSTEM_PROMPT}}` + `{{AGENT_POLICY}}`（`AGENT_V2.md`）+ `{{FRAME_REPLY}}`（初始化 ack） | **agent 创建时**（`Autonomy.InitializeAgent` → `LLMSession.GiveFirstPrompt`）；之后任何换会话的时刻也再给一次 —— 见 `Agent.needsLLMFrame()` |
 | `REASONING_DELTA.md` | **task prompt（task 那条）**：轮次标题、`{{DELTA_MARKER}}` 那句「这些值本轮给你」、可选的 `{{BRIEFING_NOTE}}`（重启续做的说明）、`{{PAYLOAD}}`（当前 Task / Runtime Context / Context Entity / World / Constraints 的 JSON） | **task 到了之后**：task 到来后的那一轮起，每个决策轮一条 |
 
 **两条互不拼接**：frame 不再是「首轮那条消息的前半段」——`reasoningPrompt` 只渲染 delta。而一条会话的
@@ -35,7 +35,8 @@ token；而「frame 里的值不会变」这条，是靠把每轮会变的占位
 
 | 文件 | 给谁 |
 |---|---|
-| `AGENT_V2.md` | planner 的策略（Output Schema、规则、完成契约的写法…）—— frame 的主体；初始化时要求优先用目标仓库根目录 `AGENT.md` 建立项目认知 |
+| `AGENT_V2.md` | planner 的策略（Decision Output Schema、规则、完成契约）—— frame 的主体；Schema 只用于后续 Decision Cycle，不用于初始化那条 |
+| `FRAME_REPLY.md` | 第一条 system 自己的回复：轻量角色 ack（`type: ready` + 对自己定位的一句话），不是决策，不钉完成契约 |
 | `CODE_EDIT.md` / `DEPLOYMENT_MONITOR.md` | 被委托出去的 worker（`code_edit` / `deployment.monitor`）各自的提示词；`CODE_EDIT.md` 同样要求优先读项目根 `AGENT.md` |
 | `TURN_TRUNCATED.md` | 一轮被截断时的追加重试提示（`src/llm_turn_retry.go`） |
 | `CHAT_MODE.md` | chat 那一轮的硬约束（「只回话、别碰计划」）—— 拼在用户的话前面（`src/chat_mode.go`） |

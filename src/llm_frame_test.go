@@ -42,6 +42,9 @@ func TestTaskPromptIsTheDeltaAndCarriesNoFrame(t *testing.T) {
 	if strings.Contains(taskPrompt, "# Autonomy Bootstrap Prompt") {
 		t.Fatalf("the task prompt must not carry the frame:\n%s", taskPrompt)
 	}
+	if strings.Contains(taskPrompt, `"type": "ready"`) {
+		t.Fatalf("the task prompt must not ask for the init ack:\n%s", taskPrompt)
+	}
 
 	// The first prompt is the frame, and it renders **without a task**: the per-cycle values
 	// are marked as coming with the task prompt, which is why initialization can give it
@@ -56,11 +59,17 @@ func TestTaskPromptIsTheDeltaAndCarriesNoFrame(t *testing.T) {
 	if !strings.Contains(firstPrompt, reasoningDeltaMarker) {
 		t.Fatalf("the first prompt must mark where the per-cycle values come from:\n%s", firstPrompt)
 	}
-	if strings.Contains(firstPrompt, "## Decision Cycle") {
+	if strings.Contains(firstPrompt, "## Decision Cycle ") {
 		t.Fatalf("the first prompt must not carry a decision cycle:\n%s", firstPrompt)
 	}
 	if strings.Contains(firstPrompt, `"id": "t-frame"`) {
 		t.Fatalf("the first prompt must not carry a task's values:\n%s", firstPrompt)
+	}
+	if !strings.Contains(firstPrompt, `"type": "ready"`) {
+		t.Fatalf("the first prompt must ask for a role ack, not a decision:\n%s", firstPrompt)
+	}
+	if !strings.Contains(firstPrompt, "Do **not** emit a decision") {
+		t.Fatalf("the first prompt must say this reply is not a decision:\n%s", firstPrompt)
 	}
 }
 
@@ -74,7 +83,7 @@ func (r *recordingSession) Attach(context.Context, llmbackend.Mode) (string, boo
 
 func (r *recordingSession) Prompt(_ context.Context, text string, _ llmbackend.Mode, _ func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	r.prompts = append(r.prompts, text)
-	return `{"type":"need_input","reason":"no task yet"}`, llmbackend.RunResult{Status: llmbackend.StatusFinished}, nil
+	return `{"type":"ready","role":"planner","understood":"I plan; I do not implement"}`, llmbackend.RunResult{Status: llmbackend.StatusFinished}, nil
 }
 
 func (r *recordingSession) PromptText(ctx context.Context, text string, mode llmbackend.Mode) (string, error) {

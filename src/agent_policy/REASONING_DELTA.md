@@ -5,4 +5,4 @@ Current values for the placeholders marked "{{DELTA_MARKER}}" above.
 {{PAYLOAD}}
 ```
 
-Reply with the AGENT_V2 Output Schema JSON for this cycle.
+Reply with the AGENT_V2 Decision Output Schema JSON for this cycle.
