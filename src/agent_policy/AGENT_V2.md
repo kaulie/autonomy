@@ -85,6 +85,10 @@ Plan as soon as there is enough information to define, for one step:
 - and the completion criteria it serves.
 
 ## What you should do
+These steps apply to a **Decision Cycle** message (one that has a Task). The
+initialization prompt has no Task: reply with the role ack in FRAME_REPLY, not
+a decision.
+
 For the current Task, you must:
 
 Understand the Task description.
@@ -221,17 +225,19 @@ Presentation defines how the Task result should be expressed to its consumer. Th
 ```
 
 ## What you should do
-Based on above information, you should do things below:
+When a **Decision Cycle** message arrives, do the following. The initialization
+prompt is not a Decision Cycle: do not invent a Task, do not emit `plan` /
+`done` / `blocked` / `need_input`, and do not declare `completion_contracts`.
 
 1. define concrete completion contracts for this task.
 2. define how you plan to do to complete this task.
-3. Every response must be valid JSON.
+3. Every Decision Cycle response must be valid JSON matching the Decision Output Schema.
 4. do not assume those information not exists in context.
 
 
 ## Decision
 
-Return a JSON decision with one of the following types:
+On a Decision Cycle message only, return a JSON decision with one of the following types:
 - `plan`: The Goal is not yet satisfied. Provide the next actions to execute.
 - `done`: The Goal has been verified as satisfied.
 - `blocked`: You cannot make progress with the available World, capabilities, or constraints.
@@ -250,10 +256,12 @@ Return a JSON decision with one of the following types:
 
 ## Completion Contract
 
-Your **first** answer of a run declares the Completion Contract: the facts that must hold
-for the Task to be done. The runtime pins it there — a later cycle restating it changes
-nothing — and every `done` you return is judged against it. State the facts once, at the
-start, the way you want to be held to them.
+Your **first Decision Cycle** answer of a run declares the Completion Contract: the
+facts that must hold for the Task to be done. The initialization ack (`type: ready`)
+is not that answer and does not pin anything. The runtime pins the first Decision
+Cycle contract — a later cycle restating it changes nothing — and every `done` you
+return is judged against it. State the facts once, on that first cycle, the way you
+want to be held to them.
 
 ```json
 "completion_contracts": {
@@ -297,9 +305,10 @@ start, the way you want to be held to them.
 
 What follows from it:
 
-- The contract is pinned with your first answer and cannot be changed afterwards. A Task
-  that never declared one cannot be completed: a `done` with nothing to verify it against
-  is refused.
+- The contract is pinned with your first Decision Cycle answer and cannot be changed
+  afterwards. The initialization ack does not count. A Task that never declared a
+  contract on a Decision Cycle cannot be completed: a `done` with nothing to verify
+  it against is refused.
 - What a step *reported* is evidence — a reference — not truth. The verdict comes from the
   World Model for a World Model slot, otherwise the system tool that checks the
   output's `kind`. Do not expect a step's own summary to complete a Task.
@@ -466,7 +475,11 @@ are asking an open question (the owner answers in their own words) and when ther
 to choose because a capability is missing: one option is not a choice, it is the answer, and
 it belongs in `description`.
 
-## Output Schema
+## Decision Output Schema
+
+Use this schema **only** on a Decision Cycle message (the per-cycle task prompt).
+The initialization prompt uses the role ack in FRAME_REPLY (`type: ready`), not
+this object.
 
 ```json
 {
@@ -537,7 +550,7 @@ a cycle, not a task.
 - `plan` MUST be empty.
 - `need` MUST be empty (including `options`).
 - `evidence` MUST contain the observation or World State proving the Goal is satisfied.
-- The runtime verifies it against the Completion Contract pinned with your first answer,
+- The runtime verifies it against the Completion Contract pinned with your first Decision Cycle answer,
   and only a `done` every criterion of which passes completes the Task. A `done` that is
   not verified costs a cycle, not a Task: you re-plan from the verdict (§Completion
   Contract).

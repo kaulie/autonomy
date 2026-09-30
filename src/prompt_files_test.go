@@ -118,4 +118,7 @@ func TestTheOtherPromptsAreTheFilesTheyComeFrom(t *testing.T) {
 	if err != nil || !strings.Contains(guard, "CHAT MODE") {
 		t.Fatalf("the embedded chat-mode guard should answer without PROJECT_ROOT: %q (%v)", guard, err)
 	}
+	if got, err := loadPromptFile(frameReplyRel); err != nil || !strings.Contains(got, `"type": "ready"`) {
+		t.Fatalf("embedded FRAME_REPLY should answer without PROJECT_ROOT: %q (%v)", got, err)
+	}
 }

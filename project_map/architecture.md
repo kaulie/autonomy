@@ -47,9 +47,10 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 
 | 文件 | 用途 |
 |---|---|
-| `REASONING_FRAME.md` | 初始化：system + policy（只在 session 的第一次 prompt） |
+| `REASONING_FRAME.md` | 初始化：system + policy + 角色 ack（只在 session 的第一次 prompt） |
+| `FRAME_REPLY.md` | 初始化回复：`type: ready` + 角色定位，不是决策 |
 | `REASONING_DELTA.md` | 每轮：当前 Task / Context / World / Runtime Context |
-| `AGENT_V2.md` | policy 正文（frame 携带）。初始化时要求 planner **优先用目标仓库根目录 `AGENT.md`** 建立项目认知 |
+| `AGENT_V2.md` | policy 正文（frame 携带）。Decision Output Schema 只用于后续 Decision Cycle |
 | `CODE_EDIT.md` | `code_edit` worker。同样要求优先读工作区 / clone 根上的 `AGENT.md` |
 | `DEPLOYMENT_MONITOR.md` | `deployment.monitor` worker |
 | `CONSTRAINTS.json` | 运行时约束（`src/policy.go`），不是写死在 renderer 里的句子 |
@@ -58,7 +59,7 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 
 一只 agent 的生命里只有两次注入顺序：先 frame（`GiveFirstPrompt`），再 task 到达后的 delta。新 session（换 cwd、桥重启、Cursor Create）会再给一次 frame，frame 从不拼进 task prompt。
 
-**第一条 system 定位角色，与 harness 无本质区别。** 各后端只是注入时机不同（`llmbackend.SystemInject`）：Cline 在建会话时写入同一份 frame；Cursor / Claude / Codex 把它当作第一条 turn。不要按 harness 再写一套政策。
+**第一条 system 定位角色，与 harness 无本质区别。** 各后端只是注入时机不同（`llmbackend.SystemInject`）：Cline 在建会话时写入同一份 frame；Cursor / Claude / Codex 把它当作第一条 turn。不要按 harness 再写一套政策。初始化那条的回复是 `FRAME_REPLY.md` 的角色 ack（`type: ready`），不是 Decision Output Schema，不钉完成契约、不阻塞后续 Decision Cycle。
 
 ## 内置能力（`src/capability/register.go`）
 

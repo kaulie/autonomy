@@ -241,6 +241,10 @@ func (s *LLMSession) Say(ctx context.Context, prompt string, round int) (TurnRes
 // absorbs them at session create; Cursor / Claude / Codex receive them as the first
 // turn. The wording is one file (the frame), never a per-harness policy.
 //
+// The reply this turn asks for is a role ack (FRAME_REPLY.md: type ready), not a
+// Decision. It is not parsed, does not pin a completion contract, and must not
+// block the task loop.
+//
 //	agent created  → first system: the frame     (this method)
 //	               → the task prompt: the delta  (the task's decision cycles)
 //

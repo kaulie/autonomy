@@ -18,8 +18,9 @@ const defaultAgentPolicyRel = "src/agent_policy/AGENT_V2.md"
 // The two halves of the reasoning prompt are files, not Go strings.
 //
 //   - REASONING_FRAME.md is what an agent is told once per session, at initialization: its own
-//     system prompt (when it has one) and the policy (AGENT_V2.md). It is a template with two
-//     placeholders, so the composition is visible where the words are;
+//     system prompt (when it has one), the policy (AGENT_V2.md), and FRAME_REPLY.md (the
+//     role ack this message asks for). It is a template, so the composition is visible
+//     where the words are;
 //   - REASONING_DELTA.md is what every later decision cycle carries: the current values as one
 //     JSON block, whose surrounding prose (the cycle header, the briefing note, the closing
 //     instruction) is this file.
@@ -35,6 +36,7 @@ const (
 	chatModeRel        = "src/agent_policy/CHAT_MODE.md"
 	briefingNoteRel    = "src/agent_policy/BRIEFING_NOTE.md"
 	interruptedNoteRel = "src/agent_policy/INTERRUPTED_NOTE.md"
+	frameReplyRel      = "src/agent_policy/FRAME_REPLY.md"
 )
 
 // promptPlaceholders is the placeholder vocabulary a policy or a delegated
@@ -170,6 +172,9 @@ var embeddedInterruptedNote string
 //go:embed agent_policy/PROBE.md
 var embeddedProbePrompt string
 
+//go:embed agent_policy/FRAME_REPLY.md
+var embeddedFrameReply string
+
 // SetPromptFallback is registered from here: package autonomy is the one that can embed
 // src/agent_policy, so the harnesses that read prompt files through llmbackend.PromptFile
 // (the live probe) get this build's copies from here (src/llmbackend/prompt_file.go).
@@ -195,6 +200,8 @@ func embeddedPrompt(rel string) string {
 		return embeddedInterruptedNote
 	case llmbackend.ProbePromptRel:
 		return embeddedProbePrompt
+	case frameReplyRel:
+		return embeddedFrameReply
 	}
 	return ""
 }
@@ -278,9 +285,16 @@ func buildReasoningFrame(ctx DecisionContext, input ReasoningInput) (string, err
 	if prompt := agentSystemPrompt(ctx.Agent); prompt != "" {
 		systemPrompt = "## System Prompt\n\n" + prompt + "\n\n"
 	}
+	// The first prompt's own reply schema is not the Decision Output Schema:
+	// it is a role ack (FRAME_REPLY.md). A Decision Cycle later uses AGENT_V2.
+	frameReply, err := loadPromptFile(frameReplyRel)
+	if err != nil {
+		return "", err
+	}
 	frame := applyPromptTemplate(template, map[string]string{
 		"{{SYSTEM_PROMPT}}": systemPrompt,
 		"{{AGENT_POLICY}}":  policy,
+		"{{FRAME_REPLY}}":   strings.TrimSpace(frameReply),
 	})
 	if !strings.HasSuffix(frame, "\n") {
 		frame += "\n"
