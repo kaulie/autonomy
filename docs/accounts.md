@@ -34,8 +34,10 @@
 - 路径先归一化（`…/a/` 与 `…/a` 是同一个主张）；
 - 每只 agent 在自己的子目录里：`{agent_root_workspace}/{agent-name}/`。
 
-**凭据可以空着**：那样就跑 provider 自己保存的 auth（`cline auth` / `codex auth`）——「这台
-机器已经登录过」是最常见的用法，账号只要说清 harness/vendor/model 即可。
+**凭据可以空着**：那样就跑 provider 自己保存的 auth（`cline auth` / `codex auth` /
+`claude auth`）——「这台机器已经登录过」是最常见的用法，账号只要说清
+harness/vendor/model 即可。Claude 无 key 时不要在 `~/.claude/settings.json` 的 `env`
+里再塞 `ANTHROPIC_API_KEY`：CLI 会优先用那把 key，把 `claude.ai` 登录盖掉。
 
 ## API
 

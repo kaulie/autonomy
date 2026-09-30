@@ -10,16 +10,19 @@ catalogues and account probes. No Node bridge or additional Go dependency is req
    Set `AUTONOMY_CLAUDE_BIN` to an absolute executable path when it is not on PATH.
 2. Add an enabled account at `/accounts`: harness `claude`, vendor `anthropic`, optional
    API key, base URL and model, and the desired agent workspace root. With no key, the CLI
-   uses its saved login. Models are entered explicitly or left blank for Claude's default;
+   uses its saved login (`claude auth`, typically claude.ai OAuth in `~/.claude`). A key
+   is not required. Models are entered explicitly or left blank for Claude's default;
    the catalogue deliberately returns no hardcoded model list.
 3. Select that account for the task, or set `AUTONOMY_LLM_BACKEND=claude` on the runtime
    and make the account the default Claude account. `claude_code` is an accepted alias.
 
 Credentials and model selection come from the account, not runtime environment variables.
 The child environment removes `ANTHROPIC_*`, `CLAUDE_CODE_*` and `CLAUDECODE`, then adds
-the account's `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` when present. Claude's own saved
-configuration still applies. Configure that login/settings for the runtime user accordingly.
-Secrets are not passed in process arguments or included in harness errors.
+the account's `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` when present. A keyless account
+also passes `--setting-sources project,local` so `~/.claude/settings.json` cannot inject
+an `ANTHROPIC_API_KEY` that would override `claude auth`. Claude's own saved login still
+applies. Authenticate the runtime user with `claude auth` (no API key). Secrets are not
+passed in process arguments or included in harness errors.
 
 `scripts/start.sh` checks `--version` before starting a runtime with this backend. It does
 not install Claude or authenticate it. A non-live account probe only checks CLI execution;

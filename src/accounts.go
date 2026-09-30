@@ -20,14 +20,15 @@ import (
 // environment: a deployment's .env carries paths, ports and the store DSN, nothing a run
 // bills.
 //
-// The three harnesses differ in what a vendor means:
+// The four harnesses differ in what a vendor means:
 //   - cursor: no second level — the vendor is "cursor" itself;
 //   - cline:  the vendor is the LLM maker the key belongs to (deepseek, minimax, …);
-//   - codex:  "openai" (the Codex CLI's own endpoint), or whatever a base URL says.
+//   - codex:  "openai" (the Codex CLI's own endpoint), or whatever a base URL says;
+//   - claude: "anthropic"; a keyless account uses `claude auth` (claude.ai OAuth).
 //
 // A credential is optional: an account with no key runs on the provider's own saved auth
-// (`cline auth`, `codex auth`), which is how a machine that already authenticated gets a
-// pool entry without pasting a secret.
+// (`cline auth`, `codex auth`, `claude auth` / claude.ai), which is how a machine that
+// already authenticated gets a pool entry without pasting a secret.
 type Account struct {
 	ID      string `json:"accountId"`
 	Harness string `json:"harness"`
