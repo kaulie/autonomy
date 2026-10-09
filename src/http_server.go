@@ -89,6 +89,8 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// GET is the recent log the next prompt's World block also reads.
 		{"POST /api/events", s.handleIngestEvent},
 		{"GET /api/events", s.handleListEvents},
+		{"POST /api/watches", s.handleStartWatch},
+		{"GET /api/watches", s.handleListWatches},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -352,6 +354,61 @@ func (s *HTTPServer) handleListEvents(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleStartWatch registers a background pull-request watch: when the PR is
+// merged (default until), the event gateway emits github.pull_request.merged
+// and wakes subject.task_id's agent so it can continue.
+//
+// @Summary  开始观察一个 PR（合并后经 event gateway 唤醒对应 task 的 agent）
+// @Tags     events
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.WatchPullRequestRequest  true  "kind 默认 pull_request；pr 必填；until 默认 merged；task_id 用于唤醒"
+// @Success  202      {object}  autonomy.PRWatchView              "已在观察（watching=true），或 PR 已经是终态（watching=false）"
+// @Failure  400      {object}  errResponse                       "缺 pr、kind 不支持、或 GitHub 读失败"
+// @Failure  503      {object}  errResponse                       "pr watcher 未接线"
+// @Router   /api/watches [post]
+func (s *HTTPServer) handleStartWatch(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	var body WatchPullRequestRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	view, err := s.Autonomy.StartPRWatch(body)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "pr watcher is off") {
+			writeErr(w, http.StatusServiceUnavailable, msg)
+			return
+		}
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	code := http.StatusAccepted
+	if view != nil && !view.Watching {
+		code = http.StatusOK
+	}
+	writeJSON(w, code, view)
+}
+
+// handleListWatches lists the background pull-request watches this process holds.
+//
+// @Summary  列出正在观察的 PR
+// @Tags     events
+// @Produce  json
+// @Success  200  {object}  autonomy.ListWatchesResponse
+// @Router   /api/watches [get]
+func (s *HTTPServer) handleListWatches(w http.ResponseWriter, _ *http.Request) {
+	if s.Autonomy == nil {
+		writeJSON(w, http.StatusOK, ListWatchesResponse{Watches: []PRWatchView{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Autonomy.ListWatches())
 }
 
 // handleHealth reports liveness — the probe the deployment platform polls for every

@@ -33,7 +33,10 @@ type Autonomy struct {
 	// EventGateway is the inbound path for world observations from outside this
 	// process (src/eventgateway, docs/event-gateway.md). Nil when the gateway is
 	// switched off (AUTONOMY_EVENT_GATEWAY=0).
-	EventGateway      *eventgateway.Gateway
+	EventGateway *eventgateway.Gateway
+	// PRWatcher polls pull requests pr.watch registered and turns a merge
+	// (or close) into a world event (src/pr_watcher.go).
+	PRWatcher         *PRWatcher
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	World             *World
@@ -81,12 +84,14 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	agentFactory := NewAgentFactory()
 	rt := NewRuntime(agentFactory)
+	prWatcher := newPRWatcher()
 
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
-		Assets:  worldAssetMutator(),
-		Agents:  rt, // capabilities acquire Cursor-backed agents via Runtime
-		Context: buildContextService(store),
+		Assets:    worldAssetMutator(),
+		Agents:    rt, // capabilities acquire Cursor-backed agents via Runtime
+		Context:   buildContextService(store),
+		PRWatches: prWatcher,
 	})
 	rt.SetCapabilities(capabilityFactory.GetAll()...)
 
@@ -95,6 +100,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		CapabilityFactory: capabilityFactory,
 		Runtime:           rt,
 		Store:             store,
+		PRWatcher:         prWatcher,
 		MaxSteps:          DefaultMaxSteps,
 	}
 	_autonomy.SetWorld(world)
@@ -124,6 +130,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// log, then this runtime records them on World and may wake the named task's
 	// agent (src/event_gateway.go). Off when AUTONOMY_EVENT_GATEWAY=0.
 	_autonomy.EventGateway = newEventGateway()
+	prWatcher.SetIngest(_autonomy.IngestWorldEvent)
 
 	// Last, once every manager a decision cycle reads is wired: the runs a previous
 	// process left behind are picked up here — the instructions it accepted but never
@@ -177,6 +184,9 @@ func (r *Autonomy) Close() error {
 	// closing the store under it: there is nothing left to resume (src/graceful.go).
 	if r != nil && r.Drain != nil {
 		r.Drain.stop()
+	}
+	if r != nil && r.PRWatcher != nil {
+		r.PRWatcher.Close()
 	}
 	// Agents are resident (see drainedAgent), so teardown is where their provider
 	// sessions are torn down: the rows and handles stay, and the session ids they

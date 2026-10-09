@@ -34,8 +34,9 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 ## 代码位置与提示词
 
-- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`deployment/monitor.go`），注册在 `capability.RegisterDefaults`。
+- 实现：`src/capability/`（`asset_change.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`software_development/pr_check.go`、`software_development/pr_watch.go`、`deployment/monitor.go`），注册在 `capability.RegisterDefaults`。
 - `deployment.monitor`：跟随一次部署、发现并解释问题（见 [deployment-monitor.md](deployment-monitor.md)）。
+- `pr.watch`：观察一个 PR，直到被 merge（默认）；然后经 [event-gateway](event-gateway.md) 唤醒 agent 继续。不 merge。验真仍是 `pr.check`。
 - **提示词不进代码**：委托给 worker 的提示词放在仓库文件里，运行时按次读取 —— 与 agent policy 同一套路（见 `src/prompt.go`）：
 
 | 文件 | 占位符 | 说明 |

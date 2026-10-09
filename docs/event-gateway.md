@@ -68,12 +68,33 @@ curl -sS -X POST http://127.0.0.1:4300/api/events \
 
 `GET /api/events?source=&type=&task_id=&after=&limit=` 读同一份 log（时间正序）。契约见 [http-api.md](http-api.md)。
 
+## PR watcher（`pr.watch`）
+
+Agent 等一个 PR 被 **merge** 再继续（例如 `https://github.com/kaulie/agent-watchdog/pull/9`）时，不要空转 `pr.check`。`pr.watch` 才是这条路：
+
+1. 先看一眼当前状态。已经 `merged=true` → 本轮 plan 可以直接走下一步。
+2. 还没合：登记后台 watch（默认不把决策循环挂住），返回 `watching=true`。
+3. runtime 轮询 GitHub；一旦合入，ingest `github.pull_request.merged`（`idempotency_key`: `github:owner/name#N:merged`），`subject.task_id` 唤醒该 task 的 agent，它在 `world.events` / `additional_input` 里看见这件事，再规划（部署、验真、done）。
+
+```
+code_edit → pr.watch {pr} → （人 merge）→ observation → service.deploy / done
+```
+
+`watch=true` 时这次调用内也会轮询，窗口有界（默认 60s，上限 10 分钟），与 `deployment.monitor` 相同；超时仍留下后台 watch。
+
+`until`：`merged`（默认）/ `closed` / `terminal`。能力 **不 merge**；验真仍是 `pr.check`。
+
+后台间隔默认 15s（`AUTONOMY_PR_WATCH_INTERVAL`，最小 2s）。进程内状态，重启即忘；需要的话 restart 后再 `pr.watch` 一次。
+
+HTTP：`POST /api/watches` `{ "pr": "https://github.com/kaulie/agent-watchdog/pull/9", "task_id": "task-…", "until": "merged" }`，`GET /api/watches` 列出本进程还在看的。
+
 ## 环境变量
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
 | `AUTONOMY_EVENT_GATEWAY` | `0` / `off` / `false` / `no` 关掉 | 开 |
 | `AUTONOMY_EVENT_GATEWAY_PROMPT_LIMIT` | 注入 prompt 的最近事件条数 | `20`（最大 100） |
+| `AUTONOMY_PR_WATCH_INTERVAL` | `pr.watch` 后台轮询间隔（秒） | `15`（最小 2） |
 
 ## 持久化
 
@@ -94,3 +115,5 @@ V1 的 Log 是进程内 `MemoryLog`：重启即忘。接口是给后续 Store �
 | runtime 接线、prompt 注入、observation | `src/event_gateway.go` |
 | HTTP | `src/http_server.go`（`handleIngestEvent` / `handleListEvents`） |
 | inbox kind `observation` | `src/message.go` |
+| PR watcher（`pr.watch`） | `src/capability/software_development/pr_watch.go`、`src/pr_watcher.go` |
+| 登记 / 列出 watch | `POST`/`GET /api/watches` |
