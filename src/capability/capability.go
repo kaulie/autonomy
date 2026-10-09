@@ -89,7 +89,6 @@ func (f *Factory) FormatConstructs() string {
 		Description string       `json:"description"`
 		SystemCheck bool         `json:"system_check,omitempty"`
 		ChecksKind  string       `json:"checks_kind,omitempty"`
-		Workspace   string       `json:"workspace,omitempty"`
 		Input       []spec.Field `json:"input,omitempty"`
 		Output      []spec.Field `json:"output,omitempty"`
 	}
@@ -103,9 +102,6 @@ func (f *Factory) FormatConstructs() string {
 		if sc, ok := c.(spec.SystemCheck); ok {
 			item.SystemCheck = true
 			item.ChecksKind = sc.ChecksKind()
-		}
-		if scope, ok := c.(spec.WorkerScope); ok {
-			item.Workspace = scope.WorkerWorkspace()
 		}
 		if declared, ok := c.(spec.Declared); ok {
 			item.Input = declared.Inputs()

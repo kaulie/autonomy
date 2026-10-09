@@ -92,19 +92,18 @@ func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
 }
 
 // A software-development task must be planned, not bounced back as an
-// authorization card: code_edit's worker workspace is already permitted, and
+// authorization card: the planner concerns only its own workspace, and
 // completion binds to pr_url (kind pull_request), not summary.
 func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
 	policy := readShippedPolicy(t, "AGENT_V2.md")
 	for _, want := range []string{
-		"a worker capability (`code_edit`) running in its own workspace is the authorized",
-		"you do not choose either, authorize either, or generate the",
-		"workspace: runtime_assigned",
+		"concern only your own workspace",
+		"Another agent has its own",
+		"You only concern your own workspace",
 		"output instead (`code_edit.pr_url`)",
 		"asking the owner to add a kind",
-		"Asking the owner to authorize a worker workspace",
+		"authorize another agent's workspace",
 		"already has `kind: pull_request` for `pr.check`",
-		"do not control either.",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the planner policy no longer says %q", want)

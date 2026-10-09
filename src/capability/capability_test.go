@@ -155,15 +155,12 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if checksKind["pr.check"] != spec.KindPullRequest || checksKind["deployment.monitor"] != spec.KindDeployment {
 		t.Fatalf("tools must declare the kind they check: %v", checksKind)
 	}
-	workspaces := map[string]string{}
+	// A planner is not shown another agent's workspace. code_edit still
+	// declares WorkerWorkspace for the runtime; Constructs omit it.
 	for _, c := range constructs {
-		workspaces[c.Name] = c.Workspace
-	}
-	if workspaces["code_edit"] != spec.WorkspaceRuntimeAssigned {
-		t.Fatalf("code_edit workspace=%q, want the runtime-assigned fact %q", workspaces["code_edit"], spec.WorkspaceRuntimeAssigned)
-	}
-	if workspaces["pull_request.review"] != "" || workspaces["pr.check"] != "" {
-		t.Fatalf("read-only constructs must not claim a worker workspace: %v", workspaces)
+		if c.Workspace != "" {
+			t.Fatalf("%s workspace=%q, Constructs must not name another agent's sandbox", c.Name, c.Workspace)
+		}
 	}
 	prURL, ok := fieldNamed(outputs["code_edit"], "pr_url")
 	if !ok || prURL.Kind != spec.KindPullRequest {

@@ -27,28 +27,27 @@ func (CodeEdit) Domain() string { return Domain }
 
 func (CodeEdit) Provider() string { return Provider }
 
-// WorkerWorkspace is a runtime fact: AcquireAgent is called without a workspace,
-// so the worker gets its own AGENT_WORKSPACE. The planner reads this on the
-// construct; it does not pass a workspace, authorize one, or render the worker
-// prompt.
+// WorkerWorkspace is a runtime-internal fact: AcquireAgent is called without a
+// workspace, so the worker gets its own AGENT_WORKSPACE. Constructs do not
+// show this to the planner — each agent only concerns its own workspace.
 func (CodeEdit) WorkerWorkspace() string { return spec.WorkspaceRuntimeAssigned }
 
 func (CodeEdit) Description() string {
-	return `delegate a software-development task to a coding agent. The runtime assigns that worker its own authorized workspace — this is how code changes happen, not a constraint violation and not something to ask permission for. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored: the worker does not run in the planner's sandbox`
+	return `implement a software-development change. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored — this capability does not take a workspace`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
 func (CodeEdit) Inputs() []spec.Field {
 	return []spec.Field{
-		{Name: "instruction", Aliases: []string{"goal"}, Required: true, Description: "the goal or requirement to hand the coding agent; the plan must supply it (a literal, or a source binding) — the runtime does not fill it in"},
-		{Name: "task_id", Description: "the task the work belongs to (the runtime fills it); the worker's reason turns and current_task_id carry it"},
+		{Name: "instruction", Aliases: []string{"goal"}, Required: true, Description: "the goal or requirement; the plan must supply it (a literal, or a source binding) — the runtime does not fill it in"},
+		{Name: "task_id", Description: "the task the work belongs to (the runtime fills it)"},
 	}
 }
 
 func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "summary", Description: "the worker's own report — not a typed evidence object and not a completion slot. Bind verification to pr_url (kind pull_request), not this"},
-		{Name: "pr_url", Kind: spec.KindPullRequest, Description: "the pull request the worker opened, when its report names one — a typed pull_request object the runtime verifies with pr.check; empty when the report names none"},
+		{Name: "summary", Description: "what the capability reported — not a typed evidence object and not a completion slot. Bind verification to pr_url (kind pull_request), not this"},
+		{Name: "pr_url", Kind: spec.KindPullRequest, Description: "the pull request this step opened, when the report names one — a typed pull_request object the runtime verifies with pr.check; empty when the report names none"},
 	}
 }
 

@@ -107,17 +107,17 @@ func TestCodeEditDeclaresRuntimeAssignedWorkspace(t *testing.T) {
 
 func TestCodeEditDescriptionDoesNotInviteAPermissionAsk(t *testing.T) {
 	desc := (sd.CodeEdit{}).Description()
-	for _, want := range []string{"authorized workspace", "not something to ask permission for"} {
-		if !strings.Contains(desc, want) {
-			t.Errorf("description=%q, want %q", desc, want)
-		}
+	if !strings.Contains(desc, "implement a software-development change") {
+		t.Errorf("description=%q, want a capability contract", desc)
 	}
 	for _, unwanted := range []string{
-		"never runs in the delegating agent's workspace",
-		"which runs in its own agent workspace",
+		"coding agent",
+		"authorized workspace",
+		"delegating agent's workspace",
+		"planner's sandbox",
 	} {
 		if strings.Contains(desc, unwanted) {
-			t.Errorf("description still invites a permission conflict: %q in %q", unwanted, desc)
+			t.Errorf("description still names another agent: %q in %q", unwanted, desc)
 		}
 	}
 }
