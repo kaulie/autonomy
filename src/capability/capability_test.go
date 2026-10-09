@@ -40,10 +40,10 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 9 {
-		t.Fatalf("GetAll len=%d want 9", len(all))
+	if len(all) != 10 {
+		t.Fatalf("GetAll len=%d want 10", len(all))
 	}
-	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", deployment.Name,
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", "pr.watch", deployment.Name,
 		"context.search", "context.get", "context.list"} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
@@ -67,6 +67,9 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	}
 	if !strings.Contains(got, `"name": "pr.check"`) {
 		t.Fatalf("expected pr.check in constructs: %q", got)
+	}
+	if !strings.Contains(got, `"name": "pr.watch"`) {
+		t.Fatalf("expected pr.watch in constructs: %q", got)
 	}
 	if !strings.Contains(got, `"system_check": true`) {
 		t.Fatalf("expected system_check on verification tools: %q", got)
@@ -129,8 +132,8 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
 		t.Fatalf("constructs are not the documented JSON: %v", err)
 	}
-	if len(constructs) != 9 {
-		t.Fatalf("constructs=%d want the 9 built-ins", len(constructs))
+	if len(constructs) != 10 {
+		t.Fatalf("constructs=%d want the 10 built-ins", len(constructs))
 	}
 	inputs := map[string][]spec.Field{}
 	outputs := map[string][]spec.Field{}
@@ -145,8 +148,8 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if !systemCheck["pr.check"] || !systemCheck["deployment.monitor"] {
 		t.Fatalf("system verification tools must be marked: %v", systemCheck)
 	}
-	if systemCheck["pull_request.review"] || systemCheck["code_edit"] {
-		t.Fatalf("review and work capabilities are not verification tools: %v", systemCheck)
+	if systemCheck["pull_request.review"] || systemCheck["code_edit"] || systemCheck["pr.watch"] {
+		t.Fatalf("review, watch and work capabilities are not verification tools: %v", systemCheck)
 	}
 	checksKind := map[string]string{}
 	for _, c := range constructs {
@@ -187,6 +190,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		// (the capability never merges — a human does that).
 		{"pull_request.review", "pr", "pr_url", false, "reviews"},
 		{"pr.check", "pr", "pr_url", true, "exists"},
+		{"pr.watch", "pr", "pr_url", true, "watching"},
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},

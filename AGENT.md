@@ -80,6 +80,7 @@ Runtime 会在 planner 的初始化第一条 system（`GiveFirstPrompt` → `AGE
 |---|---|
 | 决策 / HTTP / inbox / session / store 端口 | `src/*.go` |
 | 外部世界事件（event gateway） | `src/eventgateway/` + `src/event_gateway.go`；HTTP `POST`/`GET /api/events` |
+| PR watcher（等 merge 再继续） | `src/capability/software_development/pr_watch.go` + `src/pr_watcher.go`；HTTP `POST`/`GET /api/watches` |
 | sqlite / postgres | `src/db/` |
 | 能力 | `src/capability/` + `RegisterDefaults` |
 | planner / worker 措辞 | `src/agent_policy/` |

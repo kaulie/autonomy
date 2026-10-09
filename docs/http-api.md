@@ -116,6 +116,22 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 
 进程内 MemoryLog，重启即忘。
 
+### `POST /api/watches` — 观察一个 PR，合并后唤醒 agent
+
+`pr.watch` 的 HTTP 口（见 [event-gateway.md](event-gateway.md)「PR watcher」）。对本进程登记一条后台观察：GitHub 上那个 PR 一旦 **merged**（默认 `until`），event gateway 写入 `github.pull_request.merged`，并按 `task_id` 给对应 agent 一条 `observation`，让它可以继续（部署、验真、done）。不 merge。
+
+```json
+{"kind":"pull_request","pr":"https://github.com/kaulie/agent-watchdog/pull/9","task_id":"task-…","until":"merged"}
+```
+
+`202` 且 `watching: true` 表示已在看；PR 已经合入（或 `exists=false`）是 `200` 且 `watching: false`。进程内状态，重启即忘。
+
+### `GET /api/watches` — 本进程还在看的 PR
+
+```json
+{"watches":[{"id":"kaulie/agent-watchdog#9","kind":"pull_request","pr":"https://github.com/kaulie/agent-watchdog/pull/9","until":"merged","watching":true}],"count":1}
+```
+
 ### `POST /api/tasks`
 
 接受一条任务指令：立刻返回 `task_id` / `agent_id`，并把这条指令作为**消息**放进这只 agent 的 inbox
