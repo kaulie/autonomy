@@ -28,7 +28,7 @@
 //
 // @title        autonomy
 // @version      1.0.0
-// @description  自主 agent runtime 的 HTTP API：受理指令、把一句话广播给一批 agent（某个 project 下的 / 所有 project 下的）、查任务详情（状态 / 计划 / 所属 project 与组织）、查 agent 工作状态、轮询对话流；受理外部世界事件（POST /api/events）并观察 PR（POST /api/watches，合并后唤醒 agent）；以及数据 API —— 把 reason turn 日志当数据读（列表 / 详情 / facets / task 选择器 / 自述），供评测侧调用而不再直接读库；以及优雅重启的对接端点（部署平台重启前先通知、再轮询是否可以重启，服务在这一侧不启动新 run、等在途 run 跑完）。
+// @description  自主 agent runtime 的 HTTP API：受理指令、把一句话广播给一批 agent（某个 project 下的 / 所有 project 下的）、查任务详情（状态 / 计划 / 所属 project 与组织）、查 agent 工作状态、轮询对话流；受理外部世界事件（POST /api/events）并观察世界对象（POST /api/watches，到达 until 后唤醒 agent）；以及数据 API —— 把 reason turn 日志当数据读（列表 / 详情 / facets / task 选择器 / 自述），供评测侧调用而不再直接读库；以及优雅重启的对接端点（部署平台重启前先通知、再轮询是否可以重启，服务在这一侧不启动新 run、等在途 run 跑完）。
 // @BasePath     /
 // @schemes      http
 // @host         127.0.0.1:4300

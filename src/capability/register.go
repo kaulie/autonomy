@@ -6,6 +6,7 @@ import (
 	"github.com/kaulie/autonomy/src/capability/deployment"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 	ctxsvc "github.com/kaulie/autonomy/src/context"
+	"github.com/kaulie/autonomy/src/watcher"
 )
 
 // Deps are runtime hooks built-in capabilities need from the Autonomy host.
@@ -21,10 +22,10 @@ type Deps struct {
 	// capabilities call. Optional: when nil those capabilities are still
 	// registered for the planner but report a typed "not configured" error.
 	Context ctxsvc.Service
-	// PRWatches is the background pull-request watcher pr.watch registers
-	// with. Optional: without it the capability still snapshots (and can
-	// poll in-call) but does not emit later world events.
-	PRWatches sd.WatchRegistrar
+	// Watches is the background observer `watch` registers with. Optional:
+	// without it the capability reports watcher-off rather than inventing
+	// a per-asset poller.
+	Watches *watcher.Watcher
 }
 
 // RegisterDefaults registers all built-in capabilities.
@@ -48,10 +49,10 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// pr.check (PR_Check) is the system verification tool: does this PR exist,
 	// and what state is it in. Review opinions stay on pull_request.review.
 	f.Register(sd.PRCheck{})
-	// pr.watch observes a pull request until it is merged (default) and, via
-	// the event gateway, wakes the task's agent so it can continue. It does
-	// not merge; pr.check remains the verifier.
-	f.Register(sd.PRWatch{Watches: deps.PRWatches})
+	// watch observes one world object (kind + target) until it reaches until
+	// and, via the event gateway, wakes the task's agent. A new object is a
+	// new Probe, not a new capability. It does not merge or deploy.
+	f.Register(Watch{Watches: deps.Watches})
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})

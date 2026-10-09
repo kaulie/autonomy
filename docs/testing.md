@@ -44,6 +44,7 @@
 | `accounts_*` | 账号池 |
 | `graceful_*` | 优雅重启、drain、开机自愈 |
 | `event_*` | event gateway（HTTP ingest / World 注入 / observation 入队）；模块本体的测试在 `src/eventgateway/` |
+| `watch_*` | watcher（登记 / 轮询 / 多 kind Probe / HTTP）；模块本体的测试在 `src/watcher/` |
 | `fixtures_test.go` | **唯一的**夹具入口（`openStore` / `seedTestAccounts` / …） |
 
 `fixtures_test.go` 是刻意的：一个测试要一个能跑的 runtime（store + 池子 + 策略根），
