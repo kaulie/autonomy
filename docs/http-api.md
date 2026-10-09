@@ -82,6 +82,40 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 | `reason` | 同一件事的人话版本 |
 | `notice` / `notifiedAt` / `deadline` | 谁通知的、什么时候、这次 drain 什么时候自己恢复（`AUTONOMY_DRAIN_TIMEOUT`，默认 10 分钟；`0` = 不恢复） |
 
+### `POST /api/events` — 外部世界事件：写入 World
+
+Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。外部系统把世界上已经发生的事实 POST 进来：gateway 规范化、按 `(source, idempotency_key)` 去重、记进 log，并出现在下一轮决策 prompt 的 `world.events`。`subject.task_id` 指向一条**已经有 agent** 的 task 时，还会往那只 agent 的 inbox 放一条 `observation`（见 [inbox.md](inbox.md)），让它不必等下一条用户指令。
+
+```json
+{
+  "source": "deployment",
+  "type": "deployment.succeeded",
+  "subject": {"task_id": "task-…", "asset_id": "svc:autonomy", "project_id": "project-749a0238"},
+  "payload": {"pipeline_id": "pipeline-…", "ref": "main"},
+  "occurred_at": "2026-10-09T10:00:00Z",
+  "idempotency_key": "deployment:pipeline-…:succeeded"
+}
+```
+
+`source` 与 `type` 必填。`202` 是新事件；同一 idempotency key 再来是 `200` 且 `duplicate: true`（不重通知）。缺字段或非法 JSON 是 `400`；`AUTONOMY_EVENT_GATEWAY=0` 是 `503`。
+
+```json
+{"event": {"id": "evt-…", "source": "deployment", "type": "deployment.succeeded", "…": "…"},
+ "duplicate": false, "delivered": true, "task_id": "task-…", "agent_id": 10001, "message_id": 1000001}
+```
+
+`delivered` 为真表示 observation 已入队。没有 task、或 task 还没有 agent，事件仍被记录，只是不唤醒。
+
+### `GET /api/events` — 已受理的外部世界事件
+
+与 prompt 注入的是同一份 log。查询参数：`source`、`type`、`task_id`、`after`（id 游标，append 序排他）、`limit`（默认 50，最大 200）。无 `after` 时返回匹配结果的**最后** `limit` 条（时间正序）。
+
+```json
+{"events": [{"id": "evt-…", "source": "deployment", "type": "deployment.succeeded"}], "count": 1}
+```
+
+进程内 MemoryLog，重启即忘。
+
 ### `POST /api/tasks`
 
 接受一条任务指令：立刻返回 `task_id` / `agent_id`，并把这条指令作为**消息**放进这只 agent 的 inbox

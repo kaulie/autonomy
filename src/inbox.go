@@ -88,8 +88,9 @@ func NewInbox(store InboxStore, handle MessageHandler, drained func(agent *Agent
 // process after the restart.
 //
 // What is held is a *run*, not a message: a stop's record and a capability's delegated
-// prompt are not new runs of the agent's own task, and holding them would stop an
-// in-flight run from finishing — which is the very thing a drain waits for.
+// prompt are not new runs of the agent's own task (an observation is: it re-observes
+// the world), and holding them would stop an in-flight run from finishing — which is
+// the very thing a drain waits for.
 func (i *Inbox) holdWhile(paused func() bool) {
 	if i == nil {
 		return
@@ -343,15 +344,15 @@ func (i *Inbox) drain(agent *Agent, gen int) {
 			i.endDrain(agent, gen)
 			return
 		}
-		if msg.Kind == MessageKindInstruction && i.holdStart(agent) {
-			// This instruction is a *new run*, and the runtime is draining for a
-			// restart: it must not start now. Put it back where it was (its row id is
-			// its place in the queue) and let this consumer end — the drain's end
-			// starts it again (resumePaused), and if the reload never comes, the
-			// process after the restart does (resumeAcceptedInstructions). A stop's
-			// record and a delegated prompt are not held: they are not new runs, and
-			// an in-flight run waiting on a worker is exactly what the drain waits
-			// for.
+		if isNewRunKind(msg.Kind) && i.holdStart(agent) {
+			// This message is a *new run* (an instruction, or a world observation the
+			// event gateway queued), and the runtime is draining for a restart: it
+			// must not start now. Put it back where it was (its row id is its place
+			// in the queue) and let this consumer end — the drain's end starts it
+			// again (resumePaused), and if the reload never comes, the process after
+			// the restart does (resumeAcceptedInstructions). A stop's record and a
+			// delegated prompt are not held: they are not new runs, and an in-flight
+			// run waiting on a worker is exactly what the drain waits for.
 			if err := i.store.RequeueMessage(msg.ID); err != nil {
 				fmt.Fprintf(os.Stderr, "[autonomy] %s inbox: hold message %d: %v\n", agent.Name, msg.ID, err)
 			}

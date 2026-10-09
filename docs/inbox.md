@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `user` | 用户 | `POST /api/tasks` 的指令 / `Autonomy.Run` / `POST /api/broadcast` 的广播（一句话投给多个 agent，每个目标各收到一条） | `instruction`（`mode=command` 或省略）或 `chat`（`mode=chat`） |
 | `agent` | 别的 agent | capability 交给 worker 的那句 prompt（`LLMSession.Prompt`），`sender_id` 记委托方 agent | `delegation` |
-| `system` | runtime 自己 | 停止通知（`sender_id=runtime`）：用户走 `POST /api/tasks/{id}/stop`，运行时走重启/退出时的在途 run 收尾（`src/stop_reason.go`，消息里写明是用户停的、还是运行时为重启停的并带 `requestId`） | `stop` |
+| `system` | runtime 自己 | 停止通知（`sender_id=runtime`）：用户走 `POST /api/tasks/{id}/stop`，运行时走重启/退出时的在途 run 收尾（`src/stop_reason.go`，消息里写明是用户停的、还是运行时为重启停的并带 `requestId`）；以及世界观察（`sender_id=event-gateway:<source>`）：event gateway 受理的外部事件点名了这只 agent 的 task（见 [event-gateway.md](event-gateway.md)） | `stop` / `observation` |
 
 广播不是第四种消息：它是**同一个 `user` 指令**同时说给多个 agent（见 [broadcast.md](broadcast.md)）——
 每个目标收到的就是它自己那条 task 的指令，队列里看不出任何差别。
@@ -44,6 +44,7 @@
   已产生的 plan 原样保留；模型就算答了 `type:plan` 也会被丢掉（`src/chat_mode.go`）。用户原文记在消息的 `content` 里。
 - **`delegation` = worker 的一次 turn**：capability 的 `Prompt` 把 prompt 发进 worker 的 inbox，由 worker 自己的消费者跑这一轮，
   结果等回来交给 capability —— 对话仍记在同一个 session 上，顺序由队列保证（见 [session.md](session.md)、[delegation.md](delegation.md)）。
+- **`observation` = 世界变了，再看一眼**：event gateway 把一条外部事件记进 World 之后，若 `subject.task_id` 已有 agent，就往队里放一条 observation（内容是事件 JSON）。处理时走与 instruction 相同的决策循环，所以 agent 不必等下一条用户指令。优雅重启时它和 instruction 一样被 hold：那是一次新 run。
 - **`stop` 不是一次 turn**：停止是靠**取消正在处理的那条消息**做到的，这条消息是它的记录，排在它停下的那条指令之后。
   它后面的消息仍然在队里（已接受的不丢）。**一条被进程带走的 `running` 消息也一样**：重启后它不是等指令，
   而是由 runtime 在开机时把这条消息连同它的 agent 一起续起来（见 [graceful-restart.md](graceful-restart.md)「开机自愈」）。
@@ -77,4 +78,4 @@ task 行已有的描述（`tasks.description`）——「这个 task 要做什�
 | 队列与消费者（每个 agent 一个） | `src/inbox.go` |
 | 端口 `InboxStore` | `src/store.go` |
 | sqlite 实现（表 / claim / 收尾 / 回收 / 计数） | `src/db/sqlite_inbox.go` |
-| 谁发什么（指令 / 委托 / 停止） | `src/autonomy.go`、`src/api_service.go`、`src/llm_session.go` |
+| 谁发什么（指令 / 委托 / 停止 / 世界观察） | `src/autonomy.go`、`src/api_service.go`、`src/llm_session.go`、`src/event_gateway.go` |

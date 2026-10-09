@@ -19,7 +19,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 20b. [prompt.md](prompt.md) — 提示词是文件：初始化（frame）与每轮（delta）各一个文件
 6. [capability.md](capability.md) / [provider.md](provider.md) / [action.md](action.md) — 能力空间
 7. [asset.md](asset.md) / [domain.md](domain.md) — 世界中的对象与语义空间
-8. [event.md](event.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、验真、边界
+8. [event.md](event.md) / [event-gateway.md](event-gateway.md) / [verification.md](verification.md) / [policy.md](policy.md) — 观察、外部事件入口、验真、边界
 9. [runtime.md](runtime.md) / [execution-loop.md](execution-loop.md) — 执行与主循环
 10. [trust.md](trust.md) — 信任与选择（可后置实现）
 11. [llm-event-stream.md](llm-event-stream.md) — LLM 事件流持久化（reason_turns run header + llm_events 原始流，原始流默认不写）与多 provider 扩展
@@ -37,6 +37,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 22b. [remote-deploy.md](remote-deploy.md) — 发版包装到远程机器：`AUTONOMY_HTTP_HOST`、`scripts/start.sh`、systemd 单元；本机平台默认仍只绑 loopback
 23. [dashboard.md](dashboard.md) — agent 状态监控页：`GET /api/agents`（所有 agent 的实时状态）与 `GET /dashboard`（轮询它的自刷新表格页）
 24. [agent-initialization.md](agent-initialization.md) — agent 初始化与 task 输入解耦：先初始化、再给 system prompt、之后才接受 task，先出计划、确认后再实现
+25. [event-gateway.md](event-gateway.md) — 外部世界事件入口：独立模块受理 / 去重 / 记入 World，按需唤醒 task 的 agent
 
 ## 终局四对象
 
