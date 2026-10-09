@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/capability/deployment"
-	sd "github.com/kaulie/autonomy/src/capability/software_development"
+	"github.com/kaulie/autonomy/src/eventcenter"
 	"github.com/kaulie/autonomy/src/eventgateway"
 	"github.com/kaulie/autonomy/src/watcher"
 )
@@ -49,9 +49,9 @@ type ListWatchesResponse struct {
 	Count   int         `json:"count"`
 }
 
-func newWorldWatcher() *watcher.Watcher {
+func newWorldWatcher(ec *eventcenter.Client) *watcher.Watcher {
 	return watcher.New([]watcher.Probe{
-		watcher.PullRequestProbe{Snapshot: defaultPullRequestSnapshot},
+		watcher.PullRequestProbe{Snapshot: pullRequestSnapshot(ec)},
 		watcher.DeploymentProbe{Snapshot: defaultDeploymentSnapshot},
 	}, watcher.WithInterval(watchInterval()))
 }
@@ -71,12 +71,17 @@ func watchInterval() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-func defaultPullRequestSnapshot(target string) (watcher.Observation, error) {
-	out, err := sd.PRCheck{}.Run(map[string]string{"pr": target})
-	if err != nil {
-		return nil, err
+func pullRequestSnapshot(ec *eventcenter.Client) func(string) (watcher.Observation, error) {
+	return func(target string) (watcher.Observation, error) {
+		if ec == nil {
+			return nil, fmt.Errorf("event-center is off")
+		}
+		out, err := ec.ObservePullRequest(context.Background(), target)
+		if err != nil {
+			return nil, err
+		}
+		return watcher.Observation(out), nil
 	}
-	return watcher.Observation(out), nil
 }
 
 func defaultDeploymentSnapshot(target string) (watcher.Observation, error) {

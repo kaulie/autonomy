@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	sd "github.com/kaulie/autonomy/src/capability/software_development"
+	"github.com/kaulie/autonomy/src/eventcenter"
 	"github.com/kaulie/autonomy/src/eventgateway"
 	"github.com/kaulie/autonomy/src/watcher"
 )
@@ -75,22 +76,27 @@ func TestWatcherEmitsMergedEvent(t *testing.T) {
 func TestWatchHTTPRegistersAndLists(t *testing.T) {
 	var mu sync.Mutex
 	merged := false
-	git := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	center := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		state, flag := "open", "false"
+		body := openPREventBody()
 		if merged {
-			state, flag = "closed", "true"
+			body = mergedPREventBody()
 		}
-		_, _ = w.Write([]byte(`{"number":9,"html_url":"https://github.com/kaulie/agent-watchdog/pull/9","title":"watch","state":"` + state + `","draft":false,"merged":` + flag + `}`))
+		switch r.URL.Path {
+		case "/v1/streams":
+			_, _ = w.Write([]byte(`{"streams":{"github":1},"global_seq":1}`))
+		default:
+			_, _ = w.Write([]byte(`{"events":[` + body + `],"next_cursor":1}`))
+		}
 	}))
-	t.Cleanup(git.Close)
+	t.Cleanup(center.Close)
 
-	check := sd.PRCheck{APIURL: git.URL, Token: "test-token"}
+	ec := &eventcenter.Client{URL: center.URL}
 	w := watcher.New([]watcher.Probe{watcher.PullRequestProbe{
 		Snapshot: func(pr string) (watcher.Observation, error) {
-			out, err := check.Run(map[string]string{"pr": pr})
+			out, err := ec.ObservePullRequest(context.Background(), pr)
 			return watcher.Observation(out), err
 		},
 	}}, watcher.WithErrors(func(string, ...any) {}))

@@ -118,7 +118,7 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 
 ### `POST /api/watches` — 观察一个世界对象，到达 until 后唤醒 agent
 
-[Watcher](watcher.md) 的 HTTP 口。对本进程登记一条后台观察：对象（kind + target）一旦到达 `until`，event gateway 写入对应事实，并按 `task_id` 给对应 agent 一条 `observation`。`pr` / `deployment` 是填写 kind+target 的别名。不 merge、不部署。
+[Watcher](watcher.md) 的 HTTP 口。对本进程登记一条后台观察：对象（kind + target）一旦到达 `until`，event gateway 写入对应事实，并按 `task_id` 给对应 agent 一条 `observation`。`pr` / `deployment` 是填写 kind+target 的别名。不 merge、不部署。Pull request 的状态来自 [event-center](event-center.md)，不是 GitHub REST。
 
 ```json
 {"kind":"pull_request","target":"https://github.com/kaulie/agent-watchdog/pull/9","task_id":"task-…","until":"merged"}

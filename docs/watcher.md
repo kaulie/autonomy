@@ -17,7 +17,7 @@ Watcher 是 autonomy **持续观察**外部对象的模块：在事实发生之�
 ## 职责
 
 - **负责**：按 kind 调用 Probe 读对象、比较 fingerprint、在变化时发出 Change、在 `until` 满足后停掉那条观察。
-- **不负责**：规定下一步调用谁；合并 PR / 触发部署；验真（仍是 `pr.check` / `deployment.monitor`）；发明 task / agent；把 GitHub 或部署平台的 HTTP 客户端写进模块本体。
+- **不负责**：规定下一步调用谁；合并 PR / 触发部署；验真（仍是 `pr.check` / `deployment.monitor`）；发明 task / agent；把 GitHub 或部署平台的 HTTP 客户端写进模块本体。PR 的快照来自 [event-center](event-center.md)，不是 GitHub REST。
 
 ## 模块边界
 
@@ -27,7 +27,7 @@ Watcher 是 autonomy **持续观察**外部对象的模块：在事实发生之�
 |---|---|---|
 | 模块 | `src/watcher/` | Spec / Probe / Observation / Change / Watcher。不知道 task、inbox、prompt、runtime |
 | Probe | `pull_request.go` / `deployment.go` | 该对象的词汇（open/merged，succeeded/failed）。读世界的方式是注入的 Snapshot |
-| runtime 接线 | `src/watch.go` | 把 PRCheck / HTTPObserver 接到 Probe；Change → event gateway |
+| runtime 接线 | `src/watch.go` | PR Snapshot 接 event-center；deployment 仍接 HTTPObserver；Change → event gateway |
 | 能力 | `src/capability/watch.go` | **一个** `watch`：kind + target。新对象加 Probe，不加 `*.watch` |
 | HTTP | `POST`/`GET /api/watches` | 与能力同一份登记 |
 

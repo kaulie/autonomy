@@ -17,8 +17,8 @@ const (
 )
 
 // PullRequestProbe watches one pull request. Snapshot is how the host reads
-// it (typically PRCheck). The probe knows the object's vocabulary — open /
-// closed / merged — not GitHub's REST client.
+// it (typically event-center, not GitHub). The probe knows the object's
+// vocabulary — open / closed / merged — not the event-center HTTP client.
 type PullRequestProbe struct {
 	Snapshot func(target string) (Observation, error)
 }

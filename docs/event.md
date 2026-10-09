@@ -27,6 +27,7 @@ Agent A 完成 → Event → Owner 重新观察 → 再规划 → Agent B → Ev
 
 - [Action](action.md) / [Delegation](delegation.md) / 外部世界 → Event
 - 外部世界的入口是 [event-gateway](event-gateway.md)：进程外的事实经 `POST /api/events` 进入 World，并在点名了已有 agent 的 task 时投递 `observation`
+- 外部世界里 GitHub 一类的变化经 [event-center](event-center.md) 进入本进程，不经 GitHub REST
 - 事实还没发生、需要先盯着一个对象时，是 [watcher](watcher.md)：一种 `watch` 能力，多种 Probe；到达 until 后把 Change 交给 gateway
 - [Agent](agent.md)（尤其 Task Owner）消费 Event 后进入 [execution-loop](execution-loop.md)
 - Event 可为 [Verification](verification.md) 提供输入线索

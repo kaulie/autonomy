@@ -9,7 +9,7 @@ Event Gateway 是 autonomy 感知**外部世界变化**的入口：把进程外�
 ## 职责
 
 - **负责**：受理外部事件、规范化成 canonical Event、去重、留下可查询的 log、把最近的事件注入决策周期的 `## World`；当事件点名了一个已有 agent 的 task 时，向该 agent 的 inbox 投递一条 `observation`，让它不必等下一条用户指令就能再观察。
-- **不负责**：规定下一步调用谁；发明 task / agent；替代 [Verification](verification.md)；把 GitHub / 部署平台的专有协议写进 runtime 主循环。
+- **不负责**：规定下一步调用谁；发明 task / agent；替代 [Verification](verification.md)；把 GitHub / 部署平台的专有协议写进 runtime 主循环。GitHub webhook 由 [event-center](event-center.md) 受理；Runtime 拉它的流，不直连 GitHub。
 
 ## 模块边界
 
@@ -38,7 +38,7 @@ Gateway 只在 envelope 不合法时拒绝 ingest。runtime 唤醒 agent 失败�
 | `received_at` | gateway 看到它的时间 |
 | `idempotency_key` | 与 `source` 一起去重；省略则每次都是新事件 |
 
-V1 的 Adapter 是恒等映射（HTTP body 就是 envelope）。GitHub webhook、部署平台通知做成另一个 `Adapter`（`Match` + `Normalize`）即可，Gateway / Log / HTTP 形状不变。
+V1 的 Adapter 是恒等映射（HTTP body 就是 envelope）。GitHub webhook 进 event-center，不进本进程；Runtime 的 feed 把 event-center 的行收成 envelope。Gateway / Log / HTTP 形状不变。
 
 ## 事件怎么到达 agent
 
@@ -77,6 +77,8 @@ curl -sS -X POST http://127.0.0.1:4300/api/events \
 | `AUTONOMY_EVENT_GATEWAY` | `0` / `off` / `false` / `no` 关掉 | 开 |
 | `AUTONOMY_EVENT_GATEWAY_PROMPT_LIMIT` | 注入 prompt 的最近事件条数 | `20`（最大 100） |
 | `AUTONOMY_WATCH_INTERVAL` | Watcher 后台轮询间隔（秒） | `15`（最小 2） |
+| `EVENT_CENTER_API_URL` | 事件中心基址 | `http://127.0.0.1:9099` |
+| `AUTONOMY_EVENT_CENTER` | `0` / `off` 关掉事件中心客户端（PR watch 不回退 GitHub） | 开 |
 
 ## 持久化
 
@@ -98,3 +100,4 @@ V1 的 Log 是进程内 `MemoryLog`：重启即忘。接口是给后续 Store �
 | HTTP | `src/http_server.go`（`handleIngestEvent` / `handleListEvents`） |
 | inbox kind `observation` | `src/message.go` |
 | Watcher（持续观察 → Change） | `src/watcher/`、`src/watch.go`、能力 `watch`；见 [watcher.md](watcher.md) |
+| Event-center 客户端 / feed | `src/eventcenter/`、`src/event_center.go`；见 [event-center.md](event-center.md) |
