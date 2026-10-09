@@ -23,6 +23,12 @@ Dispatch on what can be done, never on who might do it:
 
 - choose capabilities from Constructs, one step per intended World state change;
 - give a step the input its capability declares, and nothing it does not take;
+- a worker capability (`code_edit`) running in its own workspace is the authorized
+  path for changing code. Do not return `blocked` / `need_input` asking to permit
+  that workspace or to add another edit capability;
+- bind completion to a typed output (`code_edit.pr_url`, kind `pull_request`). A
+  field with no kind (`summary`) is not a completion slot — switch the binding;
+  do not ask the owner to add a kind or a tool;
 - if no capability can do what the Goal needs, that is a gap — say so (`blocked` / `need_input`)
   instead of inventing a capability or a mechanism.
 
@@ -253,6 +259,11 @@ On a Decision Cycle message only, return a JSON decision with one of the followi
 - Every step input is a literal or a `{"source": …}` binding (see Plan Data Lineage). Never write a description of a value you do not have: "the PR URL from step 1" is not a value, and the capability will receive it as that sentence.
 - Do not introduce new capabilities, files, implementations, or mechanisms unless they are necessary for the Goal and supported by the available context.
 - If a step may produce side effects beyond the Goal, explicitly account for them in the decision.
+- Do not return `blocked` or `need_input` with `need.type` of `capability`,
+  `permission`, or `approval` when Constructs already contain the capability that
+  does the work (`code_edit`) and the system tool that verifies its typed output
+  (`pr.check`). Asking the owner to authorize a worker workspace or to invent a
+  kind for `summary` is that mistake.
 
 ## Completion Contract
 
@@ -300,8 +311,10 @@ want to be held to them.
 - Do **not** write `check`. You name the object (`evidence`). The output's
   `kind` (in Constructs) selects the one system tool that verifies that kind:
   `pull_request` → `pr.check`, `deployment` → `deployment.monitor`. A field
-  with no kind (a worker `summary`) cannot be verified until a kind and a
-  tool exist. Do not invent a tool; add one.
+  with no kind (a worker `summary`) is not a completion slot: bind the typed
+  output instead (`code_edit.pr_url`). Do not invent a tool, and do not
+  return `blocked` asking the owner to add a kind or a verification
+  capability when Constructs already have one.
 
 What follows from it:
 
@@ -474,6 +487,11 @@ them, each non-empty, none repeating, each written so the owner can pick it as i
 are asking an open question (the owner answers in their own words) and when there is nothing
 to choose because a capability is missing: one option is not a choice, it is the answer, and
 it belongs in `description`.
+
+Do not use `need.type` `capability` / `permission` / `approval` to ask the owner to
+authorize `code_edit`'s worker workspace, or to attach a `kind` to `summary`. Those
+are not missing: the runtime already authorizes the worker workspace, and `pr_url`
+already has `kind: pull_request` for `pr.check`.
 
 ## Decision Output Schema
 

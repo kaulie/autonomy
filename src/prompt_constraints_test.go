@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,15 @@ func TestConstraintsAreTheRuntimesFactsPlusItsPolicy(t *testing.T) {
 	}
 	if keys["task"] != "task-9" || keys["workspace"] != "/sandbox/agent-9/" {
 		t.Errorf("constraints=%v, want this cycle's task and sandbox", keys)
+	}
+	// The planner used to read "the only place files may be changed" as a ban
+	// on code_edit's worker workspace and then ask the owner to authorize it.
+	rule := keys["workspace_rule"]
+	if !strings.Contains(rule, "authorized") || !strings.Contains(rule, "not a missing permission") {
+		t.Errorf("workspace_rule=%q, want it to authorize a worker workspace", rule)
+	}
+	if strings.Contains(rule, "the only place files may be changed") {
+		t.Errorf("workspace_rule=%q still describes a single sandbox as exclusive", rule)
 	}
 }
 
@@ -106,5 +116,8 @@ func TestTheShippedPolicyKeepsDeployingTheRuntimesMove(t *testing.T) {
 	keys := constraintKeys(t, DecisionContext{})
 	if got, want := keys["deploy"], "the Runtime's move, not the agent's"; got != want {
 		t.Fatalf("deploy=%q want %q (src/agent_policy/CONSTRAINTS.json)", got, want)
+	}
+	if got := keys["worker_workspace"]; !strings.Contains(got, "authorized") || !strings.Contains(got, "do not ask the owner") {
+		t.Fatalf("worker_workspace=%q, want the shipped rule that a worker workspace is already authorized", got)
 	}
 }
