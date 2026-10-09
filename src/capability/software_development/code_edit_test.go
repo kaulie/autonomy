@@ -98,6 +98,28 @@ func TestCodeEditFailsWithoutPromptTemplate(t *testing.T) {
 	}
 }
 
+// TestCodeEditDescriptionDoesNotInviteAPermissionAsk: the planner used to
+// read "runs in its own agent workspace" / "never runs in the delegating
+// agent's workspace" as a constraint conflict and block asking the owner to
+// authorize the worker sandbox. The construct must say that workspace is
+// already authorized.
+func TestCodeEditDescriptionDoesNotInviteAPermissionAsk(t *testing.T) {
+	desc := (sd.CodeEdit{}).Description()
+	for _, want := range []string{"authorized workspace", "not something to ask permission for"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description=%q, want %q", desc, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"never runs in the delegating agent's workspace",
+		"which runs in its own agent workspace",
+	} {
+		if strings.Contains(desc, unwanted) {
+			t.Errorf("description still invites a permission conflict: %q in %q", unwanted, desc)
+		}
+	}
+}
+
 func TestCodeEditRequiresInstruction(t *testing.T) {
 	useRepoPrompt(t)
 	c := sd.CodeEdit{Agents: &mockBroker{sess: &mockSession{summary: "ok"}}}

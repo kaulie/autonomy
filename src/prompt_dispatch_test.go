@@ -91,6 +91,33 @@ func TestThePlannerPolicyBindsEveryInputToASource(t *testing.T) {
 	}
 }
 
+// A software-development task must be planned, not bounced back as an
+// authorization card: code_edit's worker workspace is already permitted, and
+// completion binds to pr_url (kind pull_request), not summary.
+func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
+	policy := readShippedPolicy(t, "AGENT_V2.md")
+	for _, want := range []string{
+		"a worker capability (`code_edit`) running in its own workspace is the authorized",
+		"Do not return `blocked` / `need_input` asking to permit",
+		"output instead (`code_edit.pr_url`)",
+		"asking the owner to add a kind",
+		"Asking the owner to authorize a worker workspace",
+		"already has `kind: pull_request` for `pr.check`",
+	} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("the planner policy no longer says %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		"cannot be verified until a kind and a",
+		"Do not invent a tool; add one.",
+	} {
+		if strings.Contains(policy, unwanted) {
+			t.Errorf("the planner policy still tells the model to ask for a new kind/tool: %q", unwanted)
+		}
+	}
+}
+
 // The worker prompt is the other side of the same line: it belongs to a
 // capability the runtime acquired an agent for, and it must still be the agent's
 // own identity and sandbox — not a plan that names agents.

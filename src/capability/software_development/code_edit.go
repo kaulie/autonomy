@@ -28,7 +28,7 @@ func (CodeEdit) Domain() string { return Domain }
 func (CodeEdit) Provider() string { return Provider }
 
 func (CodeEdit) Description() string {
-	return `delegate a software-development task to a coding agent, which runs in its own agent workspace. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored: the worker never runs in the delegating agent's workspace`
+	return `delegate a software-development task to a coding agent. The runtime assigns that worker its own authorized workspace — this is how code changes happen, not a constraint violation and not something to ask permission for. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored: the worker does not run in the planner's sandbox`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
@@ -41,8 +41,8 @@ func (CodeEdit) Inputs() []spec.Field {
 
 func (CodeEdit) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "summary", Description: "the worker's own report: what it changed, how it verified it, and what it landed"},
-		{Name: "pr_url", Kind: spec.KindPullRequest, Description: "the pull request the worker opened, when its report names one — a typed pull_request object; empty when the report names none"},
+		{Name: "summary", Description: "the worker's own report — not a typed evidence object and not a completion slot. Bind verification to pr_url (kind pull_request), not this"},
+		{Name: "pr_url", Kind: spec.KindPullRequest, Description: "the pull request the worker opened, when its report names one — a typed pull_request object the runtime verifies with pr.check; empty when the report names none"},
 	}
 }
 

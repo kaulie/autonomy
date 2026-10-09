@@ -123,7 +123,12 @@ func constraintsJSON(ctx DecisionContext) []byte {
 	// The runtime's own facts come last: its policy cannot redefine the task, nor
 	// the sandbox an agent works in.
 	m["scope"] = "the files this task touches"
-	m["workspace_rule"] = "the only place files may be changed"
+	// A planner that reads "the only place files may be changed" next to its
+	// own sandbox treats code_edit's worker workspace as unauthorized and
+	// blocks asking the owner to permit it (task-74fbfcd59d464cae). The
+	// planner does not edit files; a worker the runtime acquires is already
+	// authorized in the workspace it was given.
+	m["workspace_rule"] = "this agent's sandbox (a planner does not edit files). A capability that acquires a worker is authorized to change files in the workspace the runtime assigns that worker — that is not a missing permission"
 	if ctx.Task != nil && strings.TrimSpace(ctx.Task.ID) != "" {
 		m["task"] = ctx.Task.ID
 	}
