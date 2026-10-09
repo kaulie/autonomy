@@ -39,6 +39,11 @@ type AcceptTaskRequest struct {
 	// account's (or the harness default). The account still decides harness, vendor,
 	// credential and workspace; this only names which model the session opens with.
 	Model string `json:"model,omitempty"`
+	// CompletionContracts is the Completion Contract the caller pins at accept
+	// (same JSON as a planner's first `completion_contracts`: {"steps":[...]} or
+	// a bare array). Empty leaves the contract to the first planner answer.
+	// A malformed body is a refused request, not a task that later cannot be judged.
+	CompletionContracts json.RawMessage `json:"completion_contracts,omitempty"`
 }
 
 // AcceptTaskResponse is returned as soon as the instruction is accepted: its task
@@ -368,6 +373,12 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	if err != nil {
 		return nil, nil, AgentMessage{}, err
 	}
+	// The caller's contract is parsed *before* anything is written: a body the
+	// runtime cannot pin must not become a task row that later has nothing to
+	// judge a `done` against (src/completion_contract.go).
+	if _, err := parseCompletionContract(req.CompletionContracts); err != nil {
+		return nil, nil, AgentMessage{}, fmt.Errorf("completion_contracts: %w", err)
+	}
 
 	// A second instruction for a task the store already knows continues that task
 	// rather than starting a new one: it keeps the row's own identity (when the task
@@ -445,6 +456,11 @@ func (r *Autonomy) accept(req AcceptTaskRequest) (*Task, *Agent, AgentMessage, e
 	// A model on the instruction overrides the account's stored default for this
 	// task's agent — same row, so a restart keeps the choice (src/agent_runtime.go).
 	r.applyRequestedModel(agent, req.Model)
+	// Caller-supplied contract is pinned here, before a planner cycle: the first
+	// write wins, so a later answer restating it changes nothing.
+	if err := r.pinAcceptedContract(task.ID, req.CompletionContracts); err != nil {
+		return nil, nil, AgentMessage{}, err
+	}
 	return task, agent, msg, nil
 }
 

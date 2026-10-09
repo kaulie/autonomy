@@ -40,8 +40,9 @@ Completion Contract 是执行系统的**完成锚点**：在 Agent 可自由选�
 
 契约是**数据**，不是散文（`src/completion_contract.go`）：
 
-- planner 在**第一轮**答复里给出 `completion_contracts.steps[]`；运行时把每一条钉进 `completion_contract`
-  （一条判据一行，`INSERT OR IGNORE`），并在第一轮就先校验它（槽可读、本计划里那个 step 确实声明了这个 output；
+- 契约可以在**受理时**由呼叫方带上（`POST /api/tasks` 的 `completion_contracts`，与 planner 首答同一套 JSON）；
+  运行时立刻钉进 `completion_contract`。没带则仍由 planner 在**第一轮**答复里给出 `completion_contracts.steps[]`。
+  一条判据一行，`INSERT OR IGNORE`：先写下的那份就是标准。planner 首轮若自己钉，会先校验它（槽可读、本计划里那个 step 确实声明了这个 output；
   不得再写 `check`）。之后每轮的 Runtime Context 都带回**这份钉住的**合同。
 - 一条判据 = 一个必须成立的事实：`requirement`（事实，planner 的话）+ `evidence`（**证据槽**：这个事实的对象
   将从哪里来，与 plan input 同一套绑定语法）+ `expect`（事实的可判定形态：`exists`，或某个字段等于某个值）。
