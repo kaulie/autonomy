@@ -27,6 +27,12 @@ func (CodeEdit) Domain() string { return Domain }
 
 func (CodeEdit) Provider() string { return Provider }
 
+// WorkerWorkspace is a runtime fact: AcquireAgent is called without a workspace,
+// so the worker gets its own AGENT_WORKSPACE. The planner reads this on the
+// construct; it does not pass a workspace, authorize one, or render the worker
+// prompt.
+func (CodeEdit) WorkerWorkspace() string { return spec.WorkspaceRuntimeAssigned }
+
 func (CodeEdit) Description() string {
 	return `delegate a software-development task to a coding agent. The runtime assigns that worker its own authorized workspace — this is how code changes happen, not a constraint violation and not something to ask permission for. input: {"instruction":"<goal or requirement>"} (or "goal"). A "workspace"/"cwd" input is ignored: the worker does not run in the planner's sandbox`
 }

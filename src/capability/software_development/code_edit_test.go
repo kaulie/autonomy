@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kaulie/autonomy/src/capability/broker"
+	"github.com/kaulie/autonomy/src/capability/spec"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 )
 
@@ -98,11 +99,12 @@ func TestCodeEditFailsWithoutPromptTemplate(t *testing.T) {
 	}
 }
 
-// TestCodeEditDescriptionDoesNotInviteAPermissionAsk: the planner used to
-// read "runs in its own agent workspace" / "never runs in the delegating
-// agent's workspace" as a constraint conflict and block asking the owner to
-// authorize the worker sandbox. The construct must say that workspace is
-// already authorized.
+func TestCodeEditDeclaresRuntimeAssignedWorkspace(t *testing.T) {
+	if got, want := (sd.CodeEdit{}).WorkerWorkspace(), spec.WorkspaceRuntimeAssigned; got != want {
+		t.Fatalf("WorkerWorkspace=%q, want %q", got, want)
+	}
+}
+
 func TestCodeEditDescriptionDoesNotInviteAPermissionAsk(t *testing.T) {
 	desc := (sd.CodeEdit{}).Description()
 	for _, want := range []string{"authorized workspace", "not something to ask permission for"} {

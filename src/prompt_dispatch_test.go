@@ -98,11 +98,13 @@ func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
 	policy := readShippedPolicy(t, "AGENT_V2.md")
 	for _, want := range []string{
 		"a worker capability (`code_edit`) running in its own workspace is the authorized",
-		"Do not return `blocked` / `need_input` asking to permit",
+		"you do not choose either, authorize either, or generate the",
+		"workspace: runtime_assigned",
 		"output instead (`code_edit.pr_url`)",
 		"asking the owner to add a kind",
 		"Asking the owner to authorize a worker workspace",
 		"already has `kind: pull_request` for `pr.check`",
+		"do not control either.",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the planner policy no longer says %q", want)

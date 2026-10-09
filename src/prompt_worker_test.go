@@ -174,6 +174,10 @@ func TestWorkerPlaceholdersAreTheWorkersOwnContext(t *testing.T) {
 	if c := values["{{CONSTRAINTS}}"]; !strings.Contains(c, `"/sandbox/10099/"`) || !strings.Contains(c, `"task-9"`) {
 		t.Fatalf("constraints=%s, want the worker's own sandbox and the task", c)
 	}
+	// Worker constraints are the runtime's, not the planner's voice.
+	if c := values["{{CONSTRAINTS}}"]; !strings.Contains(c, `"role": "worker"`) || strings.Contains(c, "planner does not edit") || strings.Contains(c, "file_changes") {
+		t.Fatalf("constraints still speak as the planner:\n%s", c)
+	}
 }
 
 // TestWorkerPlaceholdersWithoutACycle: a capability run outside a decision cycle

@@ -73,11 +73,13 @@ var decisionRules = map[string][]decisionRule{
 	decisionBlocked: {
 		{name: "blocked.plan_empty", check: noSteps},
 		{name: "blocked.need_describes_what_is_missing", check: needDescribesWhatIsMissing},
+		{name: "blocked.need_not_runtime_worker_auth", check: needNotAskRuntimeToAuthorizeAWorker},
 		{name: "blocked.need_options_are_choices", check: needOptionsAreChoices},
 	},
 	decisionNeedInput: {
 		{name: "need_input.plan_empty", check: noSteps},
 		{name: "need_input.need_describes_what_is_missing", check: needDescribesWhatIsMissing},
+		{name: "need_input.need_not_runtime_worker_auth", check: needNotAskRuntimeToAuthorizeAWorker},
 		{name: "need_input.need_options_are_choices", check: needOptionsAreChoices},
 	},
 }
@@ -168,6 +170,37 @@ func doneNamesEvidence(decision Decision) string {
 		return ""
 	}
 	return "the answer carries no evidence: done must name the observation or World State that proves the Goal is satisfied"
+}
+
+// needNotAskRuntimeToAuthorizeAWorker: worker authorization and the worker
+// prompt are the runtime's. A planner that asks the owner to permit code_edit's
+// workspace, or to invent a kind for summary, is naming something that is not
+// missing — the decision is refused and the next cycle re-plans.
+func needNotAskRuntimeToAuthorizeAWorker(decision Decision) string {
+	typ := strings.ToLower(strings.TrimSpace(decision.Need.Type))
+	switch typ {
+	case "capability", "permission", "approval":
+	default:
+		return ""
+	}
+	blob := strings.ToLower(decision.Need.Description + "\n" + decision.Reason)
+	asksPermit := containsAnyFold(blob, "permit", "permission", "authorize", "授权", "许可", "纳入许可")
+	asksWorkspace := containsAnyFold(blob, "workspace", "工作区", "sandbox")
+	asksCodeEdit := strings.Contains(blob, "code_edit")
+	asksSummaryKind := strings.Contains(blob, "summary") && containsAnyFold(blob, "kind", "类型化")
+	if (asksPermit && (asksWorkspace || asksCodeEdit)) || asksSummaryKind {
+		return "worker authorization and the worker prompt are the runtime's: a registered code_edit is not a missing permission — plan it, do not ask the owner to permit its workspace or invent a kind for summary"
+	}
+	return ""
+}
+
+func containsAnyFold(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
 }
 
 // needDescribesWhatIsMissing: for blocked / need_input the description *is* the

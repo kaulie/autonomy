@@ -54,3 +54,16 @@ type Declared interface {
 type SystemCheck interface {
 	ChecksKind() string
 }
+
+// WorkspaceRuntimeAssigned is the workspace fact a worker-acquiring capability
+// declares: the runtime gives that worker its own sandbox when it acquires the
+// agent. The planner reads the fact; it does not choose the path, authorize it,
+// or render the worker's prompt.
+const WorkspaceRuntimeAssigned = "runtime_assigned"
+
+// WorkerScope is how a capability that acquires a worker declares where that
+// worker runs. The value is a fact the runtime already applies — not a planner
+// input and not a permission the planner grants.
+type WorkerScope interface {
+	WorkerWorkspace() string
+}

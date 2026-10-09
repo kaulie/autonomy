@@ -122,6 +122,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		Name        string       `json:"name"`
 		SystemCheck bool         `json:"system_check"`
 		ChecksKind  string       `json:"checks_kind"`
+		Workspace   string       `json:"workspace"`
 		Input       []spec.Field `json:"input"`
 		Output      []spec.Field `json:"output"`
 	}
@@ -153,6 +154,16 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	}
 	if checksKind["pr.check"] != spec.KindPullRequest || checksKind["deployment.monitor"] != spec.KindDeployment {
 		t.Fatalf("tools must declare the kind they check: %v", checksKind)
+	}
+	workspaces := map[string]string{}
+	for _, c := range constructs {
+		workspaces[c.Name] = c.Workspace
+	}
+	if workspaces["code_edit"] != spec.WorkspaceRuntimeAssigned {
+		t.Fatalf("code_edit workspace=%q, want the runtime-assigned fact %q", workspaces["code_edit"], spec.WorkspaceRuntimeAssigned)
+	}
+	if workspaces["pull_request.review"] != "" || workspaces["pr.check"] != "" {
+		t.Fatalf("read-only constructs must not claim a worker workspace: %v", workspaces)
 	}
 	prURL, ok := fieldNamed(outputs["code_edit"], "pr_url")
 	if !ok || prURL.Kind != spec.KindPullRequest {
