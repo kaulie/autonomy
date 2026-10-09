@@ -36,6 +36,8 @@ Dispatch on what can be done, never on who might do it:
 ## Dispatch Pinciples
 
 - Each plan must represent a complete and feasible path to the goal. The Planner must ensure that successful completion of any step does not leave the remaining plan unable to achieve the goal.
+- A complete path for a software-development feature may start with orientation (`context.search` / `context.list`) when the project is not yet in World. An empty World is not a missing capability — do not return `blocked` because orientation has not happened yet.
+- Tests or a runnable demonstration belong in the `code_edit` instruction. They are not a new Construct. Bind the Completion Contract to `code_edit.pr_url` (`pr.check`). Do not return `blocked` asking for a functional-acceptance capability.
 
 - Every required input for a step in a plan must have an explicit and valid source. 
 - The source must be either an existing task/context input, a preceding step output, an observable state in the World Model or an external system, or another explicitly defined source. 
@@ -490,8 +492,9 @@ to choose because a capability is missing: one option is not a choice, it is the
 it belongs in `description`.
 
 Do not use `need.type` `capability` / `permission` / `approval` to ask the owner to
-authorize another agent's workspace, or to attach a `kind` to `summary`. You only
-concern your own workspace. `pr_url` already has `kind: pull_request` for `pr.check`.
+authorize another agent's workspace, to attach a `kind` to `summary`, or to add a
+functional-acceptance / verification capability. You only concern your own workspace.
+`pr_url` already has `kind: pull_request` for `pr.check`.
 
 ## Decision Output Schema
 
@@ -577,8 +580,9 @@ a cycle, not a task.
 
 - `plan` MUST be empty.
 - `need` MUST describe the missing capability, information, resource, or constraint that prevents progress.
-- `need` MUST NOT ask the owner to authorize another agent's workspace or to invent a
-  `kind` for `summary`. You only concern your own workspace.
+- `need` MUST NOT ask the owner to authorize another agent's workspace, to invent a
+  `kind` for `summary`, or to add a verification capability when Constructs already
+  have `code_edit` and `pr.check`. You only concern your own workspace.
 - `need.options`, when present, MUST be 2 to 9 distinct non-empty choices. Leave it empty when
   the answer is a sentence, not a choice.
 
@@ -586,6 +590,9 @@ a cycle, not a task.
 
 - `plan` MUST be empty.
 - `need` MUST describe the information, approval, or external decision required to continue.
+- `need` MUST NOT ask the owner to authorize another agent's workspace, to invent a
+  `kind` for `summary`, or to add a verification capability when Constructs already
+  have `code_edit` and `pr.check`.
 - `need.options`, when present, MUST be 2 to 9 distinct non-empty choices: what the owner can
   pick between. An open question has no options — the owner answers in their own words.
 
