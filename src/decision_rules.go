@@ -172,10 +172,17 @@ func doneNamesEvidence(decision Decision) string {
 	return "the answer carries no evidence: done must name the observation or World State that proves the Goal is satisfied"
 }
 
-// needNotAskRuntimeToAuthorizeAWorker: worker authorization and the worker
-// prompt are the runtime's. A planner that asks the owner to permit code_edit's
-// workspace, or to invent a kind for summary, is naming something that is not
-// missing — the decision is refused and the next cycle re-plans.
+// needNotAskRuntimeToAuthorizeAWorker: worker authorization, the worker
+// prompt, and the typed verification path are the runtime's. A planner that
+// asks the owner to permit code_edit's workspace, to invent a kind for
+// summary, or to add a functional-acceptance capability when pr.check already
+// verifies code_edit.pr_url, is naming something that is not missing — the
+// decision is refused and the next cycle re-plans.
+//
+// task-657bf64104564202 blocked on cycle 1 this way: the need asked Runtime
+// for a dashboard-acceptance tool and for code_edit's workspace to be
+// authorized, then the task sat blocked. The prompt forbids that; this gate
+// makes the forbidding a cycle failure rather than a terminal status.
 func needNotAskRuntimeToAuthorizeAWorker(decision Decision) string {
 	typ := strings.ToLower(strings.TrimSpace(decision.Need.Type))
 	switch typ {
@@ -183,15 +190,56 @@ func needNotAskRuntimeToAuthorizeAWorker(decision Decision) string {
 	default:
 		return ""
 	}
-	blob := strings.ToLower(decision.Need.Description + "\n" + decision.Reason)
+	blob := needFalseGapText(decision)
+	if asksWorkerWorkspaceAuth(blob) {
+		return "worker authorization and the worker prompt are the runtime's: a registered code_edit is not a missing permission — plan it, do not ask the owner to permit its workspace or invent a kind for summary"
+	}
+	if asksInventedVerificationConstruct(blob) {
+		return "Constructs already have code_edit.pr_url (kind pull_request) and pr.check: bind completion to that typed output — do not invent a kind for summary or ask the owner to add a verification capability"
+	}
+	return ""
+}
+
+// needFalseGapText is the prose a blocked / need_input decision used to name
+// the alleged gap: need, reason, and the evidence facts it cited.
+func needFalseGapText(decision Decision) string {
+	var b strings.Builder
+	b.WriteString(decision.Need.Description)
+	b.WriteByte('\n')
+	b.WriteString(decision.Reason)
+	for _, item := range decision.Evidence {
+		b.WriteByte('\n')
+		b.WriteString(item.Fact)
+		b.WriteByte('\n')
+		b.WriteString(item.Reference)
+	}
+	return strings.ToLower(b.String())
+}
+
+func asksWorkerWorkspaceAuth(blob string) bool {
 	asksPermit := containsAnyFold(blob, "permit", "permission", "authorize", "授权", "许可", "纳入许可")
 	asksWorkspace := containsAnyFold(blob, "workspace", "工作区", "sandbox")
 	asksCodeEdit := strings.Contains(blob, "code_edit")
-	asksSummaryKind := strings.Contains(blob, "summary") && containsAnyFold(blob, "kind", "类型化")
-	if (asksPermit && (asksWorkspace || asksCodeEdit)) || asksSummaryKind {
-		return "worker authorization and the worker prompt are the runtime's: a registered code_edit is not a missing permission — plan it, do not ask the owner to permit its workspace or invent a kind for summary"
-	}
-	return ""
+	asksAnotherEdit := containsAnyFold(blob, "编辑能力", "another edit capability", "add another edit")
+	return (asksPermit && (asksWorkspace || asksCodeEdit)) || (asksAnotherEdit && asksWorkspace)
+}
+
+func asksInventedVerificationConstruct(blob string) bool {
+	asksSummaryAsProof := strings.Contains(blob, "summary") &&
+		containsAnyFold(blob, "kind", "类型化", "验证", "验收")
+	asksNewVerifier := containsAnyFold(blob,
+		"verification capability",
+		"acceptance capability",
+		"验收能力",
+		"功能验收",
+		"权威验收",
+		"系统验证规则",
+		"验证能力",
+		"add a kind",
+		"invent a kind",
+		"invent a tool",
+	)
+	return asksSummaryAsProof || asksNewVerifier
 }
 
 func containsAnyFold(s string, needles ...string) bool {

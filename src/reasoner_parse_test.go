@@ -81,13 +81,19 @@ func TestBuildReasoningPromptUsesAgentPolicy(t *testing.T) {
 	// The agent's own identity is the opposite: it does not change between cycles,
 	// so it belongs to the frame — and the frame is where the agent is told who it
 	// is (role, id, name, how it runs), not only where it is in the task.
-	for _, perSession := range []string{`"agent-10001"`, `"role": "planner"`} {
+	// constraints.role also says "planner" (this cycle's sandbox facts); that is
+	// not the identity block, so the assertion is the agent's name/id, not the
+	// role substring that constraints reuse.
+	for _, perSession := range []string{`"agent-10001"`, `"id": 10001`} {
 		if !strings.Contains(frame, perSession) {
 			t.Fatalf("frame missing the agent's own identity %s\n%s", perSession, frame)
 		}
 		if strings.Contains(delta, perSession) {
 			t.Fatalf("delta repeats the agent's identity %s\n%s", perSession, delta)
 		}
+	}
+	if !strings.Contains(frame, `"role": "planner"`) {
+		t.Fatalf("frame missing the agent's role\n%s", frame)
 	}
 	// What does change per cycle — which cycle this is — stays in the delta.
 	if !strings.Contains(delta, `"cycle": 2`) {

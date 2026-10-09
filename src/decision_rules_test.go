@@ -115,6 +115,28 @@ func TestValidateDecisionNamesTheRuleItBreaks(t *testing.T) {
 			detail: "worker authorization and the worker prompt are the runtime's",
 		},
 		{
+			// task-657bf64104564202 cycle 1: planner asked Runtime for a
+			// dashboard-acceptance tool and for code_edit's workspace, then
+			// the task sat blocked. That need is a false gap.
+			name: "a blocked that asks for functional acceptance like task-657bf64104564202",
+			decision: Decision{Type: "blocked", Need: Need{
+				Type: "capability",
+				Description: "请 Runtime 提供具有明确输入、输出和系统验证规则的功能验收能力，或提供权威 World 验收状态。" +
+					"同时需要提供可在允许工作区内执行的编辑能力，或明确授权 code_edit 的独立工作区。",
+			}, Reason: "不能用 PR 存在代替功能验证，也不能将执行者的 summary 当作验证通过。当前缺少可绑定的权威验收证据。"},
+			rule:   "blocked.need_not_runtime_worker_auth",
+			detail: "worker authorization and the worker prompt are the runtime's",
+		},
+		{
+			name: "a blocked that asks only for a functional-acceptance capability",
+			decision: Decision{Type: "blocked", Need: Need{
+				Type:        "capability",
+				Description: "请 Runtime 提供功能验收能力，使完成合同能够验证 dashboard 行为；不能将 summary 当作验证通过。",
+			}},
+			rule:   "blocked.need_not_runtime_worker_auth",
+			detail: "add a verification capability",
+		},
+		{
 			name:     "a done that carries options",
 			decision: Decision{Type: "done", Evidence: []Evidence{{ID: "E1"}}, Need: Need{Options: []string{"a", "b"}}},
 			rule:     "done.need_empty",

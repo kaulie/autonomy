@@ -104,6 +104,8 @@ func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
 		"asking the owner to add a kind",
 		"authorize another agent's workspace",
 		"already has `kind: pull_request` for `pr.check`",
+		"An empty World is not a missing capability",
+		"functional-acceptance capability",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the planner policy no longer says %q", want)
