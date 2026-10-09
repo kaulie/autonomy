@@ -93,6 +93,7 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
   "description": "开放服务契约的前端入口",
   "domain": "software_development",
   "goal_type": "dev_feature",
+  "completion_contracts": {"steps": [{"name": "merged_to_main", "requirement": "完成后把 PR 合入主分支；不要部署上线。"}]},
   "task_id": "optional-client-id",
   "context_ref": { "project": "project-2" },
   "mode": "command",
@@ -102,6 +103,8 @@ go run ./cmd/autonomy -broadcast all -description "今天 18:00 全员停服演�
 ```
 
 `account_id` 选账号池里的一条（`GET /api/accounts`）：这条任务跑在那个 harness / vendor / 凭据 / 工作目录上。不传 = 交给池子解析（该 harness 的默认账号）。`model` 是这次任务对账号默认模型的覆盖；不传 = 用账号自己的 model（或 harness 默认）。账号仍决定凭据和工作区，只换打开 session 的模型。可用的模型见 `GET /api/accounts/models?harness=&vendor=&accountId=`。
+
+`completion_contracts` 是呼叫方在受理时钉住的完成契约，形状与 planner 首答的 `completion_contracts` 相同（`{"steps":[…]}` 或裸数组）。带了就立刻钉进 `completion_contract`（先写的那份为准，planner 后来说的不算）；不带则仍由第一轮答复钉。读不出来的 JSON 是拒绝请求，不建 task。
 
 `mode` 只对**后续**消息有意义（带已有 `task_id`）：
 

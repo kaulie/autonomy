@@ -270,6 +270,50 @@ func stepInputsFromObject(raw json.RawMessage) (map[string]StepInput, error) {
 	return out, nil
 }
 
+// pinAcceptedContract writes the contract a caller sent with AcceptTask. It is
+// the same pin as the first planner answer: once written, a later cycle
+// restating it changes nothing. planID is 0 because no plan exists yet — the
+// contract belongs to the task, not a cycle.
+func (r *Autonomy) pinAcceptedContract(taskID string, raw json.RawMessage) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	criteria, err := parseCompletionContract(raw)
+	if err != nil {
+		return fmt.Errorf("completion_contracts: %w", err)
+	}
+	if len(criteria) == 0 {
+		return nil
+	}
+	s := r.acceptedVerificationStore()
+	if s == nil {
+		return fmt.Errorf("completion_contracts: verification store is not ready")
+	}
+	now := time.Now()
+	for i, criterion := range criteria {
+		row := ContractCriterion{
+			TaskID:    taskID,
+			Idx:       i + 1,
+			PlanID:    0,
+			Name:      criterion.Name,
+			Criterion: criterion.Raw,
+			CreatedAt: now,
+		}
+		if err := s.AppendCompletionContract(row); err != nil {
+			return fmt.Errorf("pin completion contract %s/%s: %w", taskID, criterion.Name, err)
+		}
+	}
+	return nil
+}
+
+func (r *Autonomy) acceptedVerificationStore() VerificationStore {
+	if r != nil && r.Store != nil {
+		return r.Store
+	}
+	return activeVerificationStore()
+}
+
 // pinCompletionContract writes the contract this run's first answer declared. The
 // criteria written first are the ones the task keeps: AppendCompletionContract
 // ignores a row that is already there, so a later cycle restating its contract
