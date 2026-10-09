@@ -8,7 +8,7 @@ import "time"
 //
 //	user    an instruction for a task (POST /api/tasks, Autonomy.Run)
 //	agent   another agent handing it a job (a capability's delegated prompt)
-//	system  the runtime itself (today: a stop)
+//	system  the runtime itself (a stop, or a world observation from the event gateway)
 //
 // A message is what was said and who said it; the turn it produces is recorded
 // as any other turn (reason_turns / llm_messages), with the message as the input
@@ -49,6 +49,11 @@ const (
 	// The stop is enforced by cancelling the message being processed; this is the
 	// record of it, in its place in the queue.
 	MessageKindStop AgentMessageKind = "stop"
+	// MessageKindObservation is the runtime telling the agent the world changed:
+	// an external event the event gateway accepted, about this agent's task
+	// (src/event_gateway.go). It is a new run the way an instruction is — the
+	// agent re-observes and may re-plan — not a user command and not a stop.
+	MessageKindObservation AgentMessageKind = "observation"
 )
 
 // AgentMessageStatus is where a message is in the queue.
@@ -98,4 +103,11 @@ type AgentMessage struct {
 // open reports whether the message is still the agent's to process.
 func (m AgentMessage) open() bool {
 	return m.Status == "" || m.Status == MessageStatusQueued
+}
+
+// isNewRunKind reports whether a message starts a new decision run of the
+// agent's own task. Those are what a graceful drain holds back (src/inbox.go);
+// a stop or a delegated prompt is not a new run.
+func isNewRunKind(kind AgentMessageKind) bool {
+	return kind == MessageKindInstruction || kind == MessageKindObservation
 }

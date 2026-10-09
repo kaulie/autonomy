@@ -11,6 +11,7 @@ import (
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/context_builder"
+	"github.com/kaulie/autonomy/src/eventgateway"
 )
 
 type Autonomy struct {
@@ -28,7 +29,11 @@ type Autonomy struct {
 	// registered context, plus the platform's registries — the project and the
 	// organization it belongs to. It is nil when the builder is switched off
 	// (AUTONOMY_CONTEXT_BUILDER=0).
-	ContextBuilder    *context_builder.Builder
+	ContextBuilder *context_builder.Builder
+	// EventGateway is the inbound path for world observations from outside this
+	// process (src/eventgateway, docs/event-gateway.md). Nil when the gateway is
+	// switched off (AUTONOMY_EVENT_GATEWAY=0).
+	EventGateway      *eventgateway.Gateway
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	World             *World
@@ -114,6 +119,11 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// The context builder is wired here, after the managers it reads: every decision
 	// cycle resolves its task's context_ref through it (fillContextSections).
 	_autonomy.ContextBuilder = newContextBuilder(_autonomy)
+
+	// The event gateway is the inbound path for external world facts: ingest,
+	// log, then this runtime records them on World and may wake the named task's
+	// agent (src/event_gateway.go). Off when AUTONOMY_EVENT_GATEWAY=0.
+	_autonomy.EventGateway = newEventGateway()
 
 	// Last, once every manager a decision cycle reads is wired: the runs a previous
 	// process left behind are picked up here — the instructions it accepted but never
@@ -265,6 +275,11 @@ func (r *Autonomy) processMessage(ctx context.Context, cancel context.CancelFunc
 		return agent.Session.Say(ctx, msg.Content, RoundAuto)
 	case MessageKindChat:
 		return r.processChat(ctx, cancel, agent, msg)
+	case MessageKindObservation:
+		// A world event is a new run of the same loop an instruction uses: the
+		// agent re-observes (the event is additional_input and already on World)
+		// and may re-plan. It is not a user command.
+		return r.processInstruction(ctx, cancel, agent, msg)
 	default:
 		return r.processInstruction(ctx, cancel, agent, msg)
 	}

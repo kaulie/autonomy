@@ -79,6 +79,7 @@ Runtime 会在 planner 的初始化第一条 system（`GiveFirstPrompt` → `AGE
 | 要改的东西 | 去哪 |
 |---|---|
 | 决策 / HTTP / inbox / session / store 端口 | `src/*.go` |
+| 外部世界事件（event gateway） | `src/eventgateway/` + `src/event_gateway.go`；HTTP `POST`/`GET /api/events` |
 | sqlite / postgres | `src/db/` |
 | 能力 | `src/capability/` + `RegisterDefaults` |
 | planner / worker 措辞 | `src/agent_policy/` |

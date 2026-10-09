@@ -26,6 +26,7 @@ Agent A 完成 → Event → Owner 重新观察 → 再规划 → Agent B → Ev
 ## 关系
 
 - [Action](action.md) / [Delegation](delegation.md) / 外部世界 → Event
+- 外部世界的入口是 [event-gateway](event-gateway.md)：进程外的事实经 `POST /api/events` 进入 World，并在点名了已有 agent 的 task 时投递 `observation`
 - [Agent](agent.md)（尤其 Task Owner）消费 Event 后进入 [execution-loop](execution-loop.md)
 - Event 可为 [Verification](verification.md) 提供输入线索
 - 与固定 Step1→Step2→Step3 相对：这里是 状态变化 → 事件 → 再决策
@@ -38,4 +39,4 @@ Agent A 完成 → Event → Owner 重新观察 → 再规划 → Agent B → Ev
 
 ## 演化注记
 
-V1：内存内同步回调也可冒充事件总线，但概念上要保留 Event，避免把控制流写死成函数硬编码串联。
+V1 的 **Event Gateway**（`src/eventgateway`）已经是外部事实的入口，而不是用内存回调冒充总线。进程内 Log 重启即忘；跨重启保留走 Log 端口，不把 Event 写进 Store 并集。内部 loop 自己 emit 的 `Event`（`src/event.go`）仍是运行时事实，与外部 envelope 分开，runtime 把后者映射到 World。

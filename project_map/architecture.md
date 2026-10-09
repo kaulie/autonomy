@@ -16,7 +16,8 @@
         ├─ Context        src/context（Context Service）+ src/capability/contextcap（context.*）
         ├─ LLMSession     src/llm_session.go
         │     └─ harness  src/llmbackend/{cursor,cline,codex,claude}
-        └─ ContextBuilder src/context_builder + src/context_resolver.go
+        ├─ ContextBuilder src/context_builder + src/context_resolver.go
+        └─ EventGateway   src/eventgateway + src/event_gateway.go（外部世界事件）
 ```
 
 `cmd/autonomy` 不链接上述任何一块，只发 HTTP。
@@ -124,6 +125,11 @@ Agent / 账号 / UI：
 - `GET /health`（`/healthz` 别名）—— 含 `llm_backend` / 默认账号信息
 - `POST /api/ops/restart-notify`、`GET /api/ops/restart-status`
 
+世界事件（event gateway，`src/eventgateway`，见 [event-gateway.md](../docs/event-gateway.md)）：
+
+- `POST /api/events` — 受理一条外部世界事件（写入 World；`subject.task_id` 已有 agent 时入队 observation）
+- `GET /api/events` — 列出已受理事件（与 prompt 的 `world.events` 同一份 log）
+
 契约真源是 handler 上的 swag 注解 + `src/contract_test.go`（注解与路由表必须一一对应）。运行期不 import swag。
 
 ## 外部系统（context builder 与能力）
@@ -139,6 +145,8 @@ Agent / 账号 / UI：
 | GitHub | `GITHUB_TOKEN` / `gh` / GitHub App（`docs/github-app.md`） | `pull_request.review`、`pr.check`、worker 推送 |
 
 本进程自己的 world 容器（`RegisterContextContainer`，`cmd/autonomyd/world.go` 播种 demo）只补充它知道的描述与领域。
+
+那些系统上**已经发生的变化**不经 context builder 拉取，而经 event gateway **推入**：`POST /api/events`（`src/eventgateway`）。Gateway 不知道这些系统；调用方把事实收成 canonical envelope。见 [event-gateway.md](../docs/event-gateway.md)。
 
 ## 工作区
 

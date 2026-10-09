@@ -597,6 +597,7 @@ func formatWorldJSON(ctx DecisionContext) []byte {
 	}
 	return mustJSON(map[string]any{
 		"assets": assets,
+		"events": recentWorldEventsJSON(),
 	})
 }
 

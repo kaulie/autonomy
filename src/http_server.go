@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kaulie/autonomy/src/eventgateway"
 )
 
 // httpShutdownGrace is how long a graceful HTTP stop waits for the requests in flight
@@ -82,6 +84,11 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// started the hard way, mid-cycle.
 		{"POST /api/ops/restart-notify", s.handleRestartNotify},
 		{"GET /api/ops/restart-status", s.handleRestartStatus},
+		// Event gateway: inbound world observations from outside this process
+		// (src/event_gateway.go, docs/event-gateway.md). POST is ingest;
+		// GET is the recent log the next prompt's World block also reads.
+		{"POST /api/events", s.handleIngestEvent},
+		{"GET /api/events", s.handleListEvents},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -261,6 +268,90 @@ func (s *HTTPServer) handleRestartStatus(w http.ResponseWriter, _ *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Autonomy.RestartStatus())
+}
+
+// handleIngestEvent accepts one external world observation: the event gateway
+// stores it, copies it onto World, and — when subject.task_id names a task that
+// already has an agent — queues an observation so that agent re-observes
+// (docs/event-gateway.md). A duplicate idempotency key returns the original
+// and does not re-notify.
+//
+// @Summary  受理一条外部世界事件（写入 World，可选唤醒对应 task 的 agent）
+// @Tags     events
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.IngestEventRequest   true  "canonical envelope：source / type 必填；subject.task_id 有对应 agent 时会入队 observation"
+// @Success  202      {object}  autonomy.IngestEventResponse  "已受理：event + duplicate=false；delivered 表示是否唤醒了 agent"
+// @Success  200      {object}  autonomy.IngestEventResponse  "重复：同一 (source, idempotency_key) 已存在，返回原来那条"
+// @Failure  400      {object}  errResponse                   "请求不是合法 JSON，或缺少 source / type"
+// @Failure  503      {object}  errResponse                   "event gateway 已关闭（AUTONOMY_EVENT_GATEWAY=0）"
+// @Router   /api/events [post]
+func (s *HTTPServer) handleIngestEvent(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
+		return
+	}
+	var body IngestEventRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	resp, err := s.Autonomy.IngestWorldEvent(req.Context(), body)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "event gateway is off") {
+			writeErr(w, http.StatusServiceUnavailable, msg)
+			return
+		}
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	code := http.StatusAccepted
+	if resp != nil && resp.Duplicate {
+		code = http.StatusOK
+	}
+	writeJSON(w, code, resp)
+}
+
+// handleListEvents reads the gateway's recent world events. It is the same log
+// the next decision-cycle prompt injects as World.events.
+//
+// @Summary  列出已受理的外部世界事件
+// @Tags     events
+// @Produce  json
+// @Param    source   query     string  false  "按来源过滤（github / deployment / …）"
+// @Param    type     query     string  false  "按事件类型过滤"
+// @Param    task_id  query     string  false  "按 subject.task_id 过滤"
+// @Param    after    query     string  false  "id 游标：只返回这条之后的（append 序）"
+// @Param    limit    query     int     false  "条数，默认 50，最大 200"
+// @Success  200      {object}  autonomy.ListEventsResponse  "events（时间正序）+ count"
+// @Router   /api/events [get]
+func (s *HTTPServer) handleListEvents(w http.ResponseWriter, req *http.Request) {
+	if s.Autonomy == nil {
+		writeJSON(w, http.StatusOK, ListEventsResponse{Events: []eventgateway.Event{}})
+		return
+	}
+	q := req.URL.Query()
+	filter := eventgateway.Filter{
+		Source: q.Get("source"),
+		Type:   q.Get("type"),
+		TaskID: q.Get("task_id"),
+		After:  q.Get("after"),
+	}
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "limit must be a non-negative integer")
+			return
+		}
+		filter.Limit = n
+	}
+	resp, err := s.Autonomy.ListWorldEvents(filter)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleHealth reports liveness — the probe the deployment platform polls for every
