@@ -89,6 +89,8 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// GET is the recent log the next prompt's World block also reads.
 		{"POST /api/events", s.handleIngestEvent},
 		{"GET /api/events", s.handleListEvents},
+		// Watcher: subscribe to an external object (kind + target) until it
+		// reaches until; state changes are ingested as world events.
 		{"POST /api/watches", s.handleStartWatch},
 		{"GET /api/watches", s.handleListWatches},
 		// /health is the path the deployment platform probes for every service;
@@ -356,33 +358,33 @@ func (s *HTTPServer) handleListEvents(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleStartWatch registers a background pull-request watch: when the PR is
-// merged (default until), the event gateway emits github.pull_request.merged
-// and wakes subject.task_id's agent so it can continue.
+// handleStartWatch registers a background watch of one world object (kind +
+// target). When it reaches until, the event gateway emits a fact and wakes
+// subject.task_id's agent so it can continue.
 //
-// @Summary  开始观察一个 PR（合并后经 event gateway 唤醒对应 task 的 agent）
+// @Summary  开始观察一个世界对象（状态到达 until 后经 event gateway 唤醒对应 task 的 agent）
 // @Tags     events
 // @Accept   json
 // @Produce  json
-// @Param    request  body      autonomy.WatchPullRequestRequest  true  "kind 默认 pull_request；pr 必填；until 默认 merged；task_id 用于唤醒"
-// @Success  202      {object}  autonomy.PRWatchView              "已在观察（watching=true），或 PR 已经是终态（watching=false）"
-// @Failure  400      {object}  errResponse                       "缺 pr、kind 不支持、或 GitHub 读失败"
-// @Failure  503      {object}  errResponse                       "pr watcher 未接线"
+// @Param    request  body      autonomy.WatchRequest  true  "kind+target 命名对象；pr / deployment 是别名；until 默认随 kind；task_id 用于唤醒"
+// @Success  202      {object}  autonomy.WatchView     "已在观察（watching=true），或对象已经是终态（watching=false）"
+// @Failure  400      {object}  errResponse            "缺 target、kind 不支持、或对象读失败"
+// @Failure  503      {object}  errResponse            "watcher 未接线"
 // @Router   /api/watches [post]
 func (s *HTTPServer) handleStartWatch(w http.ResponseWriter, req *http.Request) {
 	if s.Autonomy == nil {
 		writeErr(w, http.StatusInternalServerError, "autonomy not initialized")
 		return
 	}
-	var body WatchPullRequestRequest
+	var body WatchRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	view, err := s.Autonomy.StartPRWatch(body)
+	view, err := s.Autonomy.StartWatch(body)
 	if err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "pr watcher is off") {
+		if strings.Contains(msg, "watcher is off") {
 			writeErr(w, http.StatusServiceUnavailable, msg)
 			return
 		}
@@ -396,16 +398,16 @@ func (s *HTTPServer) handleStartWatch(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, code, view)
 }
 
-// handleListWatches lists the background pull-request watches this process holds.
+// handleListWatches lists the background watches this process holds.
 //
-// @Summary  列出正在观察的 PR
+// @Summary  列出正在观察的世界对象
 // @Tags     events
 // @Produce  json
 // @Success  200  {object}  autonomy.ListWatchesResponse
 // @Router   /api/watches [get]
 func (s *HTTPServer) handleListWatches(w http.ResponseWriter, _ *http.Request) {
 	if s.Autonomy == nil {
-		writeJSON(w, http.StatusOK, ListWatchesResponse{Watches: []PRWatchView{}})
+		writeJSON(w, http.StatusOK, ListWatchesResponse{Watches: []WatchView{}})
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Autonomy.ListWatches())

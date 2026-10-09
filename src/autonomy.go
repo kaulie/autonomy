@@ -12,6 +12,7 @@ import (
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/context_builder"
 	"github.com/kaulie/autonomy/src/eventgateway"
+	"github.com/kaulie/autonomy/src/watcher"
 )
 
 type Autonomy struct {
@@ -34,9 +35,10 @@ type Autonomy struct {
 	// process (src/eventgateway, docs/event-gateway.md). Nil when the gateway is
 	// switched off (AUTONOMY_EVENT_GATEWAY=0).
 	EventGateway *eventgateway.Gateway
-	// PRWatcher polls pull requests pr.watch registered and turns a merge
-	// (or close) into a world event (src/pr_watcher.go).
-	PRWatcher         *PRWatcher
+	// Watcher polls world objects `watch` registered (a pull request, a
+	// deployment, later another asset) and turns a state change into a world
+	// event (src/watcher, src/watch.go).
+	Watcher           *watcher.Watcher
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
 	World             *World
@@ -84,14 +86,14 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	agentFactory := NewAgentFactory()
 	rt := NewRuntime(agentFactory)
-	prWatcher := newPRWatcher()
+	worldWatcher := newWorldWatcher()
 
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
-		Assets:    worldAssetMutator(),
-		Agents:    rt, // capabilities acquire Cursor-backed agents via Runtime
-		Context:   buildContextService(store),
-		PRWatches: prWatcher,
+		Assets:  worldAssetMutator(),
+		Agents:  rt, // capabilities acquire Cursor-backed agents via Runtime
+		Context: buildContextService(store),
+		Watches: worldWatcher,
 	})
 	rt.SetCapabilities(capabilityFactory.GetAll()...)
 
@@ -100,7 +102,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		CapabilityFactory: capabilityFactory,
 		Runtime:           rt,
 		Store:             store,
-		PRWatcher:         prWatcher,
+		Watcher:           worldWatcher,
 		MaxSteps:          DefaultMaxSteps,
 	}
 	_autonomy.SetWorld(world)
@@ -130,7 +132,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// log, then this runtime records them on World and may wake the named task's
 	// agent (src/event_gateway.go). Off when AUTONOMY_EVENT_GATEWAY=0.
 	_autonomy.EventGateway = newEventGateway()
-	prWatcher.SetIngest(_autonomy.IngestWorldEvent)
+	worldWatcher.SetSink(_autonomy.watchSink)
 
 	// Last, once every manager a decision cycle reads is wired: the runs a previous
 	// process left behind are picked up here — the instructions it accepted but never
@@ -185,8 +187,8 @@ func (r *Autonomy) Close() error {
 	if r != nil && r.Drain != nil {
 		r.Drain.stop()
 	}
-	if r != nil && r.PRWatcher != nil {
-		r.PRWatcher.Close()
+	if r != nil && r.Watcher != nil {
+		r.Watcher.Close()
 	}
 	// Agents are resident (see drainedAgent), so teardown is where their provider
 	// sessions are torn down: the rows and handles stay, and the session ids they

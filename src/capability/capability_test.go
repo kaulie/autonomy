@@ -43,7 +43,7 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if len(all) != 10 {
 		t.Fatalf("GetAll len=%d want 10", len(all))
 	}
-	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", "pr.watch", deployment.Name,
+	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", "watch", deployment.Name,
 		"context.search", "context.get", "context.list"} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
@@ -68,8 +68,8 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	if !strings.Contains(got, `"name": "pr.check"`) {
 		t.Fatalf("expected pr.check in constructs: %q", got)
 	}
-	if !strings.Contains(got, `"name": "pr.watch"`) {
-		t.Fatalf("expected pr.watch in constructs: %q", got)
+	if !strings.Contains(got, `"name": "watch"`) {
+		t.Fatalf("expected watch in constructs: %q", got)
 	}
 	if !strings.Contains(got, `"system_check": true`) {
 		t.Fatalf("expected system_check on verification tools: %q", got)
@@ -148,7 +148,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if !systemCheck["pr.check"] || !systemCheck["deployment.monitor"] {
 		t.Fatalf("system verification tools must be marked: %v", systemCheck)
 	}
-	if systemCheck["pull_request.review"] || systemCheck["code_edit"] || systemCheck["pr.watch"] {
+	if systemCheck["pull_request.review"] || systemCheck["code_edit"] || systemCheck["watch"] {
 		t.Fatalf("review, watch and work capabilities are not verification tools: %v", systemCheck)
 	}
 	checksKind := map[string]string{}
@@ -190,7 +190,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		// (the capability never merges — a human does that).
 		{"pull_request.review", "pr", "pr_url", false, "reviews"},
 		{"pr.check", "pr", "pr_url", true, "exists"},
-		{"pr.watch", "pr", "pr_url", true, "watching"},
+		{"watch", "target", "pr", true, "watching"},
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},

@@ -72,7 +72,7 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `service.deploy` | `software_development/deploy.go` | HTTP 触发部署平台，不等待流水线结束 |
 | `pull_request.review` | `software_development/pull_request_review.go` | GitHub REST，**不 merge** |
 | `pr.check` | `software_development/pr_check.go` | 系统验真工具：PR 是否存在、状态如何 |
-| `pr.watch` | `software_development/pr_watch.go` | 观察一个 PR；合并后经 event gateway 唤醒 agent |
+| `watch` | `capability/watch.go` + `src/watcher/` | 观察一类世界对象（kind + target）；到达 until 后经 event gateway 唤醒 agent |
 | `deployment.monitor` | `deployment/monitor.go` | 跟随一次部署；可再委托监控 agent |
 | `context.search` | `contextcap/search.go` | Context Service：全文 + metadata 过滤检索，返回候选 section |
 | `context.get` | `contextcap/get.go` | Context Service：取一个 section 的完整内容与来源 |
@@ -130,7 +130,7 @@ Agent / 账号 / UI：
 
 - `POST /api/events` — 受理一条外部世界事件（写入 World；`subject.task_id` 已有 agent 时入队 observation）
 - `GET /api/events` — 列出已受理事件（与 prompt 的 `world.events` 同一份 log）
-- `POST /api/watches` / `GET /api/watches` — 观察一个 PR；合并后 ingest `github.pull_request.merged`
+- `POST /api/watches` / `GET /api/watches` — 观察一个世界对象（kind + target）；到达 until 后 ingest 对应事件
 
 契约真源是 handler 上的 swag 注解 + `src/contract_test.go`（注解与路由表必须一一对应）。运行期不 import swag。
 

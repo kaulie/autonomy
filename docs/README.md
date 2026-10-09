@@ -37,7 +37,8 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 22b. [remote-deploy.md](remote-deploy.md) — 发版包装到远程机器：`AUTONOMY_HTTP_HOST`、`scripts/start.sh`、systemd 单元；本机平台默认仍只绑 loopback
 23. [dashboard.md](dashboard.md) — agent 状态监控页：`GET /api/agents`（所有 agent 的实时状态）与 `GET /dashboard`（轮询它的自刷新表格页）
 24. [agent-initialization.md](agent-initialization.md) — agent 初始化与 task 输入解耦：先初始化、再给 system prompt、之后才接受 task，先出计划、确认后再实现
-25. [event-gateway.md](event-gateway.md) — 外部世界事件入口：独立模块受理 / 去重 / 记入 World，按需唤醒 task 的 agent；`pr.watch` 观察 PR，合并后走同一条路
+25. [event-gateway.md](event-gateway.md) — 外部世界事件入口：独立模块受理 / 去重 / 记入 World，按需唤醒 task 的 agent
+25b. [watcher.md](watcher.md) — 持续观察外部对象（一种 `watch` 能力，多种 Probe）；到达 until 后把 Change 交给 gateway
 
 ## 终局四对象
 
