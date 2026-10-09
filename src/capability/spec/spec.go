@@ -56,14 +56,13 @@ type SystemCheck interface {
 }
 
 // WorkspaceRuntimeAssigned is the workspace fact a worker-acquiring capability
-// declares: the runtime gives that worker its own sandbox when it acquires the
-// agent. The planner reads the fact; it does not choose the path, authorize it,
-// or render the worker's prompt.
+// reports to the runtime: AcquireAgent is called without a path, so that worker
+// gets its own sandbox. Constructs omit this — each agent only concerns its own
+// workspace.
 const WorkspaceRuntimeAssigned = "runtime_assigned"
 
-// WorkerScope is how a capability that acquires a worker declares where that
-// worker runs. The value is a fact the runtime already applies — not a planner
-// input and not a permission the planner grants.
+// WorkerScope is how a capability that acquires a worker tells the runtime
+// where that worker runs. It is not rendered into Constructs.
 type WorkerScope interface {
 	WorkerWorkspace() string
 }

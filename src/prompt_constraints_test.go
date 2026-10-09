@@ -42,12 +42,12 @@ func TestConstraintsAreTheRuntimesFactsPlusItsPolicy(t *testing.T) {
 	ctx := DecisionContext{Task: &Task{ID: "task-9"}, Agent: &Agent{Workspace: "/sandbox/agent-9/"}}
 
 	keys := constraintKeys(t, ctx)
-	for _, want := range []string{"scope", "workspace_rule", "task", "workspace", "role", "this_agent_edits_files", "file_changes"} {
+	for _, want := range []string{"scope", "workspace_rule", "task", "workspace", "role", "this_agent_edits_files"} {
 		if keys[want] == "" {
 			t.Errorf("constraints=%v, want the runtime's own fact %s", keys, want)
 		}
 	}
-	if len(keys) != 7 {
+	if len(keys) != 6 {
 		t.Fatalf("constraints=%v, want only the runtime's own planner facts without a policy", keys)
 	}
 	if keys["task"] != "task-9" || keys["workspace"] != "/sandbox/agent-9/" {
@@ -56,11 +56,11 @@ func TestConstraintsAreTheRuntimesFactsPlusItsPolicy(t *testing.T) {
 	if keys["role"] != "planner" || keys["this_agent_edits_files"] != "false" {
 		t.Errorf("constraints=%v, want a planner that does not edit files", keys)
 	}
-	if !strings.Contains(keys["file_changes"], "runtime") || !strings.Contains(keys["file_changes"], "does not choose") {
-		t.Errorf("file_changes=%q, want the runtime to assign the worker workspace", keys["file_changes"])
+	if _, ok := keys["file_changes"]; ok {
+		t.Fatalf("constraints=%v, planner must not be told about another agent's workspace", keys)
 	}
-	if strings.Contains(keys["workspace_rule"], "the only place files may be changed") {
-		t.Errorf("workspace_rule=%q still describes a single sandbox as exclusive", keys["workspace_rule"])
+	if !strings.Contains(keys["workspace_rule"], "this agent's own workspace") {
+		t.Errorf("workspace_rule=%q, want this planner's own workspace only", keys["workspace_rule"])
 	}
 }
 
@@ -101,7 +101,7 @@ func TestAnUnreadablePolicyDoesNotBreakThePrompt(t *testing.T) {
 	t.Setenv("PROJECT_ROOT", root)
 	writePolicy(t, root, "{ this is not json")
 	keys := constraintKeys(t, DecisionContext{Task: &Task{ID: "task-9"}})
-	if len(keys) != 6 {
+	if len(keys) != 5 {
 		t.Fatalf("constraints=%v, want the runtime's own planner facts and nothing else", keys)
 	}
 	if keys["task"] != "task-9" {
@@ -122,11 +122,9 @@ func TestTheShippedPolicyKeepsDeployingTheRuntimesMove(t *testing.T) {
 	}
 }
 
-// TestPlannerAndWorkerConstraintsAreAuthoredSeparately: the runtime writes each
-// role's constraints. The planner is told it does not edit files; the worker is
-// told its own sandbox. The planner's sentences must not appear in the worker
-// prompt — worker authorization is not a planner control surface.
-func TestPlannerAndWorkerConstraintsAreAuthoredSeparately(t *testing.T) {
+// TestEachAgentIsToldOnlyItsOwnWorkspace: planner and worker each see their
+// own path. Neither constraint object names the other agent's sandbox.
+func TestEachAgentIsToldOnlyItsOwnWorkspace(t *testing.T) {
 	t.Setenv("PROJECT_ROOT", t.TempDir())
 	planner := constraintKeys(t, DecisionContext{
 		Task:  &Task{ID: "task-9"},
@@ -136,25 +134,20 @@ func TestPlannerAndWorkerConstraintsAreAuthoredSeparately(t *testing.T) {
 		Task:  &Task{ID: "task-9"},
 		Agent: &Agent{Role: AgentRoleWorker, Workspace: "/sandbox/worker/"},
 	})
-	if planner["role"] != "planner" || planner["this_agent_edits_files"] != "false" {
-		t.Fatalf("planner=%v", planner)
-	}
-	if worker["role"] != "worker" || worker["this_agent_edits_files"] != "true" {
-		t.Fatalf("worker=%v", worker)
+	if planner["workspace"] != "/sandbox/planner/" || strings.Contains(fmtJoin(planner), "/sandbox/worker/") {
+		t.Fatalf("planner was told another agent's workspace: %v", planner)
 	}
 	if worker["workspace"] != "/sandbox/worker/" || strings.Contains(fmtJoin(worker), "/sandbox/planner/") {
-		t.Fatalf("worker constraints leaked the planner sandbox: %v", worker)
+		t.Fatalf("worker was told another agent's workspace: %v", worker)
 	}
-	if _, ok := worker["file_changes"]; ok {
-		t.Fatalf("worker=%v, file_changes is a planner fact", worker)
+	if _, ok := planner["file_changes"]; ok {
+		t.Fatalf("planner=%v, must not narrate another agent's workspace", planner)
 	}
-	for _, unwanted := range []string{"planner does not edit", "does not choose", "ask the owner", "authorize"} {
-		if strings.Contains(fmtJoin(worker), unwanted) {
-			t.Fatalf("worker constraints still speak in the planner's voice (%q): %v", unwanted, worker)
-		}
+	if !strings.Contains(planner["workspace_rule"], "this agent's own workspace") {
+		t.Fatalf("planner workspace_rule=%q", planner["workspace_rule"])
 	}
-	if !strings.Contains(worker["workspace_rule"], "this worker may change files") {
-		t.Fatalf("worker workspace_rule=%q, want this worker's own sandbox", worker["workspace_rule"])
+	if !strings.Contains(worker["workspace_rule"], "this agent's own workspace") {
+		t.Fatalf("worker workspace_rule=%q", worker["workspace_rule"])
 	}
 }
 
