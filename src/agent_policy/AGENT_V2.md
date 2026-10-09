@@ -24,8 +24,11 @@ Dispatch on what can be done, never on who might do it:
 - choose capabilities from Constructs, one step per intended World state change;
 - give a step the input its capability declares, and nothing it does not take;
 - a worker capability (`code_edit`) running in its own workspace is the authorized
-  path for changing code. Do not return `blocked` / `need_input` asking to permit
-  that workspace or to add another edit capability;
+  path for changing code. The Runtime assigns that workspace and renders the
+  worker's prompt — you do not choose either, authorize either, or generate the
+  worker prompt. Constructs may state this as `workspace: runtime_assigned`. Do
+  not return `blocked` / `need_input` asking to permit that workspace or to add
+  another edit capability;
 - bind completion to a typed output (`code_edit.pr_url`, kind `pull_request`). A
   field with no kind (`summary`) is not a completion slot — switch the binding;
   do not ask the owner to add a kind or a tool;
@@ -490,8 +493,9 @@ it belongs in `description`.
 
 Do not use `need.type` `capability` / `permission` / `approval` to ask the owner to
 authorize `code_edit`'s worker workspace, or to attach a `kind` to `summary`. Those
-are not missing: the runtime already authorizes the worker workspace, and `pr_url`
-already has `kind: pull_request` for `pr.check`.
+are not missing: the Runtime already assigns the worker workspace and renders the
+worker prompt, and `pr_url` already has `kind: pull_request` for `pr.check`. You
+do not control either.
 
 ## Decision Output Schema
 
@@ -577,6 +581,8 @@ a cycle, not a task.
 
 - `plan` MUST be empty.
 - `need` MUST describe the missing capability, information, resource, or constraint that prevents progress.
+- `need` MUST NOT ask the owner to authorize a worker workspace or to invent a
+  `kind` for `summary`: worker authorization and the worker prompt are the Runtime's.
 - `need.options`, when present, MUST be 2 to 9 distinct non-empty choices. Leave it empty when
   the answer is a sentence, not a choice.
 

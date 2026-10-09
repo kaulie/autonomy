@@ -90,6 +90,9 @@ func (r *Runtime) WorkerPlaceholders(worker *Agent) map[string]string {
 // agent itself — its identity ({{AGENT}}), its situation ({{RUNTIME_CONTEXT}}) and
 // the constraints it works under ({{CONSTRAINTS}}) — speak for the worker, never
 // for the agent that delegated.
+//
+// Worker authorization and this prompt are the Runtime's. The planner does not
+// choose the worker workspace, permit it, or supply the text of these sections.
 func workerPromptPlaceholders(ctx DecisionContext, worker *Agent) map[string]string {
 	values := promptPlaceholders(ctx, ReasoningInput{})
 	values["{{AGENT}}"] = fencedJSON(formatAgentIdentityJSON(worker))
@@ -121,21 +124,43 @@ func constraintsJSON(ctx DecisionContext) []byte {
 		m[key] = value
 	}
 	// The runtime's own facts come last: its policy cannot redefine the task, nor
-	// the sandbox an agent works in.
-	m["scope"] = "the files this task touches"
-	// A planner that reads "the only place files may be changed" next to its
-	// own sandbox treats code_edit's worker workspace as unauthorized and
-	// blocks asking the owner to permit it (task-74fbfcd59d464cae). The
-	// planner does not edit files; a worker the runtime acquires is already
-	// authorized in the workspace it was given.
-	m["workspace_rule"] = "this agent's sandbox (a planner does not edit files). A capability that acquires a worker is authorized to change files in the workspace the runtime assigns that worker — that is not a missing permission"
+	// the sandbox an agent works in. Role splits the write-scope: a planner does
+	// not edit files, and a worker's authorization is this runtime's — never a
+	// sentence the planner wrote into the worker prompt.
 	if ctx.Task != nil && strings.TrimSpace(ctx.Task.ID) != "" {
 		m["task"] = ctx.Task.ID
 	}
 	if ctx.Agent != nil && strings.TrimSpace(ctx.Agent.Workspace) != "" {
 		m["workspace"] = ctx.Agent.Workspace
 	}
+	if ctx.Agent != nil && ctx.Agent.Role == AgentRoleWorker {
+		applyWorkerConstraints(m)
+	} else {
+		applyPlannerConstraints(m)
+	}
 	return mustJSON(m)
+}
+
+// applyPlannerConstraints is what a planner may be held to: it does not edit
+// files. Where a worker runs, and what that worker is prompted with, are facts
+// this runtime already applied — not a permission the planner grants and not
+// prompt text the planner supplies.
+func applyPlannerConstraints(m map[string]any) {
+	m["role"] = string(AgentRolePlanner)
+	m["scope"] = "the files this task touches"
+	m["this_agent_edits_files"] = "false"
+	m["workspace_rule"] = "this planner does not edit files"
+	m["file_changes"] = "via code_edit; the runtime assigns that worker its workspace and renders its prompt — this planner does not choose, authorize, or generate either"
+}
+
+// applyWorkerConstraints is authored by the runtime for the worker it acquired.
+// It names this worker's own sandbox. It does not mention the planner, and it
+// is not derived from a planner decision.
+func applyWorkerConstraints(m map[string]any) {
+	m["role"] = string(AgentRoleWorker)
+	m["scope"] = "the files this worker may change"
+	m["this_agent_edits_files"] = "true"
+	m["workspace_rule"] = "this agent's sandbox is the only place this worker may change files"
 }
 
 func applyPolicyPlaceholders(policy string, values map[string]string) string {

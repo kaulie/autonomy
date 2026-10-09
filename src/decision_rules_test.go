@@ -88,6 +88,33 @@ func TestValidateDecisionNamesTheRuleItBreaks(t *testing.T) {
 			detail:   "does not say what is missing",
 		},
 		{
+			name: "a blocked that asks the owner to permit the worker workspace",
+			decision: Decision{Type: "blocked", Need: Need{
+				Type:        "capability",
+				Description: "请将 code_edit 的执行工作区纳入许可范围",
+			}},
+			rule:   "blocked.need_not_runtime_worker_auth",
+			detail: "worker authorization and the worker prompt are the runtime's",
+		},
+		{
+			name: "a blocked that asks for a kind on summary",
+			decision: Decision{Type: "blocked", Need: Need{
+				Type:        "capability",
+				Description: "summary 没有可供系统验证的 kind，请提供类型化输出",
+			}},
+			rule:   "blocked.need_not_runtime_worker_auth",
+			detail: "invent a kind for summary",
+		},
+		{
+			name: "a need_input that asks to authorize the worker sandbox",
+			decision: Decision{Type: "need_input", Need: Need{
+				Type:        "permission",
+				Description: "authorize the code_edit worker workspace",
+			}},
+			rule:   "need_input.need_not_runtime_worker_auth",
+			detail: "worker authorization and the worker prompt are the runtime's",
+		},
+		{
 			name:     "a done that carries options",
 			decision: Decision{Type: "done", Evidence: []Evidence{{ID: "E1"}}, Need: Need{Options: []string{"a", "b"}}},
 			rule:     "done.need_empty",
