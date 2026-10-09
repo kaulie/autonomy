@@ -17,7 +17,8 @@
         ├─ LLMSession     src/llm_session.go
         │     └─ harness  src/llmbackend/{cursor,cline,codex,claude}
         ├─ ContextBuilder src/context_builder + src/context_resolver.go
-        └─ EventGateway   src/eventgateway + src/event_gateway.go（外部世界事件）
+        ├─ EventGateway   src/eventgateway + src/event_gateway.go（外部世界事件）
+        └─ EventCenter    src/eventcenter + src/event_center.go（拉事件中心，不直连 GitHub）
 ```
 
 `cmd/autonomy` 不链接上述任何一块，只发 HTTP。
@@ -144,11 +145,12 @@ Agent / 账号 / UI：
 | organization | `http://127.0.0.1:4244` | 部门目录补全 |
 | 服务中心 | `http://127.0.0.1:4240` | `GET /v1/orgs/{orgId}/services` |
 | 部署平台 | `http://127.0.0.1:4220` | `service.deploy` / `deployment.monitor` |
-| GitHub | `GITHUB_TOKEN` / `gh` / GitHub App（`docs/github-app.md`） | `pull_request.review`、`pr.check`、worker 推送 |
+| 事件中心 | `http://127.0.0.1:9099`（`EVENT_CENTER_API_URL`） | `watch` 的 PR 快照；后台 tail `github` 流 → event gateway。**不**直连 GitHub 观察世界 |
+| GitHub | `GITHUB_TOKEN` / `gh` / GitHub App（`docs/github-app.md`） | 仅 `pull_request.review`、`pr.check`、worker 推送（验真/动作，不是观察） |
 
 本进程自己的 world 容器（`RegisterContextContainer`，`cmd/autonomyd/world.go` 播种 demo）只补充它知道的描述与领域。
 
-那些系统上**已经发生的变化**不经 context builder 拉取，而经 event gateway **推入**：`POST /api/events`（`src/eventgateway`）。Gateway 不知道这些系统；调用方把事实收成 canonical envelope。见 [event-gateway.md](../docs/event-gateway.md)。
+那些系统上**已经发生的变化**不经 context builder 拉取。GitHub 一类的事实由 [event-center](https://github.com/kaulie/event-center) 受理，Runtime **拉**它的流（`src/eventcenter`）再经 event gateway 写入 World；也可以 `POST /api/events` 直接推入。Gateway 不知道 GitHub。见 [event-gateway.md](../docs/event-gateway.md)、[event-center.md](../docs/event-center.md)。
 
 ## 工作区
 

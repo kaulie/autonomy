@@ -43,7 +43,7 @@
 | `http_*` / `ui_*` | HTTP 面与页面 |
 | `accounts_*` | 账号池 |
 | `graceful_*` | 优雅重启、drain、开机自愈 |
-| `event_*` | event gateway（HTTP ingest / World 注入 / observation 入队）；模块本体的测试在 `src/eventgateway/` |
+| `event_*` | event gateway（HTTP ingest / World 注入 / observation 入队）；模块本体的测试在 `src/eventgateway/`；`event_center_*` 是事件中心客户端接线，本体在 `src/eventcenter/` |
 | `watch_*` | watcher（登记 / 轮询 / 多 kind Probe / HTTP）；模块本体的测试在 `src/watcher/` |
 | `fixtures_test.go` | **唯一的**夹具入口（`openStore` / `seedTestAccounts` / …） |
 

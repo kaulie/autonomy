@@ -11,6 +11,7 @@ import (
 
 	"github.com/kaulie/autonomy/src/capability"
 	"github.com/kaulie/autonomy/src/context_builder"
+	"github.com/kaulie/autonomy/src/eventcenter"
 	"github.com/kaulie/autonomy/src/eventgateway"
 	"github.com/kaulie/autonomy/src/watcher"
 )
@@ -35,9 +36,15 @@ type Autonomy struct {
 	// process (src/eventgateway, docs/event-gateway.md). Nil when the gateway is
 	// switched off (AUTONOMY_EVENT_GATEWAY=0).
 	EventGateway *eventgateway.Gateway
+	// EventCenter is the client for the event-center service: GitHub (and
+	// later other producers) land there, and this runtime pulls facts from it
+	// instead of calling GitHub. Nil when AUTONOMY_EVENT_CENTER=0.
+	EventCenter *eventcenter.Client
+	eventCenter *eventCenterFeed
 	// Watcher polls world objects `watch` registered (a pull request, a
 	// deployment, later another asset) and turns a state change into a world
-	// event (src/watcher, src/watch.go).
+	// event (src/watcher, src/watch.go). Pull-request snapshots come from
+	// event-center, not GitHub.
 	Watcher           *watcher.Watcher
 	CapabilityFactory *capability.Factory
 	Runtime           *Runtime
@@ -86,7 +93,8 @@ func BootstrapAutonomy() (*Autonomy, error) {
 
 	agentFactory := NewAgentFactory()
 	rt := NewRuntime(agentFactory)
-	worldWatcher := newWorldWatcher()
+	eventCenter := newEventCenterClient()
+	worldWatcher := newWorldWatcher(eventCenter)
 
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
@@ -102,6 +110,8 @@ func BootstrapAutonomy() (*Autonomy, error) {
 		CapabilityFactory: capabilityFactory,
 		Runtime:           rt,
 		Store:             store,
+		EventCenter:       eventCenter,
+		eventCenter:       newEventCenterFeed(eventCenter),
 		Watcher:           worldWatcher,
 		MaxSteps:          DefaultMaxSteps,
 	}
@@ -133,6 +143,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	// agent (src/event_gateway.go). Off when AUTONOMY_EVENT_GATEWAY=0.
 	_autonomy.EventGateway = newEventGateway()
 	worldWatcher.SetSink(_autonomy.watchSink)
+	_autonomy.startEventCenterFeed()
 
 	// Last, once every manager a decision cycle reads is wired: the runs a previous
 	// process left behind are picked up here — the instructions it accepted but never
@@ -186,6 +197,9 @@ func (r *Autonomy) Close() error {
 	// closing the store under it: there is nothing left to resume (src/graceful.go).
 	if r != nil && r.Drain != nil {
 		r.Drain.stop()
+	}
+	if r != nil && r.eventCenter != nil {
+		r.eventCenter.Close()
 	}
 	if r != nil && r.Watcher != nil {
 		r.Watcher.Close()

@@ -61,9 +61,9 @@ type View struct {
 
 // Probe reads one kind of world object and says when that object is "done".
 // Implementations live beside this package's engine (pull_request.go,
-// deployment.go); they know the object's vocabulary, not GitHub's HTTP or
-// the deployment control plane's client — those are injected as Snapshot
-// functions by the runtime.
+// deployment.go); they know the object's vocabulary, not event-center's
+// HTTP or the deployment control plane's client — those are injected as
+// Snapshot functions by the runtime.
 type Probe interface {
 	Kind() string
 	DefaultUntil() string
