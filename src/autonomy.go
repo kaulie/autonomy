@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaulie/autonomy/src/capability"
+	ctxsvc "github.com/kaulie/autonomy/src/context"
 	"github.com/kaulie/autonomy/src/context_builder"
 	"github.com/kaulie/autonomy/src/eventcenter"
 	"github.com/kaulie/autonomy/src/eventgateway"
@@ -47,9 +48,13 @@ type Autonomy struct {
 	// event-center, not GitHub.
 	Watcher           *watcher.Watcher
 	CapabilityFactory *capability.Factory
-	Runtime           *Runtime
-	World             *World
-	Store             Store
+	// Context is the Context Service the context.* capabilities read and the
+	// operator write path (POST /api/context/resources…) writes. Nil when the
+	// store engine cannot back it (sqlite): src/context_service.go.
+	Context ctxsvc.Service
+	Runtime *Runtime
+	World   *World
+	Store   Store
 	// Inbox is every agent's message queue: the messages addressed to it are
 	// processed by that agent, one at a time, in the order they arrived
 	// (src/inbox.go). It is also how an instruction reaches an agent — including
@@ -96,11 +101,12 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	eventCenter := newEventCenterClient()
 	worldWatcher := newWorldWatcher(eventCenter)
 
+	contextService := buildContextService(store)
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
 		Assets:  worldAssetMutator(),
 		Agents:  rt, // capabilities acquire Cursor-backed agents via Runtime
-		Context: buildContextService(store),
+		Context: contextService,
 		Watches: worldWatcher,
 	})
 	rt.SetCapabilities(capabilityFactory.GetAll()...)
@@ -108,6 +114,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	_autonomy = &Autonomy{
 		AgentFactory:      agentFactory,
 		CapabilityFactory: capabilityFactory,
+		Context:           contextService,
 		Runtime:           rt,
 		Store:             store,
 		EventCenter:       eventCenter,
