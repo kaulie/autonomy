@@ -67,7 +67,7 @@ func writeContextServiceErr(w http.ResponseWriter, err error) {
 	case "":
 		code = ctxsvc.ErrIndexFailed
 	}
-	writeContextErr(w, status, code, err.Error())
+	writeContextErr(w, status, code, strings.TrimPrefix(err.Error(), string(code)+": "))
 }
 
 // contextService is the Context Service the write path uses, or nil (with the
