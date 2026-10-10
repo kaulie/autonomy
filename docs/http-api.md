@@ -133,6 +133,30 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 {"watches":[{"id":"pull_request:kaulie/agent-watchdog#9","kind":"pull_request","target":"https://github.com/kaulie/agent-watchdog/pull/9","until":"merged","watching":true}],"count":1}
 ```
 
+### `POST /api/context/resources` — Context Service：登记一个资源
+
+Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填；`type` 为 `document`（默认）/ `repository` / `service`；`id` 为空时生成 `ctx-<hex>`，已存在的 `id` 重新登记。`source.location`（+ `source.path`）是 **runtime 所在主机**上的文件或目录。
+
+```json
+{"project_id":"project-749a0238","name":"runtime.md","type":"document","source":{"type":"git","location":"/srv/autonomy","path":"docs/runtime.md"}}
+```
+
+`201` 回登记后的资源。
+
+### `POST /api/context/resources/{resourceID}/sync` — Context Service：同步进全文索引
+
+读源 → 按 Markdown 标题切段 → 写全文索引。回 `{"resource_id","project_id","type","status","revision","checksum","sections"}`，`status`：`indexed`（已重建）/ `unchanged`（checksum 与 revision 未变，不重建）/ `skipped`（`repository` / `service` 在 V1 只登记，**只有 `document` 产生 section**）。
+
+两个端点的错误都是 `{"code","message"}`：`INVALID_QUERY` / `PROJECT_NOT_FOUND`（缺 project_id）→ `400`，`RESOURCE_NOT_FOUND` → `404`，`SOURCE_UNAVAILABLE` / `PARSE_FAILED` → `422`，其余 `INDEX_FAILED` → `500`。**索引需要 postgres store engine**（`AUTONOMY_STORE_ENGINE=postgres`）；sqlite 下 Context Service 未配置，答 `503` + `INDEX_FAILED`。
+
+命令行同一条路（`cmd/autonomy/context_cmd.go`）：
+
+```bash
+autonomy context register --project project-749a0238 --name runtime.md \
+  --source-type git --location /srv/autonomy --path docs/runtime.md --sync
+autonomy context sync ctx-1a2b3c4d5e6f7a8b
+```
+
 ### `POST /api/tasks`
 
 接受一条任务指令：立刻返回 `task_id` / `agent_id`，并把这条指令作为**消息**放进这只 agent 的 inbox

@@ -29,6 +29,9 @@
 //	autonomy -account acct-f26e65bd7a4a21f7 -description "…"         # run it on that pool account
 //	autonomy -broadcast project-749a0238 -description "上线窗口挪到今晚"  # that project's agents
 //	autonomy -broadcast all -description "今天 18:00 全员停服演练"        # every project's agents
+//
+// `autonomy context register|sync` is the Context Service's write path
+// (context_cmd.go): register a resource into a project, then index it.
 package main
 
 import (
@@ -216,6 +219,12 @@ func main() {
 // cli is main's whole body, so what it prints and what it exits with can be
 // tested without a process.
 func cli(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "context" {
+		// The Context Service's operator write path (context_cmd.go).
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return contextCLI(ctx, args[1:], stdout, stderr)
+	}
 	o, err := parse(args, stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
