@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaulie/autonomy/src/llmbackend"
+	"github.com/kaulie/autonomy/src/llmrun"
 )
 
 func (s *session) Prompt(ctx context.Context, prompt string, mode llmbackend.Mode, sink func(llmbackend.Event)) (out string, result llmbackend.RunResult, err error) {
@@ -50,6 +51,10 @@ func (s *session) Prompt(ctx context.Context, prompt string, mode llmbackend.Mod
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	finished := false
 	for scanner.Scan() {
+		// Each stream line is provider activity: it resets the run's idle budget
+		// (llm_session.go's watchdog). Without it the budget bounds the *total*
+		// run time instead of silence, killing busy runs at AUTONOMY_LLM_TIMEOUT.
+		llmrun.Touch(ctx)
 		var native map[string]any
 		if err = json.Unmarshal(scanner.Bytes(), &native); err != nil {
 			err = fmt.Errorf("claude: invalid stream JSON: %w", err)
