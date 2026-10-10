@@ -225,13 +225,19 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 // apiError is the runtime's own reason for refusing: the API answers errors as
-// {"error": "…"}; anything else is passed through as it came.
+// {"error": "…"} (the Context Service write path as {"code", "message"});
+// anything else is passed through as it came.
 func apiError(raw []byte) string {
 	var e struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(raw, &e); err == nil && strings.TrimSpace(e.Error) != "" {
 		return e.Error
+	}
+	if e.Code != "" && e.Message != "" {
+		return e.Code + ": " + e.Message
 	}
 	if text := strings.TrimSpace(string(raw)); text != "" {
 		return oneLine(text)

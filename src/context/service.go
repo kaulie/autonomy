@@ -23,6 +23,11 @@ const (
 type Service interface {
 	RegisterResource(ctx context.Context, resource Resource) error
 	SyncResource(ctx context.Context, resourceID string) error
+	// Register is RegisterResource answering the resource as stored (its minted
+	// id and timestamps); Sync is SyncResource answering what the sync did. They
+	// are the operator write path (POST /api/context/resources[/{id}/sync]).
+	Register(ctx context.Context, resource Resource) (Resource, error)
+	Sync(ctx context.Context, resourceID string) (SyncResult, error)
 	Search(ctx context.Context, req SearchRequest) ([]SearchResult, error)
 	GetResource(ctx context.Context, resourceID string) (*Resource, error)
 	GetSection(ctx context.Context, sectionID string) (*Section, error)
@@ -71,14 +76,19 @@ func mintID() string {
 }
 
 func (s *service) RegisterResource(ctx context.Context, r Resource) error {
+	_, err := s.Register(ctx, r)
+	return err
+}
+
+func (s *service) Register(ctx context.Context, r Resource) (Resource, error) {
 	if strings.TrimSpace(r.ProjectID) == "" {
-		return Errorf(ErrProjectNotFound, "resource %q has no project id", r.Name)
+		return Resource{}, Errorf(ErrProjectNotFound, "resource %q has no project id", r.Name)
 	}
 	if r.Type == "" {
 		r.Type = ResourceDocument
 	}
 	if !r.Type.Valid() {
-		return Errorf(ErrInvalidQuery, "unknown resource type %q", r.Type)
+		return Resource{}, Errorf(ErrInvalidQuery, "unknown resource type %q", r.Type)
 	}
 	now := s.now()
 	if r.ID == "" {
@@ -89,47 +99,59 @@ func (s *service) RegisterResource(ctx context.Context, r Resource) error {
 	}
 	r.UpdatedAt = now
 	if err := s.repo.SaveResource(ctx, r); err != nil {
-		return Wrap(ErrIndexFailed, err, "register resource %q", r.ID)
+		return Resource{}, Wrap(ErrIndexFailed, err, "register resource %q", r.ID)
 	}
-	return nil
+	return r, nil
 }
 
 func (s *service) SyncResource(ctx context.Context, resourceID string) error {
+	_, err := s.Sync(ctx, resourceID)
+	return err
+}
+
+func (s *service) Sync(ctx context.Context, resourceID string) (SyncResult, error) {
 	r, err := s.repo.GetResource(ctx, strings.TrimSpace(resourceID))
 	if err != nil {
-		return Wrap(ErrIndexFailed, err, "read resource %q", resourceID)
+		return SyncResult{}, Wrap(ErrIndexFailed, err, "read resource %q", resourceID)
 	}
 	if r == nil {
-		return Errorf(ErrResourceNotFound, "resource %q is not registered", resourceID)
+		return SyncResult{}, Errorf(ErrResourceNotFound, "resource %q is not registered", resourceID)
 	}
+	result := SyncResult{ResourceID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Revision: r.Revision, Checksum: r.Checksum}
 	if r.Type != ResourceDocument {
 		// Repository and service resources are registered only in V1.
-		return nil
+		result.Status = SyncSkipped
+		return result, nil
 	}
 	content, revision, err := s.loader.Load(ctx, *r)
 	if err != nil {
-		return err
+		return SyncResult{}, err
 	}
 	sum := sha256.Sum256(content)
 	checksum := hex.EncodeToString(sum[:])
-	if r.Checksum == checksum && r.Revision == revision {
-		// Source unchanged: do not re-index (spec 9 / 17).
-		return nil
-	}
 	sections, err := ParseMarkdown(r.ID, content)
 	if err != nil {
-		return err
+		return SyncResult{}, err
+	}
+	result.Sections = len(sections)
+	if r.Checksum == checksum && r.Revision == revision {
+		// Source unchanged: do not re-index (spec 9 / 17).
+		result.Status = SyncUnchanged
+		return result, nil
 	}
 	if err := s.repo.ReplaceSections(ctx, r.ID, sections); err != nil {
-		return Wrap(ErrIndexFailed, err, "index %d section(s) for %q", len(sections), r.ID)
+		return SyncResult{}, Wrap(ErrIndexFailed, err, "index %d section(s) for %q", len(sections), r.ID)
 	}
 	r.Checksum = checksum
 	r.Revision = revision
 	r.UpdatedAt = s.now()
 	if err := s.repo.SaveResource(ctx, *r); err != nil {
-		return Wrap(ErrIndexFailed, err, "record revision for %q", r.ID)
+		return SyncResult{}, Wrap(ErrIndexFailed, err, "record revision for %q", r.ID)
 	}
-	return nil
+	result.Status = SyncIndexed
+	result.Revision = revision
+	result.Checksum = checksum
+	return result, nil
 }
 
 func (s *service) Search(ctx context.Context, req SearchRequest) ([]SearchResult, error) {

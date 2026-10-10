@@ -80,6 +80,30 @@ type Section struct {
 	Source   ResourceSource `json:"source,omitempty"`
 }
 
+// SyncStatus is what one Sync did to a resource's index.
+type SyncStatus string
+
+const (
+	// SyncIndexed: the source changed (or was never indexed); sections replaced.
+	SyncIndexed SyncStatus = "indexed"
+	// SyncUnchanged: checksum and revision match the last sync; index untouched.
+	SyncUnchanged SyncStatus = "unchanged"
+	// SyncSkipped: the resource type produces no sections in V1 (repository, service).
+	SyncSkipped SyncStatus = "skipped"
+)
+
+// SyncResult reports one Sync: the resource's revision after it, and how many
+// sections its source parses into (0 when skipped).
+type SyncResult struct {
+	ResourceID string       `json:"resource_id"`
+	ProjectID  string       `json:"project_id"`
+	Type       ResourceType `json:"type"`
+	Status     SyncStatus   `json:"status"`
+	Revision   string       `json:"revision,omitempty"`
+	Checksum   string       `json:"checksum,omitempty"`
+	Sections   int          `json:"sections"`
+}
+
 // SearchRequest asks for candidate resources inside one project (spec 12).
 type SearchRequest struct {
 	ProjectID     string

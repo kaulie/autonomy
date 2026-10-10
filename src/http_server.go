@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	ctxsvc "github.com/kaulie/autonomy/src/context"
 	"github.com/kaulie/autonomy/src/eventgateway"
 )
 
@@ -93,6 +94,10 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// reaches until; state changes are ingested as world events.
 		{"POST /api/watches", s.handleStartWatch},
 		{"GET /api/watches", s.handleListWatches},
+		// Context Service operator write path (src/context_write.go): register a
+		// resource into a project's context, then sync it into the index.
+		{"POST /api/context/resources", s.handleRegisterContextResource},
+		{"POST /api/context/resources/{resourceID}/sync", s.handleSyncContextResource},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -957,6 +962,64 @@ func (s *HTTPServer) handleUIHome(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, uiHomeHTML)
+}
+
+// handleRegisterContextResource registers (or re-registers, by id) one
+// resource into a project's context space. It does not index: sync does.
+//
+// @Summary  Context Service：登记一个 context 资源（document / repository / service）
+// @Tags     context
+// @Accept   json
+// @Produce  json
+// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；type 默认 document；id 为空时生成 ctx-<hex>"
+// @Success  201      {object}  context.Resource                         "已登记的资源（含生成的 id 与时间戳）"
+// @Failure  400      {object}  contextErrResponse                       "INVALID_QUERY / PROJECT_NOT_FOUND：非法 JSON、缺 project_id、未知 type"
+// @Failure  500      {object}  contextErrResponse                       "INDEX_FAILED：写注册表失败"
+// @Failure  503      {object}  contextErrResponse                       "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/resources [post]
+func (s *HTTPServer) handleRegisterContextResource(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	var body RegisterContextResourceRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeContextErr(w, http.StatusBadRequest, ctxsvc.ErrInvalidQuery, "invalid json: "+err.Error())
+		return
+	}
+	resource, err := svc.Register(req.Context(), body.Resource())
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, resource)
+}
+
+// handleSyncContextResource loads a registered resource's source, splits it
+// into sections and writes them into the full-text index. Unchanged sources
+// are not re-indexed; repository / service resources are skipped (V1).
+//
+// @Summary  Context Service：同步一个资源进全文索引
+// @Tags     context
+// @Produce  json
+// @Param    resourceID  path      string               true  "资源 id"
+// @Success  200         {object}  context.SyncResult   "status：indexed / unchanged / skipped；sections 为段数"
+// @Failure  404         {object}  contextErrResponse   "RESOURCE_NOT_FOUND：资源未登记"
+// @Failure  422         {object}  contextErrResponse   "SOURCE_UNAVAILABLE / PARSE_FAILED：源读不到或不是合法 UTF-8 Markdown"
+// @Failure  500         {object}  contextErrResponse   "INDEX_FAILED：写索引失败"
+// @Failure  503         {object}  contextErrResponse   "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/resources/{resourceID}/sync [post]
+func (s *HTTPServer) handleSyncContextResource(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	result, err := svc.Sync(req.Context(), req.PathValue("resourceID"))
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
