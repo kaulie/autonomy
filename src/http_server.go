@@ -98,6 +98,11 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// resource into a project's context, then sync it into the index.
 		{"POST /api/context/resources", s.handleRegisterContextResource},
 		{"POST /api/context/resources/{resourceID}/sync", s.handleSyncContextResource},
+		// ...and its operator read path, for the dashboard's Context area.
+		{"GET /api/context/resources", s.handleListContextResources},
+		{"GET /api/context/resources/{resourceID}", s.handleGetContextResource},
+		{"GET /api/context/search", s.handleSearchContext},
+		{"GET /api/context/sections/{sectionID}", s.handleGetContextSection},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -1020,6 +1025,114 @@ func (s *HTTPServer) handleSyncContextResource(w http.ResponseWriter, req *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleListContextResources lists a project's registered context resources
+// (inventory, not content).
+//
+// @Summary  Context Service：列出一个项目登记的 context 资源
+// @Tags     context
+// @Produce  json
+// @Param    project_id  query     string                   true  "项目 id"
+// @Success  200         {object}  contextResourcesResponse  "resources：已登记的资源"
+// @Failure  400         {object}  contextErrResponse        "PROJECT_NOT_FOUND：缺 project_id"
+// @Failure  500         {object}  contextErrResponse        "INDEX_FAILED：读注册表失败"
+// @Failure  503         {object}  contextErrResponse        "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/resources [get]
+func (s *HTTPServer) handleListContextResources(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	resources, err := svc.ListResources(req.Context(), strings.TrimSpace(req.URL.Query().Get("project_id")))
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, contextResourcesResponse{Resources: resources})
+}
+
+// handleGetContextResource reads one registered resource.
+//
+// @Summary  Context Service：读取一个 context 资源
+// @Tags     context
+// @Produce  json
+// @Param    resourceID  path      string              true  "资源 id"
+// @Success  200         {object}  context.Resource    "资源"
+// @Failure  404         {object}  contextErrResponse  "RESOURCE_NOT_FOUND：资源未登记"
+// @Failure  500         {object}  contextErrResponse  "INDEX_FAILED：读注册表失败"
+// @Failure  503         {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/resources/{resourceID} [get]
+func (s *HTTPServer) handleGetContextResource(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	resource, err := svc.GetResource(req.Context(), req.PathValue("resourceID"))
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resource)
+}
+
+// handleSearchContext finds candidate sections of a project's context.
+//
+// @Summary  Context Service：在一个项目的 context 里全文检索段落
+// @Tags     context
+// @Produce  json
+// @Param    project_id  query     string                 true   "项目 id"
+// @Param    q           query     string                 true   "检索词"
+// @Param    limit       query     int                    false  "最多返回条数（默认 10，上限 50）"
+// @Param    types       query     string                 false  "逗号分隔的资源类型：document,repository,service"
+// @Success  200         {object}  contextSearchResponse  "results：候选段落"
+// @Failure  400         {object}  contextErrResponse     "INVALID_QUERY / PROJECT_NOT_FOUND：缺 project_id、无检索词或 limit 非法"
+// @Failure  500         {object}  contextErrResponse     "INDEX_FAILED：读索引失败"
+// @Failure  503         {object}  contextErrResponse     "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/search [get]
+func (s *HTTPServer) handleSearchContext(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	searchReq, err := contextSearchRequest(req.URL.Query())
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	results, err := svc.Search(req.Context(), searchReq)
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	if results == nil {
+		results = []ctxsvc.SearchResult{}
+	}
+	writeJSON(w, http.StatusOK, contextSearchResponse{Results: results})
+}
+
+// handleGetContextSection reads one indexed section's full content.
+//
+// @Summary  Context Service：读取一个段落的全文与出处
+// @Tags     context
+// @Produce  json
+// @Param    sectionID  path      string              true  "段落 id"
+// @Success  200        {object}  context.Section     "段落全文、revision 与 source"
+// @Failure  404        {object}  contextErrResponse  "RESOURCE_NOT_FOUND：段落未索引"
+// @Failure  500        {object}  contextErrResponse  "INDEX_FAILED：读索引失败"
+// @Failure  503        {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/sections/{sectionID} [get]
+func (s *HTTPServer) handleGetContextSection(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	section, err := svc.GetSection(req.Context(), req.PathValue("sectionID"))
+	if err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, section)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
