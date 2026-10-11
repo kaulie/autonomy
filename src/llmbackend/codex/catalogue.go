@@ -13,16 +13,20 @@ func codexVendors(context.Context, llmbackend.Creds) ([]string, error) {
 	return []string{"openai"}, nil
 }
 
-// CodexModels is the pickable fallback when the Codex CLI / bridge has no catalogue
-// of its own. These are the ids this runtime already names in tests and docs; a
+// CodexModels is the pickable fallback when the Codex CLI / bridge has no
+// catalogue of its own. This is a static snapshot, not a live listing — new
+// Codex ids (Sol / Terra / Luna …) must be added here when they ship. A
 // caller may still type any id the CLI accepts.
 func CodexModels() []string {
 	return []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-6.1-sol",
+		"gpt-6-sol",
+		"gpt-6-luna",
+		"gpt-5.5",
 		"gpt-5-codex",
-		"gpt-5.4",
-		"gpt-5.4-mini",
-		"gpt-5.3-codex",
-		"gpt-5.2-codex",
 		"o3",
 		"o4-mini",
 	}
