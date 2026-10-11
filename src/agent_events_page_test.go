@@ -24,6 +24,7 @@ func TestAgentEventsPageUsesPerEventSections(t *testing.T) {
 		"event-body",
 		"function appendEvent",
 		"MAX_SECTIONS",
+		"document.scrollingElement",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events page missing %q", want)
@@ -31,5 +32,26 @@ func TestAgentEventsPageUsesPerEventSections(t *testing.T) {
 	}
 	if strings.Contains(body, "id=\"log\"") {
 		t.Fatal("events page should not use the old single #log terminal")
+	}
+}
+
+// A long event must grow with its text and ride the page scrollbar. Capping each
+// section (or the stream box) with its own overflow makes the stream unreadable.
+func TestAgentEventsPageScrollsWithThePage(t *testing.T) {
+	server := NewHTTPServer(nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/agents/10001/events?task=task-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET events status=%d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, refuse := range []string{
+		"max-height: 240px",
+		"height: calc(100vh - 140px)",
+		"eventsEl.scrollTop",
+	} {
+		if strings.Contains(body, refuse) {
+			t.Fatalf("events page still uses inner scroll %q", refuse)
+		}
 	}
 }

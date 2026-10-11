@@ -12,8 +12,8 @@ agent 行（[store.md](store.md) 的 `AgentStore`）合并进程内活的 agent 
 ## 一条 agent 一行，行上有两个入口
 
 - **一行一只 agent**：单元格不换行，表宽超出窗口就横向滚动 —— 「这只是谁、在做什么」一眼一行；
-- **events**：点进去看这只 agent 的**实时事件流**（一行一条事件，按 `next_poll_after_seq` 增量 tail，
-  不会重复渲染；`GET /agents/{agentID}/events?task=…`）；
+- **events**：点进去看这只 agent 的**实时事件流**（一条事件一个 section，按内容撑开，整页滚动，
+  按 `next_poll_after_seq` 增量 tail，不会重复渲染；`GET /agents/{agentID}/events?task=…`）；
 - **messages**：点进去看**发给它的消息**（inbox：用户指令 / 别的 agent 委托 / runtime 停）与
   **它自己的回复**（每轮 turn 的 input/output，一行一条；`GET /agents/{agentID}/messages`，
   数据来自 `GET /api/agents/{agentID}/messages`）。
