@@ -55,8 +55,9 @@ func TestTheVendorAndModelCataloguesComeFromTheHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claude models: %v", err)
 	}
-	if !strings.Contains(strings.Join(claudeModels, ","), "sonnet") {
-		t.Fatalf("claude models=%v want the CLI aliases so a create-task picker can offer them", claudeModels)
+	joined := strings.Join(claudeModels, ",")
+	if !strings.Contains(joined, "claude-sonnet-5-5") || !strings.Contains(joined, "sonnet") {
+		t.Fatalf("claude models=%v want a versioned id and a family alias", claudeModels)
 	}
 	if _, err := runtime.AccountVendors(ctx, "gemini", ""); err == nil {
 		t.Fatal("an unknown harness must be refused")
@@ -74,7 +75,7 @@ func TestTheCatalogueEndpointsAnswerOverHTTP(t *testing.T) {
 	}{
 		{"/api/accounts/vendors?harness=cline", "\"deepseek\""},
 		{"/api/accounts/vendors?harness=claude", "\"anthropic\""},
-		{"/api/accounts/models?harness=claude", "\"sonnet\""},
+		{"/api/accounts/models?harness=claude", "\"claude-sonnet-5-5\""},
 		{"/api/accounts/models?harness=cline&vendor=deepseek", "\"deepseek-v4-pro\""},
 		{"/api/accounts/vendors?harness=gemini", "error"},
 	} {

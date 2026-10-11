@@ -61,8 +61,9 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
   （本机实测 **216** 个 provider）；拿不到桥时回落到一份静态清单（与 web-cursor 的
   `FALLBACK_CLINE_VENDORS` 同一份：deepseek / minimax / anthropic / openai / openai-compatible）；
 - model 是**带建议的输入框**（datalist），数据来自 `GET /api/accounts/models`：cline / cursor
-  问桥或 SDK；**codex / claude** 给出 CLI 能认的别名（`gpt-5-codex`、`sonnet` / `opus` / `haiku`
-  等），codex 还会并上桥自己列出的 id。目录是建议，字段仍可手填；
+  问桥或 SDK；**codex** 给出常用 id（`gpt-5-codex` 等），还会并上桥自己列出的；**claude**
+  同时给带版本号的 id（`claude-sonnet-5-5` / `claude-opus-5-5` …）和会跟着最新一代走的
+  家族别名（`sonnet` / `opus` / `haiku`）。目录是建议，字段仍可手填；
 - 创建任务时也可以带 `model`（`POST /api/tasks`）：覆盖该账号存着的默认模型，harness /
   vendor / 凭据 / 工作目录仍由账号决定。Codex / Claude 的会话读的是这次选的模型，不是账号上那份。
 - 两个接口都可以带 `accountId`：目录是**用那个账号的凭据**去读的（有些 provider 不给 key 不回答）；

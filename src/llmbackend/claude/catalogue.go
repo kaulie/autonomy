@@ -11,12 +11,23 @@ func claudeVendors(context.Context, llmbackend.Creds) ([]string, error) {
 	return []string{"anthropic"}, nil
 }
 
-// ClaudeModels is the pickable catalogue for create-task / account UIs. Claude Code
-// accepts aliases (`--model sonnet`) that track the latest of each family, so the
-// list stays stable even as versioned IDs change. A caller may still type a full
-// model id; the catalogue is advice, not a gate.
+// ClaudeModels is the pickable catalogue for create-task / account UIs.
+//
+// Full ids pin a release (`claude-sonnet-5-5`). Family aliases (`sonnet`) track
+// whatever Claude Code currently resolves for that family — they do not name a
+// version. Both are accepted by `claude --model`. The list is advice, not a gate.
 func ClaudeModels() []string {
 	return []string{
+		"claude-sonnet-5-5",
+		"claude-sonnet-4-6",
+		"claude-sonnet-4-5",
+		"claude-opus-5-5",
+		"claude-opus-4-8",
+		"claude-opus-4-6",
+		"claude-haiku-5-5",
+		"claude-haiku-4-5",
+		"claude-fable-5-1",
+		"claude-fable-5",
 		"sonnet",
 		"opus",
 		"haiku",
