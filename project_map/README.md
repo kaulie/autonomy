@@ -31,4 +31,6 @@
 4. **`CLINE_SYSTEM.md` / `CODEX_SYSTEM.md` 把 system prompt 按 harness 分了两份。** 上层只应有一条「定位角色」的 first system（frame）。区别只是注入时机：Cline 建会话时写入同一份文字，其它后端作为第一条 turn。那两个文件已删；`llmbackend.SystemInject` 是时机，不是第二套政策。
 5. **Context Service 设计文档把 Postgres 实现放在 `context/index/postgres.go`，与 `store_ports_test.go` 的驱动边界冲突。** 事实：只有存储引擎（`src/db/postgres_*.go` / `sqlite_*.go`）可以 import 驱动；上层不得 import `database/sql`。处理：SQL 实现落在 `src/db/postgres_context*.go`，上层只依赖 `src/context` 的 `Repository` 端口与根包 `ContextStore` 端口（`src/context_service.go`）。见 `architecture.md`「Context Service」。
 
+6. **`scripts/stop.sh` 曾经只认 `backend/runtime.pid`。** 平台 rsync --delete 不保留该文件，远程机器上旧 `autonomyd` 会继续占着 4300，restart 的 start 一步报「端口已被占用」把整次部署判失败（`pipeline-ba9a2e00`、`pipeline-4d3462fa`，同一 pid 跨两天）。现 stop 在 pid 文件缺失时按端口回收本 runtime 的二进制；`start.sh` 对同一类残留先 stop 再起。别人的进程仍不杀。
+
 后续 agent 若发现上述条目已被新代码推翻，删除或改写它们，不要累积过期异议。

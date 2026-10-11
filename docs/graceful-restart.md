@@ -118,5 +118,5 @@ autonomy 自己恢复（把 hold 住的指令放回去跑）。理由是部署�
 - 两个端点：`src/http_server.go`（`handleRestartNotify` / `handleRestartStatus`，注解即契约）
 - 队列的 hold：`src/inbox.go`（`holdWhile` / `holdStart` / `resumePaused`；单条消息回队 `InboxStore.RequeueMessage`）
 - 抓信号：`cmd/autonomyd/main.go`（`SIGTERM` / `SIGINT`）
-- 脚本：`scripts/stop.sh`（`TERM` → 15s → `KILL`；这 15s 就是 `AUTONOMY_SHUTDOWN_GRACE` 的上界）
+- 脚本：`scripts/stop.sh`（pid 文件，或契约端口上本 runtime 的残留 `autonomyd`；`TERM` → 15s → `KILL`；这 15s 就是 `AUTONOMY_SHUTDOWN_GRACE` 的上界）
 - 测试：`src/graceful_test.go`

@@ -18,8 +18,8 @@
 #   scripts/*.sh            本目录（来自发版包）
 #   src/agent_policy/       决策策略（来自发版包；PROJECT_ROOT 指到 runtimeDir）
 #   backend/.env            可选覆盖项（首次启动自动生成，权限 600）
-#   backend/data/           pid / 日志（库在 ~/database/autonomy/autonomy.db，全机一份）
-#   backend/runtime.pid     进程号
+#   backend/data/           日志等运行期文件（库在 ~/database/autonomy/autonomy.db，全机一份）
+#   backend/runtime.pid     进程号（平台 rsync --delete 不保留；stop.sh 还会按端口回收残留进程）
 #   backend/server.log      标准输出/错误
 set -euo pipefail
 
@@ -283,11 +283,27 @@ if [ -f "${PID_FILE}" ]; then
   rm -f "${PID_FILE}"
 fi
 
+# 别人的进程占着端口 → 失败（别抢）。本 runtime 的残留 autonomyd 占着 → 先停再起。
+# 后者是远程部署的常见残骸：rsync --delete 清掉 backend/runtime.pid 之后，
+# 旧进程还在，stop 若只认 pid 文件会空跑，这里再兜一层。
 if command -v lsof >/dev/null 2>&1; then
   holder="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   if [ -n "${holder}" ]; then
-    die "端口 ${PORT} 已被 pid=${holder} 占用：$(ps -o command= -p "${holder}" 2>/dev/null | head -c 160)
+    holder_cmd="$(ps -o command= -p "${holder}" 2>/dev/null || true)"
+    case "${holder_cmd}" in
+    *"${BIN}"*)
+      log "端口 ${PORT} 上是本 runtime 的残留进程 pid=${holder}，先执行 stop"
+      bash "${DIR}/stop.sh" || die "无法停掉占用端口 ${PORT} 的本进程 pid=${holder}"
+      holder="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+      if [ -n "${holder}" ]; then
+        die "端口 ${PORT} 仍被 pid=${holder} 占用：$(ps -o command= -p "${holder}" 2>/dev/null | head -c 160)"
+      fi
+      ;;
+    *)
+      die "端口 ${PORT} 已被 pid=${holder} 占用：${holder_cmd}
       请显式指定端口（SERVICE_PORT=…），或先停掉占用者"
+      ;;
+    esac
   fi
 fi
 

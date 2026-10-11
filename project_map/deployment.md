@@ -45,10 +45,12 @@ $RUNTIME_DIR/
   src/clinesdk/bridge/ …         # 发版包自带；依赖解到包外缓存
   src/codexsdk/bridge/ …
   backend/.env                   # 首次生成，权限 600；平台 rsync --delete 时保留
-  backend/data/                  # 仅 pid / 日志，不是库
-  backend/runtime.pid
+  backend/data/                  # 日志等运行期文件，不是库
+  backend/runtime.pid            # 进程号。平台 rsync --delete **不**保留这一项
   backend/server.log
 ```
+
+`scripts/stop.sh` 先看 pid 文件，没有（或里面的进程已不在）再看契约端口上是否仍是本 runtime 的 `bin/autonomyd`。是就 TERM → 等 → KILL。别人的进程占着端口不杀，留给 `start.sh` 报错。`start.sh` 遇到本 runtime 的残留监听也会先调一次 `stop.sh`，避免「stop 空跑、start 因端口占用把部署判失败」。
 
 sqlite 库**不在** runtime 目录：默认 `~/database/autonomy/autonomy.db`。换位置用 `AUTONOMY_STORE_DSN` 或 `AUTONOMY_DATA_DIR`。换了就等于换库。
 

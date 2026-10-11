@@ -5,7 +5,7 @@
 | `start.sh` | 部署平台启动：`SERVICE_PORT` + 主机（`AUTONOMY_HTTP_HOST` / `SERVICE_HOST`，默认 `127.0.0.1`），探 `/health`，pid/日志在 `backend/`；顺带把两个桥指好（包自带 `bin/cursor-sdk-bridge` 与 `src/clinesdk/bridge`，后者的依赖按 tarball 的 sha256 解到 `${AUTONOMY_CACHE_DIR:-$RUNTIME_DIR/.cache}/cline-bridge/` 并 symlink 回源码目录），并在拉起进程前**自检所选后端的桥**（不过就非 0 退出 → 部署失败、留在上一版；见 docs/llm-backend.md）。远程机器对外服务见 [docs/remote-deploy.md](../docs/remote-deploy.md) |
 | `listen_addr.sh` | `start.sh` 用的监听地址：主机优先级与「`0.0.0.0` 探 loopback」。发版包必带，缺了 `start.sh` 会失败 |
 | `autonomyd.service` | 远程机器的 systemd 单元（`Type=forking` 调 `start.sh`）。本机平台不用它 |
-| `stop.sh` | TERM → 等待 → KILL |
+| `stop.sh` | TERM → 等待 → KILL。先看 `backend/runtime.pid`，没有再停契约端口上本 runtime 的残留 `autonomyd`（rsync --delete 会清掉 pid 文件） |
 | `restart.sh` | 控制面默认 `restartCmd`（`stop` 然后 `start`） |
 | `fetch-bridge.sh` | Download the pinned `cursor-sdk-bridge` standalone binary (Cursor backend)。`--print-version` 打印 pin 的版本（**版本只 pin 在它这一处**，`build.sh` 问它而不是自己知道），`--print-platform` 打印**目标平台**（`darwin-x64` / `linux-x64`…，`GOOS`/`GOARCH` 优先、否则构建机自己的平台 —— 归一化也只在这一处，`build.sh` 拿它当缓存 key），`--dest DIR` 下到别处（build.sh 用它填构建机缓存） |
 | `install-codex-bridge.sh` | `npm install` the Codex bridge's dependencies (`@openai/codex-sdk`) under `src/codexsdk/bridge/` (Codex backend) — 开发机上跑一次；打包时 `build.sh` 自己会装并把依赖压进发版包 |
