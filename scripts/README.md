@@ -7,6 +7,7 @@
 | `autonomyd.service` | 远程机器的 systemd 单元（`Type=forking` 调 `start.sh`）。本机平台不用它 |
 | `stop.sh` | TERM → 等待 → KILL。先看 `backend/runtime.pid`，没有再停契约端口上本 runtime 的残留 `autonomyd`（rsync --delete 会清掉 pid 文件） |
 | `restart.sh` | 控制面默认 `restartCmd`（`stop` 然后 `start`） |
+| `local-replica.sh` | 本机只读副本（默认 `127.0.0.1:5433`）：`init` / `start` / `stop` / `status` / `install-agent`。launchd 代理必须带合法 `LC_ALL`，否则 macOS 上 postmaster 会立刻退出，runtime 读侧变成 connection refused（见 [docs/local-replica.md](../docs/local-replica.md)） |
 | `fetch-bridge.sh` | Download the pinned `cursor-sdk-bridge` standalone binary (Cursor backend)。`--print-version` 打印 pin 的版本（**版本只 pin 在它这一处**，`build.sh` 问它而不是自己知道），`--print-platform` 打印**目标平台**（`darwin-x64` / `linux-x64`…，`GOOS`/`GOARCH` 优先、否则构建机自己的平台 —— 归一化也只在这一处，`build.sh` 拿它当缓存 key），`--dest DIR` 下到别处（build.sh 用它填构建机缓存） |
 | `install-codex-bridge.sh` | `npm install` the Codex bridge's dependencies (`@openai/codex-sdk`) under `src/codexsdk/bridge/` (Codex backend) — 开发机上跑一次；打包时 `build.sh` 自己会装并把依赖压进发版包 |
 | `install-cline-bridge.sh` | `npm install` the Cline bridge's dependencies (`@cline/sdk`) under `src/clinesdk/bridge/` (Cline backend) — 开发机上跑一次；打包时 `build.sh` 自己会取（优先 checkout 的 `node_modules`，其次构建机缓存 `~/.cache/autonomy/cline-bridge-deps/<lock 的 sha256>.tgz`，最后 `npm ci --omit=dev`），取不到就**构建失败** |
