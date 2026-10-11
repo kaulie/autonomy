@@ -78,6 +78,7 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /", s.handleUIHome},
 		{"GET /tasks", s.handleTasksPage},
 		{"GET /dashboard", s.handleAgentDashboard},
+		{"GET /context", s.handleContextPage},
 		// The graceful restart the deployment platform performs on this service: one
 		// notice before it stops us, then a poll while it waits for the runs in flight
 		// to come back (src/graceful.go). A service that answers both is deployed
@@ -952,6 +953,20 @@ func (s *HTTPServer) handleTasksPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, tasksPageHTML)
+}
+
+// handleContextPage serves the Context Service page (src/context_page.go): list, register, sync,
+// search, read and delete a project's context resources through the /api/context endpoints.
+//
+// @Summary  Context 管理页面（登记 / 同步 / 列表 / 检索 / 删除）
+// @Tags     context
+// @Produce  html
+// @Success  200  {string}  string  "HTML 页面"
+// @Router   /context [get]
+func (s *HTTPServer) handleContextPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, contextPageHTML)
 }
 
 // handleUIHome serves autonomy's UI shell: the page a human opens, with the modules of this

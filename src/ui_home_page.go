@@ -3,7 +3,7 @@ package autonomy
 // uiHomeHTML is autonomy's own UI, served at GET / : one shell that hosts the modules.
 //
 // The modules are the pages this runtime already serves (GET /tasks, GET /dashboard,
-// GET /accounts) — each one a self-contained page that talks to its own JSON API — and the shell
+// GET /accounts, GET /context) — each one a self-contained page that talks to its own JSON API — and the shell
 // embeds the selected one with ?embed=1, which tells a module to drop its own title because the
 // shell owns it. That keeps one rule from the rest of this UI: a page is the string it is, no
 // build step, no asset pipeline, and adding a module is adding a page plus one entry in the nav
@@ -57,6 +57,7 @@ const uiHomeHTML = `<!DOCTYPE html>
     <button data-module="tasks">Tasks</button>
     <button data-module="dashboard">Agent status</button>
     <button data-module="accounts">Harness accounts</button>
+    <button data-module="context">Context</button>
     <div class="note">Modules are pages of this runtime; each opens on its own path too.</div>
   </nav>
   <div class="content">
@@ -70,7 +71,7 @@ const uiHomeHTML = `<!DOCTYPE html>
 <script>
 // The modules this shell hosts: the path each one is served at. Adding a module is adding a page
 // and a line here (and a button above).
-const MODULES = { tasks: "/tasks", dashboard: "/dashboard", accounts: "/accounts" };
+const MODULES = { tasks: "/tasks", dashboard: "/dashboard", accounts: "/accounts", context: "/context" };
 
 // Views that poll, and so are the ones the refresh control applies to. A detail view
 // (#/agents/12/events) is a path rather than a module, which is how a row in agent status opens
