@@ -62,6 +62,8 @@ rsync -a --delete \
 
 `backend/` 与 `.cache/` 是运行期的（`.env`、pid、日志、桥依赖缓存），覆盖会丢掉账号池所在库之外的本地覆盖项。sqlite 默认库在远程机器的 `~/database/autonomy/autonomy.db`（或 `AUTONOMY_STORE_DSN`），不在这个目录里。
 
+部署平台自己的 rsync **不**排除整个 `backend/`，只保留其中几项（`backend/data/`、`backend/server.log`、`backend/.env`）；`backend/runtime.pid` 会被 `--delete` 清掉。所以 `scripts/stop.sh` 在没有 pid 文件时，还会停契约端口上本 runtime 的残留 `autonomyd`。手拷时继续排除整个 `backend/` 更稳，但脚本不再依赖「pid 文件一定还在」。
+
 第一次在远程上：
 
 ```bash

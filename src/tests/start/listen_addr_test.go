@@ -135,6 +135,24 @@ func TestStartScriptSourcesListenAddr(t *testing.T) {
 	}
 }
 
+func TestStartScriptStopsOwnPortHolder(t *testing.T) {
+	start := filepath.Join(filepath.Dir(helper()), "start.sh")
+	body, err := os.ReadFile(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, need := range []string{
+		`*"${BIN}"*)`,
+		`bash "${DIR}/stop.sh"`,
+		`本 runtime 的残留进程`,
+	} {
+		if !strings.Contains(text, need) {
+			t.Errorf("scripts/start.sh is missing leftover-handler %q (remote restart would die on a stale autonomyd)", need)
+		}
+	}
+}
+
 func TestReleasePackageCarriesListenAddrAndUnit(t *testing.T) {
 	root := filepath.Join(filepath.Dir(helper()), "..")
 	build, err := os.ReadFile(filepath.Join(root, "build.sh"))
