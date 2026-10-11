@@ -72,6 +72,14 @@ func (m *MemoryRepository) ReplaceSections(_ context.Context, resourceID string,
 	return nil
 }
 
+func (m *MemoryRepository) DeleteResource(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.resources, id)
+	delete(m.sections, id)
+	return nil
+}
+
 func (m *MemoryRepository) GetSection(_ context.Context, id string) (*Section, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

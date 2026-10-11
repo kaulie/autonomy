@@ -2,6 +2,8 @@ package autonomy
 
 import (
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	ctxsvc "github.com/kaulie/autonomy/src/context"
@@ -80,4 +82,38 @@ func (s *HTTPServer) contextService(w http.ResponseWriter) ctxsvc.Service {
 		return nil
 	}
 	return s.Autonomy.Context
+}
+
+// contextResourcesResponse is the body of GET /api/context/resources.
+type contextResourcesResponse struct {
+	Resources []ctxsvc.Resource `json:"resources"`
+}
+
+// contextSearchResponse is the body of GET /api/context/search.
+type contextSearchResponse struct {
+	Results []ctxsvc.SearchResult `json:"results"`
+}
+
+// contextSearchRequest reads GET /api/context/search's query string:
+// project_id, q, limit and the comma-separated types filter. The service
+// validates the project and the terms; a limit that is not a number is
+// INVALID_QUERY here.
+func contextSearchRequest(q url.Values) (ctxsvc.SearchRequest, error) {
+	req := ctxsvc.SearchRequest{
+		ProjectID: strings.TrimSpace(q.Get("project_id")),
+		Query:     q.Get("q"),
+	}
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil {
+			return req, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "limit %q is not a number", raw)
+		}
+		req.Limit = limit
+	}
+	for _, t := range strings.Split(q.Get("types"), ",") {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			req.ResourceTypes = append(req.ResourceTypes, ctxsvc.ResourceType(t))
+		}
+	}
+	return req, nil
 }

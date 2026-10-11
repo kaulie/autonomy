@@ -22,4 +22,7 @@ type Repository interface {
 	GetSection(ctx context.Context, id string) (*Section, error)
 	// Search returns ranked candidate sections (spec 12), never whole documents.
 	Search(ctx context.Context, req SearchRequest) ([]SearchResult, error)
+	// DeleteResource removes one resource and every section indexed from it.
+	// An unknown id is not an error.
+	DeleteResource(ctx context.Context, id string) error
 }
