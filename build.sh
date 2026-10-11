@@ -123,10 +123,12 @@ fi
 
 # —— Node 桥（cline / codex）随包发出 ——
 # 每个 harness 的桥都是「一个 Node 脚本 + 一棵依赖树」，打包方式完全一样，所以这里是一个
-# 函数：源码（运行时那几个模块）+ package.json/lock + 一份生产安装的依赖压缩包
-# bridge-deps.tgz。scripts/start.sh 把它解到包外的缓存（${RUNTIME_DIR}/.cache/<name>-bridge/<sha256>，
-# 部署 rsync 不碰它）、在源码目录建 node_modules 符号链接，并把 AUTONOMY_<NAME>_BRIDGE_SCRIPT
-# 指到包里的桥 —— 这样部署跑的桥来自*这个发版包*，而不是机器上的某份 checkout。
+# 函数：源码（目录里全部运行时 .mjs，不含 *.test.mjs / smoke.mjs）+ package.json/lock +
+# 一份生产安装的依赖压缩包 bridge-deps.tgz。后面列出的模块名是最低清单：缺一个就构建失败，
+# 避免再出现 bridge.mjs import 了 models.mjs 但发版包没带上的情况。scripts/start.sh 把
+# 依赖解到包外缓存（${RUNTIME_DIR}/.cache/<name>-bridge/<sha256>，部署 rsync 不碰它）、
+# 在源码目录建 node_modules 符号链接，并把 AUTONOMY_<NAME>_BRIDGE_SCRIPT 指到包里的桥 ——
+# 这样部署跑的桥来自*这个发版包*，而不是机器上的某份 checkout。
 #
 # 依赖有三个来源，按序，绝不静默产出缺桥的包：
 #   1. checkout 的 node_modules（跑过 scripts/install-<name>-bridge.sh 的开发机），
@@ -134,16 +136,27 @@ fi
 #   3. `npm ci --omit=dev`（需要 npm + 网络；AUTONOMY_NPM_BIN 指定 npm）。
 # 三者都不成 = 构建失败（不是警告）：缺桥的包在部署时会被 scripts/start.sh 的启动前自检拒
 # 掉，不如在这里说清。显式接受缺桥：AUTONOMY_ALLOW_MISSING_<NAME>_BRIDGE=1。
-package_node_bridge() { # <name> <package-relative dir> <module>...
+package_node_bridge() { # <name> <package-relative dir> <required module>...
   local name="$1" pkgdir="$2"
   shift 2
-  local modules=("$@")
+  local required=("$@")
   local src="${ROOT}/${pkgdir}"
   [ -f "${src}/bridge.mjs" ] || return 0
   mkdir -p "${OUT}/${pkgdir}"
-  local m
-  for m in "${modules[@]}"; do
-    [ -f "${src}/${m}" ] && cp "${src}/${m}" "${OUT}/${pkgdir}/"
+  local m base
+  for m in "${src}"/*.mjs; do
+    [ -f "$m" ] || continue
+    base="$(basename "$m")"
+    case "$base" in
+      *.test.mjs|smoke.mjs) continue ;;
+    esac
+    cp "$m" "${OUT}/${pkgdir}/"
+  done
+  for m in "${required[@]}"; do
+    if [ ! -f "${OUT}/${pkgdir}/${m}" ]; then
+      echo "[build][错误] ${name} bridge 缺运行时模块 ${m}（${src}/${m} 不存在或被当成测试脚本跳过）" >&2
+      exit 1
+    fi
   done
   cp "${src}/package.json" "${OUT}/${pkgdir}/"
   [ -f "${src}/package-lock.json" ] && cp "${src}/package-lock.json" "${OUT}/${pkgdir}/"
@@ -186,7 +199,7 @@ package_node_bridge() { # <name> <package-relative dir> <module>...
 }
 
 package_node_bridge cline src/clinesdk/bridge bridge.mjs config.mjs resume.mjs trace.mjs
-package_node_bridge codex src/codexsdk/bridge bridge.mjs config.mjs
+package_node_bridge codex src/codexsdk/bridge bridge.mjs config.mjs models.mjs
 
 chmod +x "${OUT}/bin/"* "${OUT}/scripts/"*.sh
 
