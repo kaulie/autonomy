@@ -17,9 +17,12 @@ func TestClaudeCatalogueOffersTheCLIAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("models: %v", err)
 	}
-	for _, want := range []string{"sonnet", "opus", "haiku"} {
+	for _, want := range []string{
+		"claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5",
+		"sonnet", "opus", "haiku",
+	} {
 		if !slices.Contains(models, want) {
-			t.Fatalf("models=%v want %q so a create-task picker has something to offer", models, want)
+			t.Fatalf("models=%v want %q so a create-task picker can pin a version or pick a family alias", models, want)
 		}
 	}
 }
