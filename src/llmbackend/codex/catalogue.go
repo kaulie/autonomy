@@ -13,17 +13,41 @@ func codexVendors(context.Context, llmbackend.Creds) ([]string, error) {
 	return []string{"openai"}, nil
 }
 
-// codexModels lists what the Codex CLI offers (usually nothing: it resolves the model itself).
-func codexModels(ctx context.Context, _ llmbackend.Creds) ([]string, error) {
-	models, err := codexClient().Models(ctx, "")
-	if err != nil {
-		return nil, nil
+// CodexModels is the pickable fallback when the Codex CLI / bridge has no catalogue
+// of its own. These are the ids this runtime already names in tests and docs; a
+// caller may still type any id the CLI accepts.
+func CodexModels() []string {
+	return []string{
+		"gpt-5-codex",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.3-codex",
+		"gpt-5.2-codex",
+		"o3",
+		"o4-mini",
 	}
-	out := make([]string, 0, len(models))
-	for _, model := range models {
-		if id := strings.TrimSpace(model.ID); id != "" {
-			out = append(out, id)
+}
+
+// codexModels lists what the Codex CLI offers, then fills in the well-known ids so a
+// create-task picker is never empty. A missing bridge is not a hard error.
+func codexModels(ctx context.Context, _ llmbackend.Creds) ([]string, error) {
+	out := make([]string, 0)
+	seen := map[string]bool{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			return
 		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	if models, err := codexClient().Models(ctx, ""); err == nil {
+		for _, model := range models {
+			add(model.ID)
+		}
+	}
+	for _, id := range CodexModels() {
+		add(id)
 	}
 	return out, nil
 }

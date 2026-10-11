@@ -19,6 +19,8 @@ func TestTheTasksPageOffersThePoolAsTheAccountChoice(t *testing.T) {
 	for _, want := range []string{
 		`api("GET", "/api/accounts")`,                 // the dropdown's source: the pool, masked
 		`body.account_id = select.value`,              // the choice travels on the instruction
+		`id="f-model"`,                                // per-task model, especially for Codex / Claude
+		`body.model = model`,                          // the override travels on the instruction
 		`<option value="">pool default</option>`,      // nothing chosen = the pool decides
 		`api("POST", "/api/tasks", body)`,             // the instruction itself
 		`/api/tasks/" + encodeURIComponent(openTask)`, // and where a task stands

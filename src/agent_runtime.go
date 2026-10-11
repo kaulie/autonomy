@@ -202,5 +202,9 @@ func (a *Agent) applyAgentRuntime(plan agentRuntimePlan) {
 	}
 	if plan.Model != "" {
 		a.SetModel(plan.Model)
+		// Codex / Claude open the session from Facts.Creds.Model. adoptAccount
+		// copied the account's stored model; keep the plan's choice on the
+		// credential so a task-level override actually reaches the CLI.
+		a.credential.Model = plan.Model
 	}
 }

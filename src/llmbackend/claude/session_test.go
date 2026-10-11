@@ -70,6 +70,25 @@ func TestSessionThroughRegistry(t *testing.T) {
 	}
 }
 
+func TestTaskModelOutranksTheAccountModel(t *testing.T) {
+	dir := fakeCLI(t, "printf '%s\\n' \"$@\" > args\ncat >/dev/null\nprintf '%s\\n' '"+success+"'\n")
+	h := &probeHost{facts: llmbackend.Facts{
+		Workspace: dir,
+		Model:     "opus",
+		Creds:     llmbackend.Creds{Model: "sonnet"},
+	}}
+	if _, _, err := newSession(h).Prompt(context.Background(), "hello", llmbackend.ModePlan, nil); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--model\nopus\n") {
+		t.Fatalf("args=%s want --model opus from Facts.Model, not the account's sonnet", args)
+	}
+}
+
 func TestFailuresAndCancellation(t *testing.T) {
 	for name, body := range map[string]string{
 		"missing result": "exit 0", "invalid JSON": "echo broken", "exit failure": "exit 2",

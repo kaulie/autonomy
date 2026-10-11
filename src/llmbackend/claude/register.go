@@ -13,8 +13,8 @@ func init() {
 		Backend: llmbackend.Claude, Provider: llmbackend.ProviderClaude,
 		New:     func(h llmbackend.Host) llmbackend.SessionImpl { return newSession(h) },
 		Adapter: streamAdapter{},
-		Vendors: func(context.Context, llmbackend.Creds) ([]string, error) { return []string{"anthropic"}, nil },
-		Models:  func(context.Context, llmbackend.Creds) ([]string, error) { return []string{}, nil },
+		Vendors: claudeVendors,
+		Models:  claudeModels,
 		Probe:   probe,
 	})
 }

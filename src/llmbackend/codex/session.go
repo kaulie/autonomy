@@ -67,12 +67,15 @@ func (c *codexSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	// Credentials are the account's (src/accounts.go): the pool is the runtime's only source,
 	// and a Codex account without a key runs on whatever `codex auth` saved.
 	creds := c.host.Facts().Creds
+	// A task-level model (Facts.Model, from POST /api/tasks `model`) outranks the
+	// account's stored default. Codex opens the thread from this id.
+	model := llmbackend.FirstNonEmptyString(c.host.Facts().Model, creds.Model)
 	// Whether this turn may reach the network from inside its sandbox is a deployment decision
 	// (src/llmbackend/codex/network.go): a sandboxed turn that cannot fetch the repository has
 	// nothing to work on.
 	network := NetworkFor(mode)
 	agent, err := codexClient().Agents().Create(ctx, codexsdk.CreateOptions{
-		ModelID:         creds.Model,
+		ModelID:         model,
 		APIKey:          creds.APIKey,
 		BaseURL:         creds.BaseURL,
 		CWD:             cwd,

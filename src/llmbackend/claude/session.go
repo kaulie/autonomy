@@ -55,7 +55,7 @@ func (s *session) Attach(ctx context.Context, mode llmbackend.Mode) (bool, error
 	s.ids[key] = id
 	s.host.SetBackend(llmbackend.Claude, llmbackend.ProviderClaude)
 	s.host.SetWorkspace(cwd)
-	s.host.SetModel(s.host.Facts().Creds.Model)
+	s.host.SetModel(s.model())
 	if !s.resumed {
 		s.host.SetFrameSent(false)
 	}
@@ -77,10 +77,17 @@ func (s *session) args() []string {
 	} else if s.id != "" {
 		args = append(args, "--resume", s.id)
 	}
-	if model := s.host.Facts().Creds.Model; model != "" {
+	if model := s.model(); model != "" {
 		args = append(args, "--model", model)
 	}
 	return args
+}
+
+// model is the id this session opens with: a task-level choice on Facts.Model
+// outranks the account's stored Creds.Model (POST /api/tasks `model`).
+func (s *session) model() string {
+	facts := s.host.Facts()
+	return llmbackend.FirstNonEmptyString(facts.Model, facts.Creds.Model)
 }
 
 // Credentials only come from the account. Keyless accounts use Claude's saved login.

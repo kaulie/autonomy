@@ -94,6 +94,14 @@ func TestTheRuntimePlanIsOneDecision(t *testing.T) {
 			policy:  agentRuntimePolicy{RequestedBackend: "local"},
 			wantAcc: nil, wantBe: llmbackend.Local, wantModel: defaultAgentModel(llmbackend.Local),
 		},
+		{
+			name: "a model already recorded on the agent outranks the account's stored model",
+			agent: &Agent{
+				ID: 9209, Name: "agent-9209", Role: AgentRolePlanner,
+				AccountID: cursor.ID, Model: "composer-2.5",
+			},
+			wantAcc: &cursor, wantBe: llmbackend.Cursor, wantModel: "composer-2.5",
+		},
 	}
 
 	t.Setenv("AUTONOMY_LLM_BACKEND", "cline")
@@ -128,6 +136,10 @@ func TestTheRuntimePlanIsOneDecision(t *testing.T) {
 			}
 			if tc.wantAcc != nil && tc.agent.AccountID != tc.wantAcc.ID {
 				t.Fatalf("applied account=%q want %s", tc.agent.AccountID, tc.wantAcc.ID)
+			}
+			if tc.wantModel != "" && tc.agent.Facts().Creds.Model != tc.wantModel {
+				t.Fatalf("creds.model=%q want %q (the session reads the plan's model from the credential)",
+					tc.agent.Facts().Creds.Model, tc.wantModel)
 			}
 		})
 	}

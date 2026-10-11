@@ -10,8 +10,9 @@ catalogues and account probes. No Node bridge or additional Go dependency is req
    Set `AUTONOMY_CLAUDE_BIN` to an absolute executable path when it is not on PATH.
 2. Add an enabled account at `/accounts`: harness `claude`, vendor `anthropic`, optional
    API key, base URL and model, and the desired agent workspace root. With no key, the CLI
-   uses its saved login. Models are entered explicitly or left blank for Claude's default;
-   the catalogue deliberately returns no hardcoded model list.
+   uses its saved login. The catalogue offers Claude Code aliases (`sonnet`, `opus`,
+   `haiku`, `fable`, …) so a create-task picker has something to choose; a full model id
+   can still be typed. Leave the field blank to use the account or Claude's own default.
 3. Select that account for the task, or set `AUTONOMY_LLM_BACKEND=claude` on the runtime
    and make the account the default Claude account. `claude_code` is an accepted alias.
 
