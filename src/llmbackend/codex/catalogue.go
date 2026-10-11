@@ -14,9 +14,10 @@ func codexVendors(context.Context, llmbackend.Creds) ([]string, error) {
 }
 
 // CodexModels is the pickable fallback when the Codex CLI / bridge has no
-// catalogue of its own. This is a static snapshot, not a live listing — new
-// Codex ids (Sol / Terra / Luna …) must be added here when they ship. A
-// caller may still type any id the CLI accepts.
+// catalogue of its own. Entries here are models ChatGPT-signed-in Codex
+// accepts (`gpt-5-codex` / `o3` are API-key only and return 400 with a
+// ChatGPT account). This is a static snapshot — a caller may still type
+// any id the CLI accepts.
 func CodexModels() []string {
 	return []string{
 		"gpt-5.6-sol",
@@ -25,10 +26,6 @@ func CodexModels() []string {
 		"gpt-6.1-sol",
 		"gpt-6-sol",
 		"gpt-6-luna",
-		"gpt-5.5",
-		"gpt-5-codex",
-		"o3",
-		"o4-mini",
 	}
 }
 
