@@ -53,6 +53,15 @@ REPLICA_SOCKET_DIR="${REPLICA_SOCKET_DIR:-/tmp}"
 REPLICA_HOST="${REPLICA_HOST:-127.0.0.1}"
 REPLICA_AGENT_LABEL="${REPLICA_AGENT_LABEL:-com.autonomy.local-replica}"
 REPLICA_AGENT_PLIST="${HOME}/Library/LaunchAgents/${REPLICA_AGENT_LABEL}.plist"
+# macOS 上 postgres 启动时如果 LC_ALL/LANG 空着或不是合法区域，setlocale() 会把
+# postmaster 变成多线程，然后直接退出：
+#   FATAL: postmaster became multithreaded during startup
+#   HINT:  Set the LC_ALL environment variable to a valid locale.
+# launchd 的默认环境几乎是空的（没有 LANG），本机副本因此会一直 connection refused。
+# C 在每台机器上都合法；要换区域设 REPLICA_LC_ALL（必须是 locale -a 里有的）。
+REPLICA_LC_ALL="${REPLICA_LC_ALL:-C}"
+export LC_ALL="${REPLICA_LC_ALL}"
+export LANG="${REPLICA_LC_ALL}"
 
 # runtime 侧的连接串（env 子命令打印用）。
 APP_DB="${APP_DB:-autonomy}"
@@ -255,6 +264,11 @@ agent_plist() {
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LC_ALL</key><string>${REPLICA_LC_ALL}</string>
+    <key>LANG</key><string>${REPLICA_LC_ALL}</string>
+  </dict>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>${REPLICA_DIR}/replica.log</string>
   <key>StandardErrorPath</key><string>${REPLICA_DIR}/replica.log</string>
@@ -266,9 +280,13 @@ EOF
 cmd_install_agent() {
   [ -d "${REPLICA_DIR}" ] || die "副本还没建起来：先跑 init"
   mkdir -p "$(dirname "${REPLICA_AGENT_PLIST}")"
+  replica_running && stop_replica
+  # 已经装过的先卸掉再写：否则旧 plist（没有 LC_ALL）会一直被 launchd 用着。
+  if agent_installed; then
+    launchctl bootout "gui/${UID}" "${REPLICA_AGENT_PLIST}" 2>/dev/null || launchctl unload -w "${REPLICA_AGENT_PLIST}" || true
+  fi
   agent_plist >"${REPLICA_AGENT_PLIST}"
   log "已写入 ${REPLICA_AGENT_PLIST}"
-  replica_running && stop_replica
   launchctl bootstrap "gui/${UID}" "${REPLICA_AGENT_PLIST}" 2>/dev/null || launchctl load -w "${REPLICA_AGENT_PLIST}"
   start_replica
   log "代理已加载：登录后会自动把副本拉起来（卸载：$0 uninstall-agent）"
@@ -323,9 +341,17 @@ cmd_status() {
 case "${1:-}" in
   init) cmd_init ;;
   configure) require_primary; write_replica_conf; log "本机副本设置已写入 ${REPLICA_DIR}" ;;
-  start) require_primary; start_replica ;;
+  start)
+    # 已经 init 过的副本，primary_conninfo 在数据目录里；start 不再要 PRIMARY_HOST。
+    [ -d "${REPLICA_DIR}" ] || die "副本还没建起来：先跑 init"
+    start_replica
+    ;;
   stop) stop_replica ;;
-  restart) stop_replica; require_primary; start_replica ;;
+  restart)
+    [ -d "${REPLICA_DIR}" ] || die "副本还没建起来：先跑 init"
+    stop_replica
+    start_replica
+    ;;
   status) cmd_status ;;
   env) cmd_env ;;
   install-agent) cmd_install_agent ;;

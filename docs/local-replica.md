@@ -86,6 +86,9 @@ scripts/local-replica.sh uninstall-agent
 ```
 
 装过代理之后 `start` / `stop` 也走 `launchctl`，两条路（`pg_ctl` 或 launchd）都能管它。
+代理的 plist 必须带 `LC_ALL`（默认 `C`，可用 `REPLICA_LC_ALL` 换）：macOS 上 launchd 的环境几乎是空的，
+postgres 会以「postmaster became multithreaded during startup」立刻退出，`127.0.0.1:5433` 就一直
+connection refused。已经装过旧代理的，改完脚本要再跑一次 `install-agent`。
 
 ## 打开「读本地」
 
@@ -158,6 +161,7 @@ go test ./src/db/ -run TestTheSplitAgainstARealReplica -v
 | 症状 | 原因 | 处理 |
 |------|------|------|
 | 服务起来了，读走了远端 | 副本没起 / 不是副本（warning 里有原因） | `scripts/local-replica.sh status`；`start`；必要时重新 `init` |
+| `127.0.0.1:5433` connection refused，副本日志里「postmaster 变成多线程的」/ `postmaster became multithreaded during startup` | launchd 没带合法 locale。macOS 上空的 `LC_ALL` 会让 `setlocale()` 在启动阶段把进程变成多线程，postgres 立刻退出（`HINT: Set the LC_ALL environment variable to a valid locale`）。本机代理的默认环境几乎是空的，所以最容易踩。 | 本脚本的 `start` / `install-agent` 会把 `LC_ALL=C`（可用 `REPLICA_LC_ALL` 换）写进进程环境和 plist。已经装过代理的重跑一次 `install-agent`。 |
 | 槽上「没人连着」 | 副本停机，或主库 hba 里那个出口 IP 过期了 | 先 `start`；还是不行就更新主库 hba 那一行并 reload |
 | 副本追不上（位点差得越来越远） | 本机断网 / 上行带宽不够 / 主库 WAL 太多 | 等它追；追不上就重新 `init`（几分钟） |
 | 槽失效（`wal_status = lost`） | 停机太久，超过 `max_slot_wal_keep_size` 的 2GB，主库不再为它留 WAL | 删槽重建 + 重新 `init`（主库磁盘安全优先，这是有意的） |
