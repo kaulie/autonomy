@@ -52,6 +52,7 @@ import {
 	statusOf,
 	threadOptionsFor,
 } from "./config.mjs";
+import { listCodexAppServerModels } from "./models.mjs";
 
 /** One Codex handle per bridge process, keyed by the credentials it was built with. */
 const clients = new Map();
@@ -249,12 +250,23 @@ async function handle(cmd, params, requestId) {
 			return;
 		}
 		case "models": {
-			// The CLI resolves the catalog; this bridge only reports what it was told to run.
+			// Live list from `codex app-server` `model/list` — account-aware, so a
+			// ChatGPT login does not see API-key-only ids. A missing CLI is not a
+			// failed RPC: the runtime still has its snapshot.
+			const defaults = resolveCodexDefaults();
+			const apiKey = (params?.apiKey || defaults.apiKey || "").trim();
+			const baseUrl = (params?.baseUrl || defaults.baseUrl || "").trim();
+			let models = [];
+			try {
+				models = await listCodexAppServerModels({ apiKey, baseUrl });
+			} catch {
+				models = [];
+			}
 			write({
 				type: "result",
 				id: requestId,
 				ok: true,
-				result: { models: [], modelId: resolveCodexDefaults().model },
+				result: { models, modelId: defaults.model },
 			});
 			return;
 		}

@@ -61,10 +61,11 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
   （本机实测 **216** 个 provider）；拿不到桥时回落到一份静态清单（与 web-cursor 的
   `FALLBACK_CLINE_VENDORS` 同一份：deepseek / minimax / anthropic / openai / openai-compatible）；
 - model 是**带建议的输入框**（datalist），数据来自 `GET /api/accounts/models`：cline / cursor
-  问桥或 SDK；**codex** 先问桥，桥没有目录时回退到一份 **ChatGPT 登录能用的**静态快照
+  问桥或 SDK；**codex** 用账号凭据拉 `codex app-server` 的 `model/list`（当前登录 /
+  API key 实际能跑的那份）。拉不到 CLI 时才回退到一份 **ChatGPT 登录能用的**静态快照
   （`gpt-5.6-sol` / `terra` / `luna` 以及 GPT-6 系列）。`gpt-5-codex` 只适用于 API key，
-  ChatGPT 账号选它会 400。目录不是实时拉 OpenAI；**claude** 同时给带版本号的 id 和家族别名。
-  字段仍可手填；
+  ChatGPT 账号选它会 400，所以活目录成功时不再和快照合并。**claude** 同时给带版本号的
+  id 和家族别名。字段仍可手填；
 - 创建任务时也可以带 `model`（`POST /api/tasks`）：覆盖该账号存着的默认模型，harness /
   vendor / 凭据 / 工作目录仍由账号决定。Codex / Claude 的会话读的是这次选的模型，不是账号上那份。
 - 两个接口都可以带 `accountId`：目录是**用那个账号的凭据**去读的（有些 provider 不给 key 不回答）；
