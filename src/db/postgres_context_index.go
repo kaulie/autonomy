@@ -34,6 +34,26 @@ func (r *postgresContextRepository) ReplaceSections(ctx context.Context, resourc
 	return nil
 }
 
+// DeleteResource removes a resource's sections and its row in one transaction,
+// so a failure never leaves sections indexed under a resource that is gone.
+func (r *postgresContextRepository) DeleteResource(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ctxsvc.Wrap(ctxsvc.ErrIndexFailed, err, "begin delete transaction for %q", id)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM context_sections WHERE resource_id = $1`, id); err != nil {
+		return ctxsvc.Wrap(ctxsvc.ErrIndexFailed, err, "delete sections of %q", id)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM context_resources WHERE id = $1`, id); err != nil {
+		return ctxsvc.Wrap(ctxsvc.ErrIndexFailed, err, "delete resource %q", id)
+	}
+	if err := tx.Commit(); err != nil {
+		return ctxsvc.Wrap(ctxsvc.ErrIndexFailed, err, "commit delete of %q", id)
+	}
+	return nil
+}
+
 func (r *postgresContextRepository) GetSection(ctx context.Context, id string) (*ctxsvc.Section, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT id, resource_id, coalesce(heading,''), coalesce(heading_path,''),
 		content, coalesce(section_order,0), coalesce(start_line,0), coalesce(end_line,0)

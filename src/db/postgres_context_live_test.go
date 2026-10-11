@@ -104,4 +104,18 @@ func TestPostgresContextRepositoryLive(t *testing.T) {
 	if !strings.Contains(updated.Content, "30 seconds") {
 		t.Fatalf("index not rebuilt: %+v", updated)
 	}
+
+	// Delete drops the resource and its sections in one transaction.
+	if err := svc.DeleteResource(ctx, "doc-pg"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := svc.GetResource(ctx, "doc-pg"); ctxsvc.CodeOf(err) != ctxsvc.ErrResourceNotFound {
+		t.Fatalf("resource after delete: %v", err)
+	}
+	if gone, _ := repo.GetSection(ctx, changed[0].SectionID); gone != nil {
+		t.Fatalf("section survived delete: %+v", gone)
+	}
+	if left, _ := svc.Search(ctx, ctxsvc.SearchRequest{ProjectID: "autonomy", Query: "heartbeat"}); len(left) != 0 {
+		t.Fatalf("search after delete = %+v", left)
+	}
 }

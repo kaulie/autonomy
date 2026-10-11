@@ -32,6 +32,9 @@ type Service interface {
 	GetResource(ctx context.Context, resourceID string) (*Resource, error)
 	GetSection(ctx context.Context, sectionID string) (*Section, error)
 	ListResources(ctx context.Context, projectID string) ([]Resource, error)
+	// DeleteResource removes a registered resource and its indexed sections;
+	// an unknown id is RESOURCE_NOT_FOUND.
+	DeleteResource(ctx context.Context, resourceID string) error
 }
 
 // ServiceOption customises a Service (clock and id generation, for tests).
@@ -212,6 +215,17 @@ func (s *service) ListResources(ctx context.Context, projectID string) ([]Resour
 		res = []Resource{}
 	}
 	return res, nil
+}
+
+func (s *service) DeleteResource(ctx context.Context, resourceID string) error {
+	id := strings.TrimSpace(resourceID)
+	if _, err := s.GetResource(ctx, id); err != nil {
+		return err
+	}
+	if err := s.repo.DeleteResource(ctx, id); err != nil {
+		return Wrap(ErrIndexFailed, err, "delete resource %q", id)
+	}
+	return nil
 }
 
 var _ Service = (*service)(nil)

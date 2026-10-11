@@ -101,6 +101,7 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// ...and its operator read path, for the dashboard's Context area.
 		{"GET /api/context/resources", s.handleListContextResources},
 		{"GET /api/context/resources/{resourceID}", s.handleGetContextResource},
+		{"DELETE /api/context/resources/{resourceID}", s.handleDeleteContextResource},
 		{"GET /api/context/search", s.handleSearchContext},
 		{"GET /api/context/sections/{sectionID}", s.handleGetContextSection},
 		// /health is the path the deployment platform probes for every service;
@@ -1074,6 +1075,29 @@ func (s *HTTPServer) handleGetContextResource(w http.ResponseWriter, req *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, resource)
+}
+
+// handleDeleteContextResource removes a registered resource and every section
+// indexed from it. The source itself is untouched.
+//
+// @Summary  Context Service：删除一个 context 资源及其索引段落
+// @Tags     context
+// @Param    resourceID  path  string  true  "资源 id"
+// @Success  204         "已删除"
+// @Failure  404         {object}  contextErrResponse  "RESOURCE_NOT_FOUND：资源未登记"
+// @Failure  500         {object}  contextErrResponse  "INDEX_FAILED：删除失败"
+// @Failure  503         {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
+// @Router   /api/context/resources/{resourceID} [delete]
+func (s *HTTPServer) handleDeleteContextResource(w http.ResponseWriter, req *http.Request) {
+	svc := s.contextService(w)
+	if svc == nil {
+		return
+	}
+	if err := svc.DeleteResource(req.Context(), req.PathValue("resourceID")); err != nil {
+		writeContextServiceErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleSearchContext finds candidate sections of a project's context.
