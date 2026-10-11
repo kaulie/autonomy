@@ -51,6 +51,13 @@ func TestTheVendorAndModelCataloguesComeFromTheHarness(t *testing.T) {
 	if len(cursorModels) == 0 {
 		t.Fatal("cursor models must not be empty (at least the harness default)")
 	}
+	claudeModels, err := runtime.AccountModels(ctx, "claude", "anthropic", "")
+	if err != nil {
+		t.Fatalf("claude models: %v", err)
+	}
+	if !strings.Contains(strings.Join(claudeModels, ","), "sonnet") {
+		t.Fatalf("claude models=%v want the CLI aliases so a create-task picker can offer them", claudeModels)
+	}
 	if _, err := runtime.AccountVendors(ctx, "gemini", ""); err == nil {
 		t.Fatal("an unknown harness must be refused")
 	}
@@ -67,7 +74,7 @@ func TestTheCatalogueEndpointsAnswerOverHTTP(t *testing.T) {
 	}{
 		{"/api/accounts/vendors?harness=cline", "\"deepseek\""},
 		{"/api/accounts/vendors?harness=claude", "\"anthropic\""},
-		{"/api/accounts/models?harness=claude", "\"anthropic\""},
+		{"/api/accounts/models?harness=claude", "\"sonnet\""},
 		{"/api/accounts/models?harness=cline&vendor=deepseek", "\"deepseek-v4-pro\""},
 		{"/api/accounts/vendors?harness=gemini", "error"},
 	} {

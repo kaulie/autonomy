@@ -7,11 +7,10 @@ package autonomy
 // asset — and its two halves are the two questions a person has:
 //
 //   - the form is POST /api/tasks: an instruction, the task it belongs to (blank asks for a
-//     new one), and the pool account that pays for it. That last field is the point of this
-//     page: which harness, vendor, model and credential a task runs on is a pool choice
-//     (src/accounts.go), and choosing it at the moment of asking is how a caller configures
-//     it per task instead of by editing the deployment's environment. "pool default" keeps
-//     the choice where it was — with the pool (src/agent_account.go).
+//     new one), the pool account that pays for it, and an optional model that overrides that
+//     account (the point of the field for Codex / Claude). The account is still the source of
+//     harness, vendor, credential and workspace (src/accounts.go); "pool default" keeps the
+//     account choice with the pool (src/agent_account.go).
 //   - the list is GET /api/tasks, and a row opens GET /api/tasks/{id}: the status, the error
 //     that came with it, and `state` — the newest round, what the completion contract still
 //     misses, and, when the runtime itself cut the run (a restart), where the cut landed
@@ -99,6 +98,11 @@ const tasksPageHTML = `<!DOCTYPE html>
     <div>
       <label for="f-account">account <span class="hint">(the pool entry this task runs on)</span></label>
       <select id="f-account"></select>
+    </div>
+    <div>
+      <label for="f-model">model <span class="hint">(optional: overrides the account — especially for Codex / Claude)</span></label>
+      <input type="text" id="f-model" list="model-options" placeholder="account / harness default">
+      <datalist id="model-options"></datalist>
     </div>
   </div>
   <div class="row actions">
@@ -196,6 +200,21 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
     select.innerHTML = html;
     if (chosen) { select.value = chosen; }
     accountHint();
+    loadModels();
+  }
+  function loadModels() {
+    var list = document.getElementById("model-options");
+    var a = chosenAccount();
+    var harness = a ? a.harness : "";
+    if (!harness) { list.innerHTML = ""; return; }
+    var q = "/api/accounts/models?harness=" + encodeURIComponent(harness);
+    if (a.vendor) { q += "&vendor=" + encodeURIComponent(a.vendor); }
+    if (a.accountId) { q += "&accountId=" + encodeURIComponent(a.accountId); }
+    api("GET", q).then(function (res) {
+      list.innerHTML = ((res && res.models) || []).map(function (m) {
+        return '<option value="' + esc(m) + '"></option>';
+      }).join("");
+    }).catch(function () { list.innerHTML = ""; });
   }
   function chosenAccount() {
     var id = select.value;
@@ -217,8 +236,9 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
       hint.textContent = "the pool resolves it when the task runs: its default account for this runtime's harness";
       return;
     }
+    var picked = document.getElementById("f-model").value.trim();
     hint.textContent = "runs on " + a.harness + "/" + a.vendor + " · model " +
-      (a.model || "the harness default") + " · root " + (a.agentRootWorkspace || "runtime default") +
+      (picked || a.model || "the harness default") + " · root " + (a.agentRootWorkspace || "runtime default") +
       (a.enabled ? "" : " · ⚠ disabled: the runtime refuses it");
   }
 
@@ -330,8 +350,9 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
 
   // ---- the form --------------------------------------------------------------------------
   // What is sent is exactly what the API documents: description, an optional task_id (an
-  // existing one continues that task), and an optional account_id (the pool entry this task
-  // runs on; absent = the pool decides).
+  // existing one continues that task), an optional account_id (the pool entry this task
+  // runs on; absent = the pool decides), and an optional model (overrides that account
+  // — the point of the field for Codex / Claude, whose default otherwise stays on the account).
   document.getElementById("instruction").addEventListener("submit", function (event) {
     event.preventDefault();
     var description = document.getElementById("f-description").value.trim();
@@ -340,6 +361,8 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
     var taskID = document.getElementById("f-task").value.trim();
     if (taskID) { body.task_id = taskID; }
     if (select.value) { body.account_id = select.value; }
+    var model = document.getElementById("f-model").value.trim();
+    if (model) { body.model = model; }
     var button = document.getElementById("send");
     button.disabled = true;
     api("POST", "/api/tasks", body).then(function (res) {
@@ -357,9 +380,12 @@ if (new URLSearchParams(location.search).has("embed")) document.body.classList.a
     document.getElementById("f-description").value = "";
     document.getElementById("f-task").value = "";
     select.value = "";
+    document.getElementById("f-model").value = "";
     accountHint();
+    loadModels();
   });
-  select.addEventListener("change", accountHint);
+  select.addEventListener("change", function () { accountHint(); loadModels(); });
+  document.getElementById("f-model").addEventListener("input", accountHint);
 
   rows.addEventListener("click", function (event) {
     var open = event.target.closest("button[data-open]");

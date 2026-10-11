@@ -60,8 +60,11 @@ verify/删除。它写 key 一次、永不读回，与 API 同一条规矩。age
 - 页面上的 vendor 是**下拉**，数据来自 `GET /api/accounts/vendors`：cline 会去问桥，桥问 Cline SDK
   （本机实测 **216** 个 provider）；拿不到桥时回落到一份静态清单（与 web-cursor 的
   `FALLBACK_CLINE_VENDORS` 同一份：deepseek / minimax / anthropic / openai / openai-compatible）；
-- model 是**带建议的输入框**（datalist），数据来自 `GET /api/accounts/models`：有些 harness 能列出
-  自己的模型，有些（codex/cursor）由 CLI/SDK 自己解析 —— 那种情况下列表为空、字段仍可手填；
+- model 是**带建议的输入框**（datalist），数据来自 `GET /api/accounts/models`：cline / cursor
+  问桥或 SDK；**codex / claude** 给出 CLI 能认的别名（`gpt-5-codex`、`sonnet` / `opus` / `haiku`
+  等），codex 还会并上桥自己列出的 id。目录是建议，字段仍可手填；
+- 创建任务时也可以带 `model`（`POST /api/tasks`）：覆盖该账号存着的默认模型，harness /
+  vendor / 凭据 / 工作目录仍由账号决定。Codex / Claude 的会话读的是这次选的模型，不是账号上那份。
 - 两个接口都可以带 `accountId`：目录是**用那个账号的凭据**去读的（有些 provider 不给 key 不回答）；
 - 这与 web-cursor 完全同构：它的 `GET /api/providers` + `GET /api/models` 就是这两个问题；
 - 目录只是**建议**：池子仍然接受手填的 vendor（provider 的清单会变，不该由我们替它把关）。
@@ -100,7 +103,8 @@ assignAgentRuntime(agent, policy) → agentRuntimePlan{ Account, Backend, Provid
 ④ 池子里没有 → 拒绝：「no enabled <harness> account in the pool: add one at /accounts」
 
 harness = 账号的 harness（有账号时）> 调用方要的 > 部署默认
-model   = 账号的 model        > 调用方要的 > 该 harness 自己的默认
+model   = 任务级（`POST /api/tasks` 的 `model`，记在 agent 行上且与账号默认不同）
+        > 账号的 model > 调用方要的 > 该 harness 自己的默认
 ```
 
 **输出**只由两个 applier 落到 agent 上：`Agent.applyAgentRuntime`（account → id/label/凭据/root，
@@ -126,9 +130,10 @@ backend/provider/model）与它的 `adoptAccount`；attach（`AttachCursor`/`Att
   它在**受理时**校验：id 不存在或账号被停用 = 这条指令被拒（而不是任务跑到第一个 cycle 才死）。
 - **三种指定方式**（同一个字段，三个入口）：
   1. **页面**：`http://127.0.0.1:4300/tasks`（壳里的 Tasks 模块）—— 发指令时从**账号下拉**里选，
-     第一项 `pool default` 就是「不指定，交给池子」；页面还会先把「这次跑在哪个
-     harness/vendor/model/工作目录上」写在按钮旁边（见 [ui.md](ui.md)）；
-  2. **API**：`curl -X POST …/api/tasks -d '{"description":"…","account_id":"acct-…"}'`；
+     第一项 `pool default` 就是「不指定，交给池子」；**model** 可覆盖账号默认（Codex / Claude
+     尤其有用）。页面还会先把「这次跑在哪个 harness/vendor/model/工作目录上」写在按钮旁边
+     （见 [ui.md](ui.md)）；
+  2. **API**：`curl -X POST …/api/tasks -d '{"description":"…","account_id":"acct-…","model":"opus"}'`；
   3. **CLI**：`autonomy -account acct-… -description "…"`（env `AUTONOMY_ACCOUNT_ID`）；
      与 `-broadcast` 同用会被拒 —— 广播没有「一条任务」可以指向某个账号。
 - **续做不会换账号**：账号记在 agent 行上（`account_id`），所以下一条指令、以及重启后的自动续做
