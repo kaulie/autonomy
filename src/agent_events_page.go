@@ -2,8 +2,9 @@ package autonomy
 
 // agentEventsHTML is the live event stream of one agent, served at GET /agents/{agentID}/events and
 // embedded by the UI shell (src/ui_home_page.go). Each event is its own terminal-style section
-// (header + body), oldest at the top. The poll carries the cursor the API hands back
-// (next_poll_after_seq), so an event is never rendered twice.
+// (header + body), oldest at the top. A section grows to its full content; the page scrolls, not
+// each section. The poll carries the cursor the API hands back (next_poll_after_seq), so an event
+// is never rendered twice.
 //
 // The page is self-contained like every other page here, and it takes the two things it needs from
 // its own URL: the task whose conversation is being tailed (?task=) and how often to poll
@@ -22,10 +23,10 @@ const agentEventsHTML = `<!DOCTYPE html>
   .sub { color: #667085; margin-bottom: 10px; }
   .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: #475467; }
   button { font: inherit; padding: 3px 9px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; }
-  #events { height: calc(100vh - 140px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
+  #events { display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
   .event-section { border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #0b1020; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
   .event-header { padding: 6px 10px; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #161b22; color: #8b949e; border-bottom: 1px solid #30363d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .event-body { padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #d7e0ff; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; }
+  .event-body { padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #d7e0ff; white-space: pre-wrap; word-break: break-word; }
   .role-user .event-body { color: #79c0ff; }
   .role-assistant .event-body { color: #e6edf3; }
   .role-tool .event-body { color: #d2a8ff; }
@@ -62,8 +63,13 @@ function trimSections() {
   while (eventsEl.children.length > MAX_SECTIONS) eventsEl.removeChild(eventsEl.firstChild);
 }
 
+function scroller() {
+  return document.scrollingElement || document.documentElement;
+}
+
 function atBottom() {
-  return eventsEl.scrollHeight - eventsEl.scrollTop - eventsEl.clientHeight < 40;
+  const el = scroller();
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 }
 
 function stamp(iso) {
@@ -120,7 +126,7 @@ async function poll() {
     after = data.next_poll_after_seq || after;
     document.getElementById("state").textContent = "agent " + AGENT_ID + " · task " + TASK_ID + " · " + after + " messages" +
       (EVERY ? " · every " + EVERY + "s" : " · auto-refresh off");
-    if (stick && tailing) eventsEl.scrollTop = eventsEl.scrollHeight;
+    if (stick && tailing) { const el = scroller(); el.scrollTop = el.scrollHeight; }
   } catch (err) {
     document.getElementById("state").textContent = "poll failed: " + err.message;
   }
