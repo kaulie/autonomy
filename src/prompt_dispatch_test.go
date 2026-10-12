@@ -108,7 +108,7 @@ func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
 		"functional-acceptance capability",
 		"Project knowledge is discovered only through `context.list`",
 		"Planner and worker share that set",
-		"Do not use host-wide filesystem grep",
+		"Filesystem search defaults to this agent's own workspace only",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the planner policy no longer says %q", want)
@@ -134,6 +134,7 @@ func TestTheWorkerPromptIsStillTheWorkersOwn(t *testing.T) {
 		"## Project Orientation",
 		"prefer `AGENT.md` at the project root",
 		"You share the same context capabilities as the planner",
+		"Filesystem search defaults to this agent's own workspace only",
 		"Do not invent a second discovery path",
 	} {
 		if !strings.Contains(policy, want) {

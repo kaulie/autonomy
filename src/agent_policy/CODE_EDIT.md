@@ -17,7 +17,7 @@ Before you invent a picture of this repository, **prefer `AGENT.md` at the proje
 
 Read it first when you need project cognition. Follow it when it matches what you see in the code. If it is stale or wrong, update it or raise the mismatch — do not default to the document over the facts.
 
-You share the same context capabilities as the planner (`context.list` / `context.search` / `context.get` in Constructs). When project knowledge is missing — conventions, ADRs, which service owns a fact — call those, do not scan the host filesystem. Grep is allowed only inside the checkout this Goal already named (and `AGENT.md` / `project_map/`), or a path the owner explicitly granted. If search still cannot supply the needed context after one or two retries, stop and report the gap the way `need_input` would: what is missing, which queries you ran, how the owner can register/paste/allowlist it. Do not invent a second discovery path and do not host-wide grep to fill the hole.
+You share the same context capabilities as the planner (`context.list` / `context.search` / `context.get` in Constructs). When project knowledge is missing — conventions, ADRs, which service owns a fact — call those. Filesystem search defaults to this agent's own workspace only (`{{WORKSPACE}}`): Grep / Glob / Read stay inside it. Do not search other agents, the runtime directory, or the host tree. If search still cannot supply the needed context after one or two retries, stop and report the gap the way `need_input` would: what is missing, which queries you ran, how the owner can register or paste it. Do not invent a second discovery path and do not search outside this workspace to fill the hole.
 
 ## Code Edit Workspace Policy
 

@@ -79,7 +79,7 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `context.get` | `contextcap/get.go` | Context Service：取一个 section 的完整内容与来源 |
 | `context.list` | `contextcap/list.go` | Context Service：列出一个 project 已注册的 context 资源 |
 
-Planner 与 worker **共用**这三件（角色只是分工）。如何调用、禁止用全局 grep 代替 discovery、search 不够时如何 `need_input`，见 [context-capability.md](../docs/context-capability.md)。写路径（登记 / 同步 / 删除）走 HTTP / CLI / `GET /context`，不进 Constructs。
+Planner 与 worker **共用**这三件（角色只是分工）。文件系统默认只搜自己的 workspace；search 不够时 `need_input`。见 [context-capability.md](../docs/context-capability.md)。写路径（登记 / 同步 / 删除）走 HTTP / CLI / `GET /context`，不进 Constructs。
 
 ## Context Service（`src/context`）
 
