@@ -92,7 +92,7 @@ const contextPageHTML = `<!DOCTYPE html>
         <label class="check"><input type="radio" name="f-shape" value="directory"> recursive directory</label>
       </div>
       <div class="hint only-file">One Markdown file on the runtime host.</div>
-      <div class="hint only-dir">Every <code>.md</code> / <code>.markdown</code> under the directory, recursively. Skips <code>.git</code>, hidden dirs, <code>node_modules</code>.</div>
+      <div class="hint only-dir">Recursively. Skips <code>.git</code>, hidden dirs, <code>node_modules</code>. Suffixes empty = all document types (<code>.md</code>, <code>.markdown</code>).</div>
     </div>
     <div class="only-file"><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
     <div class="only-file">
@@ -114,6 +114,11 @@ const contextPageHTML = `<!DOCTYPE html>
     <div>
       <label for="f-location"><span class="only-file">file path</span><span class="only-dir">directory path</span></label>
       <input type="text" id="f-location" placeholder="/path/to/doc.md">
+    </div>
+    <div class="only-dir">
+      <label for="f-suffixes">suffixes <span class="hint">(optional; empty = all)</span></label>
+      <input type="text" id="f-suffixes" placeholder="md, markdown">
+      <div class="hint">Comma-separated extensions to keep. Leave empty to search every available document.</div>
     </div>
     <div class="only-file"><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
     <div class="only-file"><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
@@ -268,6 +273,9 @@ $("register").addEventListener("submit", async (event) => {
     body.type = $("f-type").value;
     body.uri = $("f-uri").value.trim();
     body.source.path = $("f-path").value.trim();
+  } else {
+    const suffixes = $("f-suffixes").value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    if (suffixes.length) body.suffixes = suffixes;
   }
   try {
     const created = await api("POST", "/api/context/resources", body);
