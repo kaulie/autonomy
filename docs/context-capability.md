@@ -141,7 +141,7 @@ Agent **不要**计划 `context.register` / `context.sync` / `context.delete`：
 
 1. **只从 Constructs 调用。** 调用 = capability + 它声明过的 input。不要发明 `context.read_all`、`docs.grep`、`rag.query`。
 2. **Planner 和 worker 用同一套机制。** 角色只是分工：planner 把读到的约定写进后续 step；worker 在实现中途同样可以 `list` / `search` / `get`。禁止把 discovery 写成「只有 planner 能做」。
-3. **禁止漫无目的 grep 来凑 context。** 文件系统默认只搜自己的 workspace（`{account_root}/{agent-name}/`）。项目知识先走 `context.*`。**例外：** `context.search` → `context.get` 拿到的正文若**明确指示**还要去某个目录（路径写在那一段里），可以按这个指示去搜那个目录——这是有出处的下一步，不是发现手段。没有这样的指示，不得为了「再找一点 context」扫其它 agent、runtime 或宿主工程树。
+3. **限制的是「用 grep 去感知 context」，不是限制 grep 本身。** context 不清楚时，不得靠漫无目的扫目录来自己摸世界——那是在浪费时间，应走 `context.list` / `search` / `get`；一次正经零命中就 `need_input`。`context.get` 的正文若点名了另一个目录，按指示去搜，这是有出处的下一步。任务本身需要的 grep（全仓库找引用、改符号、盘点调用点等，包括所谓「全局 grep」）**不限制**。改文件仍只在自己的 workspace，那是 workspace 规则，不是这条 discovery 规则。
 4. **输入必须有来源。** planner 的 plan step 只有三种：字面量、`{"source":"step:<name>.output.<key>"}`、`{"source":"world_model:asset.…"}`。worker 从同一份 `CONTEXT_ENTITY` 抄 `project_id`。Runtime 不会猜。
 5. **一次正经的零命中就问人。** `INVALID_QUERY`（空 query、坏 metadata）是调用方写错了，改请求再搜一次，不要把修 query 推给人。`list` 没有 document、或一次用任务术语发出的 `search` 返回空结果：索引里没有这份知识，立刻 `need_input`。不要仪式性地换词再搜两轮——那只会推迟问人，也掩盖「资源根本没登记」。
 6. **够用就停。** 已经能做下一步该做的事（planner 能写 `code_edit.instruction`，worker 能改对文件）就停。不要把项目文档读完。
@@ -167,8 +167,8 @@ CONTEXT_ENTITY.project.id
   工作上下文够了？
      ├─ INVALID_QUERY → 改请求再 search 一次
      ├─ list 无 document，或一次正经 search 零命中 → need_input
-     ├─ get 到的正文点名了另一个目录 → 只搜它点名的那个目录
-     ├─ 缺口只是本 workspace 里已有代码的实现细节 → 只在自己的 workspace 里搜
+     ├─ get 到的正文点名了另一个目录 → 按指示搜那个目录
+     ├─ 任务本身要 grep（找引用、改符号等）→ 按任务需要搜，不因本条政策收窄
      └─ 是 → 停止 discovery，做本职（planner 派发下一步 / worker 改代码）
 ```
 
@@ -206,7 +206,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 | `INDEX_FAILED` / not configured | 基础设施不可用（常见：sqlite）。报告事实；不要假装搜过、也不要改去打运维 HTTP |
 | `SOURCE_UNAVAILABLE` / `PARSE_FAILED` | 只出现在运维 sync，不会从这三件 capability 冒出来 |
 
-零命中（成功但 `results` 为空）不是基础设施错误，而是「这份知识不在 Context Space 里」。进入 §4.5 问人登记或粘贴。不要再换词搜一轮，也不要开始漫无目的的文件系统 grep。
+零命中（成功但 `results` 为空）不是基础设施错误，而是「这份知识不在 Context Space 里」。进入 §4.5 问人登记或粘贴。不要再换词搜一轮，也不要用 grep 代替这次失败的 discovery。
 
 ### 4.5 `need_input`：search 仍不够时请人补，然后重试
 
@@ -216,7 +216,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 
 - `resource`：索引里没有这份知识。请人在运维面登记并 sync 一篇文档，或指出应登记的路径。
 - `information`：请人把原文贴进下一条指令。
-- 不要用 `need_input` 申请「放开全盘 grep」。缺的知识走 Context Service 或人贴进来。只有已经 `get` 到的正文点名了目录，才按那个目录去搜。
+- 不要用 `need_input` 申请「给我 grep 能力」或「让我随便扫盘来找 context」。缺的项目知识走 Context Service 或人贴进来。任务本身需要的 grep 不需要申请。
 
 `need.description` 必须写清：缺什么、已经试过的 list/query 与结果、人可以怎么补、补完后重试哪一步。缺任何一项，下一轮还会猜。
 
@@ -229,13 +229,13 @@ Worker 不走 Decision Output Schema 时：把同样四件事写进本次委托�
 - Orientation **不改变 World**。`expected_effect` 可以为空；不要因为 World 仍是 `assets: []` 就认为 list/search 失败。
 - 软件开发任务的完成锚点仍是 `code_edit.pr_url`（kind `pull_request`）+ `pr.check`。`context.get` 的 `content` **没有 kind**，不能当 Completion Contract 的 evidence 槽。
 - 读到的正文用来**写好**后续工作（planner 写 `code_edit.instruction`，worker 按约定改文件），而不是把整段 content 再塞进 World。
-- 文件系统阅读默认只在**自己的 workspace**。跨仓库 / 服务 / ADR 的项目知识走 Context Service。若某段已检索的 context **写出了**另一个目录，按指示去搜那里；没有指示就停，不要为凑齐 context 漫无目的 grep。
+- 跨仓库 / 服务 / ADR 的项目知识走 Context Service，不要用 grep 在 context 不清时自己摸。任务要做的代码搜索（含全局 grep）照做。已检索的 context 点名了目录，按指示去。
 
 ### 4.7 Worker 怎么真正调到这三件
 
 Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / `get`）和 `CONTEXT_ENTITY`。政策要求它按 Constructs 调用，不要另做一套。
 
-今天 planner 经 Decision Cycle 的 `Execute` 跑这些能力；worker 的 harness 默认是编辑器工具。要让「都可以用」在运行时成立，worker 会话必须能 **Run 同一份 `contextcap`**（同一 Context Service、同一个 `project_id`），而不是改去打运维 HTTP，也不是用 `rg` 冒充 search。接线可以后做；在接到之前，worker **仍然禁止**漫无目的搜 workspace 以外——没有 context 正文点名的目录，报缺口，升到 `need_input`。
+今天 planner 经 Decision Cycle 的 `Execute` 跑这些能力；worker 的 harness 默认是编辑器工具。要让「都可以用」在运行时成立，worker 会话必须能 **Run 同一份 `contextcap`**（同一 Context Service、同一个 `project_id`），而不是改去打运维 HTTP，也不是用 `rg` 冒充 search。接线可以后做；在接到之前，worker **仍然禁止**用 grep 代替 `context.*` 去感知项目知识——报缺口，升到 `need_input`。任务本身要的 grep 不受影响。
 
 ### 4.8 示例：两轮 orientation 再执行
 
@@ -341,5 +341,5 @@ Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / 
 | 空 World 要不要 blocked？ | 不要；先 orientation |
 | 登记文档是不是 Agent 的事？ | 不是；HTTP / CLI / `GET /context` |
 | Worker 会不会调这三件？ | 会；和 planner 同一套，只是分工不同 |
-| 文件系统默认搜哪里？ | 自己的 workspace；`context.get` 点名了别的目录则只搜那个；禁止漫无目的 grep |
+| grep 限制的是什么？ | 禁止在 context 不清时用 grep 去感知世界；不限制任务本身需要的 grep |
 | 会话裁剪、digest 算不算？ | 不算；那是控制面的窗口管理 |

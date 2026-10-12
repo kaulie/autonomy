@@ -35,7 +35,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 ## 代码位置与提示词
 
 - 实现：`src/capability/`（`asset_change.go`、`watch.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`software_development/pr_check.go`、`deployment/monitor.go`、`contextcap/{search,get,list}.go`），注册在 `capability.RegisterDefaults`（内置十个，见 `capability_test.go`）。
-- `context.search` / `context.get` / `context.list`：Context Service 的只读发现面；planner 和 worker 共用。文件系统默认只搜自己的 workspace；已检索的 context 点名了目录则可以按指示去搜，禁止漫无目的 grep。写路径不是 capability（见 [context-capability.md](context-capability.md)）。
+- `context.search` / `context.get` / `context.list`：Context Service 的只读发现面；planner 和 worker 共用。禁止用 grep 在 context 不清时感知世界；不限制任务本身需要的 grep。写路径不是 capability（见 [context-capability.md](context-capability.md)）。
 - `deployment.monitor`：跟随一次部署、发现并解释问题（见 [deployment-monitor.md](deployment-monitor.md)）。
 - `watch`：观察**一类**世界对象（kind + target：pull request、deployment、以后别的资产），直到 `until`；经 [watcher](watcher.md) 后台观察、[event-gateway](event-gateway.md) 唤醒 agent。PR 快照读 [event-center](event-center.md)，不读 GitHub。不要为每类资产再写一个 `*.watch`。不 merge / 不部署。验真仍是 `pr.check` / `deployment.monitor`。
 - **提示词不进代码**：委托给 worker 的提示词放在仓库文件里，运行时按次读取 —— 与 agent policy 同一套路（见 `src/prompt.go`）：
