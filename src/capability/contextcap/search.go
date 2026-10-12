@@ -27,7 +27,7 @@ func (Search) Description() string {
 func (Search) Inputs() []spec.Field {
 	return []spec.Field{
 		{Name: "project_id", Aliases: []string{"project"}, Required: true, Description: "the project whose context to search"},
-		{Name: "query", Aliases: []string{"q"}, Required: true, Description: "the search terms (lexical full-text; at least one term)"},
+		{Name: "query", Aliases: []string{"q"}, Required: true, Description: "the search terms. A filename (AGENT.md, home_brain.py) is a path lookup: hits whose title is not that file are not that file"},
 		{Name: "limit", Description: "maximum candidates to return (default 10, max 50)"},
 		{Name: "resource_types", Aliases: []string{"types"}, Description: "comma-separated filter: document, repository, service"},
 		{Name: "metadata", Description: "JSON object of metadata key/values every candidate resource must match"},

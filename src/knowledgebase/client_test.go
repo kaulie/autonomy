@@ -42,6 +42,7 @@ func TestListSearchGetMapProjectOntoEntity(t *testing.T) {
 					"provider": "local",
 					"source":   map[string]string{"location": "/srv/docs/runtime.md"},
 					"revision": "rev-1",
+					"files":    []string{"runtime.md", "AGENT.md"},
 				}},
 			})
 		case r.URL.Path == "/api/contexts/project/project-749a0238/search":
@@ -90,6 +91,9 @@ func TestListSearchGetMapProjectOntoEntity(t *testing.T) {
 	if len(listed) != 1 || listed[0].ID != "kn-1" || listed[0].ProjectID != "project-749a0238" ||
 		listed[0].Type != ctxsvc.ResourceDocument || listed[0].Source.Kind != "filesystem" {
 		t.Fatalf("list = %+v", listed)
+	}
+	if len(listed[0].Files) != 2 || listed[0].Files[1] != "AGENT.md" {
+		t.Fatalf("list files = %v", listed[0].Files)
 	}
 
 	hits, err := c.Search(context.Background(), ctxsvc.SearchRequest{ProjectID: "project-749a0238", Query: "heartbeat", Limit: 5})

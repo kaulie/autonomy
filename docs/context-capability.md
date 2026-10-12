@@ -48,7 +48,7 @@ V1 原则（来自设计 spec）：
 | | |
 |---|---|
 | 输入 | `project_id`（别名 `project`，必填） |
-| 输出 | `resources`：JSON 数组 `{id, name, type, uri, revision, source_type}`；另有 `count`（调用元信息，下游不要当产出绑定） |
+| 输出 | `resources`：JSON 数组 `{id, name, type, uri, revision, source_type, path, files}`；`files` 是已索引文档路径（看这里有没有 `AGENT.md`，不要靠搜 heading 里的词 "agent"）；另有 `count`（调用元信息，下游不要当产出绑定） |
 | 错误 | `PROJECT_NOT_FOUND`（没给 project_id）/ `INDEX_FAILED` |
 
 `type` 为 `document` / `repository` / `service`。V1 只有 `document` 会切出 section、能被 search/get 读到正文；另外两类只出现在清单里。
@@ -63,7 +63,7 @@ V1 原则（来自设计 spec）：
 | 输出 | `results`：JSON 数组 `{resource_id, section_id, title, heading, snippet, score, revision}` |
 | 错误 | `PROJECT_NOT_FOUND` / `INVALID_QUERY`（空 query、limit 不是数字、metadata 不是 JSON 对象）/ `INDEX_FAILED` |
 
-检索策略是 knowledge-base 的 **词法全文**（按 CONTEXT entity 绑定范围）。没有 embedding、没有 LLM 摘要。工程文档里的专有名词（Runtime、CompletionContract、GoalType）靠精确词命中。
+检索策略是 knowledge-base 的 **词法全文**（按 CONTEXT entity 绑定范围）。没有 embedding、没有 LLM 摘要。工程文档里的专有名词（Runtime、CompletionContract、GoalType）靠精确词命中。**文件名是路径查找**：`AGENT.md` / `home_brain.py` 整段匹配 `files` 里的路径，不会拆成 `agent` + `md` 去撞 heading。命中的 `title` 不是那个文件，就当 miss。
 
 Search **默认不返回整篇**。Agent 必须再走 `context.get`。
 

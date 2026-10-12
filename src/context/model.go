@@ -53,6 +53,9 @@ type Resource struct {
 	Name      string            `json:"name"`
 	URI       string            `json:"uri,omitempty"`
 	Source    ResourceSource    `json:"source"`
+	// Files is the indexed document paths on this resource (from knowledge-base
+	// context.list). Empty when the source has not been synced.
+	Files []string `json:"files,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	// Revision is a git commit SHA for repository-backed sources, else empty.
 	Revision  string    `json:"revision,omitempty"`

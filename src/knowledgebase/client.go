@@ -189,6 +189,7 @@ type kbKnowledge struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Revision  string            `json:"revision,omitempty"`
 	Checksum  string            `json:"checksum,omitempty"`
+	Files     []string          `json:"files,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 }
@@ -234,6 +235,7 @@ func knowledgeToResource(k kbKnowledge, projectID string) ctxsvc.Resource {
 		Metadata:  k.Metadata,
 		Revision:  k.Revision,
 		Checksum:  k.Checksum,
+		Files:     k.Files,
 		CreatedAt: k.CreatedAt,
 		UpdatedAt: k.UpdatedAt,
 	}
