@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -52,8 +53,9 @@ func TestRunPausesOnAPlanUntilApproved(t *testing.T) {
 	// it starts as running, like any instruction).
 	agent.planApproved = true
 	task.Status = TaskStatusRunning
-	if err := auto.runLoop(context.Background(), agent, task, "do the thing"); err != nil {
-		t.Fatalf("second runLoop: %v", err)
+	err = auto.runLoop(context.Background(), agent, task, "do the thing")
+	if err == nil || !strings.Contains(err.Error(), "cycle budget exhausted") {
+		t.Fatalf("second runLoop err=%v, want cycle budget exhausted after the approved plan ran", err)
 	}
 	if agent.pendingPlan != nil {
 		t.Fatal("the pending plan was not cleared")
@@ -64,7 +66,10 @@ func TestRunPausesOnAPlanUntilApproved(t *testing.T) {
 	if script.calls != 1 {
 		t.Fatalf("reasoner calls=%d want 1: an approved plan is executed, not planned again", script.calls)
 	}
-	if task.Status != TaskStatusCompleted {
-		t.Fatalf("status=%q want %q after the approved plan ran", task.Status, TaskStatusCompleted)
+	if task.Status != TaskStatusError {
+		t.Fatalf("status=%q want %q: the approved plan ran, then the budget was gone", task.Status, TaskStatusError)
+	}
+	if !strings.Contains(task.Error, "cycle budget exhausted") {
+		t.Fatalf("tasks.error=%q, want the budget, not a completed goal", task.Error)
 	}
 }
