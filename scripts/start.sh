@@ -89,7 +89,7 @@ AUTONOMY_REASONER=llm
 # （不再回落到环境变量），所以顺序是：先加账号，再部署/重启。
 # AUTONOMY_LLM_BACKEND=cline
 # AUTONOMY_CLINE_BRIDGE_SCRIPT=/absolute/path/to/some/checkout/src/clinesdk/bridge/bridge.mjs
-# AUTONOMY_MAX_STEPS=4
+# AUTONOMY_MAX_STEPS=10
 # provider 原始事件流（llm_events，一行一个逐 token 事件）默认不落库：它是一张叶子表，
 # 只服务回放，run header（reason_turns）与对话（llm_messages）照常记录。需要回放/分析时再打开：
 # AUTONOMY_LLM_EVENTS=1
