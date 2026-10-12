@@ -5,9 +5,9 @@ package autonomy
 // Same shape as the accounts page: one self-contained file — no build step, no bundler, no
 // external asset — whose whole job is to call the Context Service's operator API
 // (src/context_write.go and its handlers in http_server.go) and render the answer: register a
-// resource, sync it into the index, list a project's resources, search their sections, read one
-// section, delete a resource. It is the UI for what `autonomy context register|sync` does on the
-// command line. Agents still only read, through context.search / get / list.
+// resource (one file, or every Markdown file under a directory), sync it into the index, list a
+// project's resources, search their sections, read one section, delete a resource. Agents still
+// only read, through context.search / get / list.
 //
 // The Context Service needs the postgres store engine; without it every call answers 503
 // INDEX_FAILED, and the page says that instead of showing an empty table as if it were the truth.
@@ -44,6 +44,10 @@ const contextPageHTML = `<!DOCTYPE html>
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .row input[type=text] { flex: 1; width: auto; min-width: 200px; }
   .check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: #344054; }
+  .shape { display: flex; gap: 10px; flex-wrap: wrap; }
+  .shape label.check { padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 8px; background: #f9fafb; cursor: pointer; }
+  .shape input { width: auto; margin: 0; }
+  form.dir .only-file, form.file .only-dir { display: none; }
   .msg { margin: 10px 0; padding: 8px 10px; border-radius: 6px; display: none; white-space: pre-wrap; }
   .msg.ok { display: block; background: #e6f4ea; color: #1a7f37; }
   .msg.err { display: block; background: #fde8e8; color: #b42318; }
@@ -57,9 +61,9 @@ const contextPageHTML = `<!DOCTYPE html>
 <body>
 <h1>Context</h1>
 <div class="sub">
-  A project's context space: register a resource (a Markdown document, a repository, a service),
-  sync it into the full-text index, search its sections and read one — the UI for
-  <code>autonomy context register|sync</code>. Needs the postgres store engine.
+  A project's context space: register a single Markdown file or a directory of them
+  (recursive), sync into the full-text index, search sections and read one.
+  Needs the postgres store engine.
 </div>
 
 <div id="msg" class="msg"></div>
@@ -78,11 +82,20 @@ const contextPageHTML = `<!DOCTYPE html>
   <tbody id="rows"><tr><td colspan="6" class="hint">loading…</td></tr></tbody>
 </table>
 
-<h2>Register a resource</h2>
-<form id="register" autocomplete="off">
+<h2>Register</h2>
+<form id="register" class="file" autocomplete="off">
   <div class="grid">
-    <div><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
     <div>
+      <div class="formtitle">shape</div>
+      <div class="shape" id="f-shape">
+        <label class="check"><input type="radio" name="f-shape" value="file" checked> single file</label>
+        <label class="check"><input type="radio" name="f-shape" value="directory"> recursive directory</label>
+      </div>
+      <div class="hint only-file">One Markdown file on the runtime host.</div>
+      <div class="hint only-dir">Every <code>.md</code> / <code>.markdown</code> under the directory, recursively. Skips <code>.git</code>, hidden dirs, <code>node_modules</code>.</div>
+    </div>
+    <div class="only-file"><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
+    <div class="only-file">
       <label for="f-type">type</label>
       <select id="f-type">
         <option value="document">document</option>
@@ -98,9 +111,12 @@ const contextPageHTML = `<!DOCTYPE html>
         <option value="external">external</option>
       </select>
     </div>
-    <div><label for="f-location">location</label><input type="text" id="f-location" placeholder="/path/to/doc.md or a remote URL"></div>
-    <div><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
-    <div><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
+    <div>
+      <label for="f-location"><span class="only-file">file path</span><span class="only-dir">directory path</span></label>
+      <input type="text" id="f-location" placeholder="/path/to/doc.md">
+    </div>
+    <div class="only-file"><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
+    <div class="only-file"><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
     <div><label class="check"><input type="checkbox" id="f-sync" checked> sync after register</label></div>
   </div>
   <div class="actions"><button type="submit" class="primary">Register</button></div>
@@ -155,6 +171,22 @@ function esc(value) {
 }
 
 function project() { return $("f-project").value.trim(); }
+
+function shape() {
+  const picked = document.querySelector('input[name="f-shape"]:checked');
+  return picked ? picked.value : "file";
+}
+
+function applyShape() {
+  const form = $("register");
+  const kind = shape();
+  form.classList.toggle("file", kind === "file");
+  form.classList.toggle("dir", kind === "directory");
+  $("f-location").placeholder = kind === "directory" ? "/path/to/docs" : "/path/to/doc.md";
+}
+
+document.querySelectorAll('input[name="f-shape"]').forEach((el) => el.addEventListener("change", applyShape));
+applyShape();
 
 function sourceText(s) {
   if (!s) return "";
@@ -223,24 +255,36 @@ $("rows").addEventListener("click", async (event) => {
 $("register").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!project()) { say("project_id is required", "err"); return; }
+  const kind = shape();
+  const location = $("f-location").value.trim();
+  if (!location) { say(kind === "directory" ? "directory path is required" : "file path is required", "err"); return; }
   const body = {
     project_id: project(),
-    name: $("f-name").value.trim(),
-    type: $("f-type").value,
-    uri: $("f-uri").value.trim(),
-    source: {
-      type: $("f-source-type").value,
-      location: $("f-location").value.trim(),
-      path: $("f-path").value.trim(),
-    },
+    shape: kind,
+    source: { type: $("f-source-type").value, location: location },
   };
+  if (kind === "file") {
+    body.name = $("f-name").value.trim();
+    body.type = $("f-type").value;
+    body.uri = $("f-uri").value.trim();
+    body.source.path = $("f-path").value.trim();
+  }
   try {
     const created = await api("POST", "/api/context/resources", body);
-    let text = "registered " + created.id;
+    const items = kind === "directory" ? ((created && created.resources) || []) : (created && created.id ? [created] : []);
+    if (!items.length) { say("registered nothing", "err"); return; }
+    let text = kind === "directory"
+      ? "registered " + items.length + " files under " + location
+      : "registered " + created.id;
     if ($("f-sync").checked) {
+      let sections = 0, synced = 0;
       try {
-        const out = await syncResource(created.id);
-        text += ", synced: " + (out.status || "ok") + (out.sections != null ? " (" + out.sections + " sections)" : "");
+        for (const item of items) {
+          const out = await syncResource(item.id);
+          synced += 1;
+          if (out.sections) sections += Number(out.sections) || 0;
+        }
+        text += ", synced " + synced + (sections ? " (" + sections + " sections)" : "");
       } catch (e) {
         await load();
         say(text + ", but sync failed: " + e.message, "err");
@@ -249,6 +293,7 @@ $("register").addEventListener("submit", async (event) => {
     }
     say(text);
     $("register").reset();
+    applyShape();
     await load();
   } catch (e) {
     say(e.message, "err");

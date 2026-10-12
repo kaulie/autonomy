@@ -1,8 +1,11 @@
 package autonomy
 
 import (
+	"context"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -16,6 +19,14 @@ import (
 // CLI is `autonomy context register|sync` (cmd/autonomy). Agents only read,
 // through context.search / get / list — this path is not a capability.
 
+const (
+	// contextShapeFile registers one source file.
+	contextShapeFile = "file"
+	// contextShapeDirectory walks a directory recursively and registers each
+	// Markdown file as its own document.
+	contextShapeDirectory = "directory"
+)
+
 // RegisterContextResourceRequest is the body of POST /api/context/resources.
 type RegisterContextResourceRequest struct {
 	// ID is optional: empty mints ctx-<hex>; an existing id is re-registered.
@@ -26,6 +37,8 @@ type RegisterContextResourceRequest struct {
 	URI       string                `json:"uri,omitempty"`
 	Metadata  map[string]string     `json:"metadata,omitempty"`
 	Source    ctxsvc.ResourceSource `json:"source"`
+	// Shape is the operator form: file (default) or directory (recursive).
+	Shape string `json:"shape,omitempty"`
 }
 
 // Resource is the request as the Context Service stores it.
@@ -39,6 +52,80 @@ func (r RegisterContextResourceRequest) Resource() ctxsvc.Resource {
 		Metadata:  r.Metadata,
 		Source:    r.Source,
 	}
+}
+
+func (r RegisterContextResourceRequest) shape() string {
+	switch s := strings.ToLower(strings.TrimSpace(r.Shape)); s {
+	case "", contextShapeFile:
+		return contextShapeFile
+	case contextShapeDirectory:
+		return contextShapeDirectory
+	default:
+		return s
+	}
+}
+
+// contextDirectoryRegisterResponse is POST /api/context/resources with shape=directory.
+type contextDirectoryRegisterResponse struct {
+	Shape     string            `json:"shape"`
+	Count     int               `json:"count"`
+	Resources []ctxsvc.Resource `json:"resources"`
+}
+
+func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req RegisterContextResourceRequest) (contextDirectoryRegisterResponse, error) {
+	root := strings.TrimSpace(req.Source.Location)
+	if sub := strings.TrimSpace(req.Source.Path); sub != "" {
+		if root == "" {
+			root = sub
+		} else {
+			root = filepath.Join(root, sub)
+		}
+	}
+	files, err := ctxsvc.DocumentFiles(root)
+	if err != nil {
+		return contextDirectoryRegisterResponse{}, err
+	}
+	if len(files) == 0 {
+		return contextDirectoryRegisterResponse{}, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "no markdown files under %q", root)
+	}
+	srcType := strings.TrimSpace(req.Source.Type)
+	if srcType == "" {
+		srcType = "local_file"
+	}
+	out := make([]ctxsvc.Resource, 0, len(files))
+	for _, rel := range files {
+		resource, err := svc.Register(ctx, ctxsvc.Resource{
+			ProjectID: strings.TrimSpace(req.ProjectID),
+			Type:      ctxsvc.ResourceDocument,
+			Name:      rel,
+			Source: ctxsvc.ResourceSource{
+				Type:     srcType,
+				Location: root,
+				Path:     rel,
+			},
+			Metadata: req.Metadata,
+		})
+		if err != nil {
+			return contextDirectoryRegisterResponse{}, err
+		}
+		out = append(out, resource)
+	}
+	return contextDirectoryRegisterResponse{Shape: contextShapeDirectory, Count: len(out), Resources: out}, nil
+}
+
+func rejectFileShapeOnDirectory(req RegisterContextResourceRequest) error {
+	loc := strings.TrimSpace(req.Source.Location)
+	if loc == "" {
+		return nil
+	}
+	info, err := os.Stat(loc)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	if strings.TrimSpace(req.Source.Path) != "" {
+		return nil
+	}
+	return ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "location %q is a directory; use shape directory", loc)
 }
 
 // contextErrResponse is a Context Service failure as the write path answers
