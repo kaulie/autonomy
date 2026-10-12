@@ -1,6 +1,7 @@
-// Package contextcap is the agent-facing adapter for the Context Service: it
-// exposes context.search / context.get / context.list (spec 13) as capabilities,
-// so an agent discovers project context through the runtime rather than SQL.
+// Package contextcap is the agent-facing adapter for project knowledge: it
+// exposes context.search / context.get / context.list as capabilities, so an
+// agent discovers project context through the runtime rather than talking to
+// knowledge-base itself.
 package contextcap
 
 import (

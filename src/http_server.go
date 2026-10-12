@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	ctxsvc "github.com/kaulie/autonomy/src/context"
 	"github.com/kaulie/autonomy/src/eventgateway"
 )
 
@@ -78,7 +77,6 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"GET /", s.handleUIHome},
 		{"GET /tasks", s.handleTasksPage},
 		{"GET /dashboard", s.handleAgentDashboard},
-		{"GET /context", s.handleContextPage},
 		// The graceful restart the deployment platform performs on this service: one
 		// notice before it stops us, then a poll while it waits for the runs in flight
 		// to come back (src/graceful.go). A service that answers both is deployed
@@ -95,17 +93,6 @@ func (s *HTTPServer) routes() []httpsRoute {
 		// reaches until; state changes are ingested as world events.
 		{"POST /api/watches", s.handleStartWatch},
 		{"GET /api/watches", s.handleListWatches},
-		// Context Service operator write path (src/context_write.go): register a
-		// resource into a project's context, then sync it into the index.
-		{"POST /api/context/resources", s.handleRegisterContextResource},
-		{"POST /api/context/resources/{resourceID}/sync", s.handleSyncContextResource},
-		// ...and its operator read path, for the dashboard's Context area.
-		{"GET /api/context/resources", s.handleListContextResources},
-		{"GET /api/context/resources/{resourceID}", s.handleGetContextResource},
-		{"DELETE /api/context/resources/{resourceID}", s.handleDeleteContextResource},
-		{"GET /api/context/search", s.handleSearchContext},
-		{"GET /api/context/sections/{sectionID}", s.handleGetContextSection},
-		{"GET /api/context/backends", s.handleListContextBackends},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -956,20 +943,6 @@ func (s *HTTPServer) handleTasksPage(w http.ResponseWriter, _ *http.Request) {
 	_, _ = io.WriteString(w, tasksPageHTML)
 }
 
-// handleContextPage serves the Context Service page (src/context_page.go): list, register, sync,
-// search, read and delete a project's context resources through the /api/context endpoints.
-//
-// @Summary  Context 管理页面（登记 / 同步 / 列表 / 检索 / 删除）
-// @Tags     context
-// @Produce  html
-// @Success  200  {string}  string  "HTML 页面"
-// @Router   /context [get]
-func (s *HTTPServer) handleContextPage(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, contextPageHTML)
-}
-
 // handleUIHome serves autonomy's UI shell: the page a human opens, with the modules of this
 // runtime in its navigation (src/ui_home_page.go). Each module is its own self-contained page and
 // is also reachable on its own path, so the shell is a way in rather than a wrapper everything
@@ -984,228 +957,6 @@ func (s *HTTPServer) handleUIHome(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, uiHomeHTML)
-}
-
-// handleRegisterContextResource registers (or re-registers, by id) one
-// resource into a project's context space. It does not index: sync does.
-//
-// @Summary  Context Service：登记一个 context 资源（document / repository / service）
-// @Tags     context
-// @Accept   json
-// @Produce  json
-// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；kind+provider 选知识库实现（默认 filesystem/local）；shape=file|directory；suffixes 按扩展名过滤，空则全部"
-// @Success  201      {object}  context.Resource                         "shape=file：已登记的资源；shape=directory：{shape,count,resources}"
-// @Failure  400      {object}  contextErrResponse                       "INVALID_QUERY / PROJECT_NOT_FOUND：非法 JSON、缺 project_id、未知 type"
-// @Failure  500      {object}  contextErrResponse                       "INDEX_FAILED：写注册表失败"
-// @Failure  503      {object}  contextErrResponse                       "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/resources [post]
-func (s *HTTPServer) handleRegisterContextResource(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	var body RegisterContextResourceRequest
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeContextErr(w, http.StatusBadRequest, ctxsvc.ErrInvalidQuery, "invalid json: "+err.Error())
-		return
-	}
-	switch body.shape() {
-	case contextShapeDirectory:
-		out, err := registerContextDirectory(req.Context(), svc, body)
-		if err != nil {
-			writeContextServiceErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusCreated, out)
-	case contextShapeFile:
-		if err := rejectFileShapeOnDirectory(body); err != nil {
-			writeContextServiceErr(w, err)
-			return
-		}
-		resource, err := stampFileRegister(body)
-		if err != nil {
-			writeContextServiceErr(w, err)
-			return
-		}
-		resource, err = svc.Register(req.Context(), resource)
-		if err != nil {
-			writeContextServiceErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusCreated, resource)
-	default:
-		writeContextErr(w, http.StatusBadRequest, ctxsvc.ErrInvalidQuery, "shape must be file or directory")
-	}
-}
-
-// handleSyncContextResource loads a registered resource's source, splits it
-// into sections and writes them into the full-text index. Unchanged sources
-// are not re-indexed; repository / service resources are skipped (V1).
-//
-// @Summary  Context Service：同步一个资源进全文索引
-// @Tags     context
-// @Produce  json
-// @Param    resourceID  path      string               true  "资源 id"
-// @Success  200         {object}  context.SyncResult   "status：indexed / unchanged / skipped；sections 为段数"
-// @Failure  404         {object}  contextErrResponse   "RESOURCE_NOT_FOUND：资源未登记"
-// @Failure  422         {object}  contextErrResponse   "SOURCE_UNAVAILABLE / PARSE_FAILED：源读不到或不是合法 UTF-8 Markdown"
-// @Failure  500         {object}  contextErrResponse   "INDEX_FAILED：写索引失败"
-// @Failure  503         {object}  contextErrResponse   "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/resources/{resourceID}/sync [post]
-func (s *HTTPServer) handleSyncContextResource(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	result, err := svc.Sync(req.Context(), req.PathValue("resourceID"))
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// handleListContextResources lists a project's registered context resources
-// (inventory, not content).
-//
-// @Summary  Context Service：列出一个项目登记的 context 资源
-// @Tags     context
-// @Produce  json
-// @Param    project_id  query     string                   true  "项目 id"
-// @Success  200         {object}  contextResourcesResponse  "resources：已登记的资源"
-// @Failure  400         {object}  contextErrResponse        "PROJECT_NOT_FOUND：缺 project_id"
-// @Failure  500         {object}  contextErrResponse        "INDEX_FAILED：读注册表失败"
-// @Failure  503         {object}  contextErrResponse        "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/resources [get]
-func (s *HTTPServer) handleListContextResources(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	resources, err := svc.ListResources(req.Context(), strings.TrimSpace(req.URL.Query().Get("project_id")))
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, contextResourcesResponse{Resources: resources})
-}
-
-// handleGetContextResource reads one registered resource.
-//
-// @Summary  Context Service：读取一个 context 资源
-// @Tags     context
-// @Produce  json
-// @Param    resourceID  path      string              true  "资源 id"
-// @Success  200         {object}  context.Resource    "资源"
-// @Failure  404         {object}  contextErrResponse  "RESOURCE_NOT_FOUND：资源未登记"
-// @Failure  500         {object}  contextErrResponse  "INDEX_FAILED：读注册表失败"
-// @Failure  503         {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/resources/{resourceID} [get]
-func (s *HTTPServer) handleGetContextResource(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	resource, err := svc.GetResource(req.Context(), req.PathValue("resourceID"))
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resource)
-}
-
-// handleDeleteContextResource removes a registered resource and every section
-// indexed from it. The source itself is untouched.
-//
-// @Summary  Context Service：删除一个 context 资源及其索引段落
-// @Tags     context
-// @Param    resourceID  path  string  true  "资源 id"
-// @Success  204         "已删除"
-// @Failure  404         {object}  contextErrResponse  "RESOURCE_NOT_FOUND：资源未登记"
-// @Failure  500         {object}  contextErrResponse  "INDEX_FAILED：删除失败"
-// @Failure  503         {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/resources/{resourceID} [delete]
-func (s *HTTPServer) handleDeleteContextResource(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	if err := svc.DeleteResource(req.Context(), req.PathValue("resourceID")); err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleSearchContext finds candidate sections of a project's context.
-//
-// @Summary  Context Service：在一个项目的 context 里全文检索段落
-// @Tags     context
-// @Produce  json
-// @Param    project_id  query     string                 true   "项目 id"
-// @Param    q           query     string                 true   "检索词"
-// @Param    limit       query     int                    false  "最多返回条数（默认 10，上限 50）"
-// @Param    types       query     string                 false  "逗号分隔的资源类型：document,repository,service"
-// @Success  200         {object}  contextSearchResponse  "results：候选段落"
-// @Failure  400         {object}  contextErrResponse     "INVALID_QUERY / PROJECT_NOT_FOUND：缺 project_id、无检索词或 limit 非法"
-// @Failure  500         {object}  contextErrResponse     "INDEX_FAILED：读索引失败"
-// @Failure  503         {object}  contextErrResponse     "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/search [get]
-func (s *HTTPServer) handleSearchContext(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	searchReq, err := contextSearchRequest(req.URL.Query())
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	results, err := svc.Search(req.Context(), searchReq)
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	if results == nil {
-		results = []ctxsvc.SearchResult{}
-	}
-	writeJSON(w, http.StatusOK, contextSearchResponse{Results: results})
-}
-
-// handleGetContextSection reads one indexed section's full content.
-//
-// @Summary  Context Service：读取一个段落的全文与出处
-// @Tags     context
-// @Produce  json
-// @Param    sectionID  path      string              true  "段落 id"
-// @Success  200        {object}  context.Section     "段落全文、revision 与 source"
-// @Failure  404        {object}  contextErrResponse  "RESOURCE_NOT_FOUND：段落未索引"
-// @Failure  500        {object}  contextErrResponse  "INDEX_FAILED：读索引失败"
-// @Failure  503        {object}  contextErrResponse  "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
-// @Router   /api/context/sections/{sectionID} [get]
-func (s *HTTPServer) handleGetContextSection(w http.ResponseWriter, req *http.Request) {
-	svc := s.contextService(w)
-	if svc == nil {
-		return
-	}
-	section, err := svc.GetSection(req.Context(), req.PathValue("sectionID"))
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, section)
-}
-
-// handleListContextBackends lists implemented knowledge-base (kind, provider)
-// pairs. Unimplemented names (github, s3, …) are not listed.
-//
-// @Summary  Context Service：已实现的知识库 kind + provider
-// @Tags     context
-// @Produce  json
-// @Success  200  {object}  contextBackendsResponse  "backends：filesystem/local、source_code_repository/git-local"
-// @Router   /api/context/backends [get]
-func (s *HTTPServer) handleListContextBackends(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, contextBackendsResponse{Backends: contextImplementedBackends()})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

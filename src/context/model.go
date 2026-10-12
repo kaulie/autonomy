@@ -1,13 +1,8 @@
-// Package context implements the Context Service described in
-// /Users/gaolei/agent-policies/context_service.md (V1 scope, sections 21-22).
+// Package context holds the types, errors and in-memory Service the
+// context.* capabilities and their unit tests use. Production reads go
+// through src/knowledgebase to the independent knowledge-base service.
 //
-// It gives a Project a discoverable, addressable, versioned Context Space and
-// exposes discovery through a single ContextService interface, so Planner,
-// Runtime and Agent callers never touch SQL. Persistence hides behind a
-// Repository; the PostgreSQL implementation reuses the runtime's existing
-// database connection (see postgres.go) rather than opening a second one.
-//
-// V1 deliberately stops at Markdown -> Register -> Index -> Search -> Get:
+// V1 deliberately stops at Markdown heading sections and lexical search:
 // no vector DB, embeddings, LLM summarization, knowledge graph or planner logic.
 package context
 

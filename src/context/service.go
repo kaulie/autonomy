@@ -24,8 +24,8 @@ type Service interface {
 	RegisterResource(ctx context.Context, resource Resource) error
 	SyncResource(ctx context.Context, resourceID string) error
 	// Register is RegisterResource answering the resource as stored (its minted
-	// id and timestamps); Sync is SyncResource answering what the sync did. They
-	// are the operator write path (POST /api/context/resources[/{id}/sync]).
+	// id and timestamps); Sync is SyncResource answering what the sync did.
+	// The runtime client refuses these; maintenance is on knowledge-base.
 	Register(ctx context.Context, resource Resource) (Resource, error)
 	Sync(ctx context.Context, resourceID string) (SyncResult, error)
 	Search(ctx context.Context, req SearchRequest) ([]SearchResult, error)
