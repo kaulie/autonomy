@@ -3,7 +3,7 @@
 本文回答两件事：
 
 1. **现在暴露给 Agent 调用的 context 管理能力有哪些**（契约、边界、前置条件）。
-2. **Agent 会怎样来实现这些能力**——这里的「实现」不是写检索代码，而是 planner **怎么派发、怎么串联、怎么停**。
+2. **Agent 会怎样来实现这些能力**——这里的「实现」不是写检索代码，而是**任何一只 agent**（planner 或 worker，只是分工）怎么调用、怎么串联、怎么停、不够时怎么 `need_input`。
 
 概念层的 Context（「我在哪个世界」）见 [context.md](context.md)。`context_ref` 的被动解析见 [context-builder.md](context-builder.md)。检索基础设施见 `src/context` 与 [architecture.md](../project_map/architecture.md) 的 Context Service。设计真源是 `/Users/gaolei/agent-policies/context_service.md`（V1）。
 
@@ -16,10 +16,12 @@
 | 角色 | 做什么 | 不做什么 |
 |------|--------|----------|
 | **Context Service**（`src/context`） | 登记、切段、建索引、全文检索、按 id 取 section | reasoning、选文档、写计划、当 Agent Memory |
-| **Runtime**（`contextcap` + `RegisterDefaults`） | 把 Service 的读面登记成 capability，出现在 Constructs；执行 step 时调用 Service | 替 planner 决定查什么、读哪一段 |
-| **Planner Agent** | 决定是否查询、查什么、读哪些结果、信息是否已经够用；把这些写成 plan step | 自己实现 SQL / 解析 / 索引；直接打 HTTP 运维面 |
+| **Runtime**（`contextcap` + `RegisterDefaults`） | 把 Service 的读面登记成 capability，出现在 Constructs；谁调用都走同一份 Service | 替 agent 决定查什么、读哪一段 |
+| **Agent（planner 或 worker）** | 决定是否查询、查什么、读哪些结果、信息是否已经够用；按 Constructs 调用这三件 | 自己实现 SQL / 解析 / 索引；用全盘文件系统 grep 代替 discovery；直接打 HTTP 运维面 |
 
-所以：**能力是 Runtime 暴露的；检索是 Context Service 做的；discovery 是 Agent 的工作。** Agent「实现」这些能力 = 按 Constructs 的 input/output 写 plan，而不是再发明一套读文档的机制。
+所以：**能力是 Runtime 暴露的；检索是 Context Service 做的；discovery 是 Agent 的工作。** Planner 和 worker 只是分工（谁在规划、谁在改代码），**不是两套 context 机制**。谁缺项目知识，谁就走同一套 `context.list` / `search` / `get`，不够再 `need_input`。
+
+Agent「实现」这些能力 = 按 Constructs 的 input/output 调用，而不是再发明一套读文档的机制，也不是把 discovery 独占给 planner。
 
 V1 原则（来自设计 spec）：
 
@@ -75,7 +77,7 @@ Search **默认不返回整篇**。Agent 必须再走 `context.get`。
 | 输出 | `resource_id`、`section_id`、`heading`、`content`、`revision`、`source`（JSON：type / location / repository / path） |
 | 错误 | `RESOURCE_NOT_FOUND` / `INVALID_QUERY`（缺 section_id）/ `INDEX_FAILED` |
 
-`revision` + `source` 是出处：这段是从哪、在哪个版本被索引的。V1 还没有把「本次 Task 读过哪些 revision」自动记成 TaskContext；要留下证据，planner 应把 get 的输出写进 `evidence` / `previous_actions`，而不是假设 Runtime 会替它记账。
+`revision` + `source` 是出处：这段是从哪、在哪个版本被索引的。V1 还没有把「本次 Task 读过哪些 revision」自动记成 TaskContext；要留下证据，调用方应把 get 的输出写进 `evidence` / `previous_actions` / worker 报告，而不是假设 Runtime 会替它记账。
 
 ---
 
@@ -93,9 +95,9 @@ Search **默认不返回整篇**。Agent 必须再走 `context.get`。
 - `project_id` 从这里来，供 `context.list` / `context.search` 当字面量输入。
 - 关 builder（`AUTONOMY_CONTEXT_BUILDER=0`）时退回本进程注册过的容器描述。
 
-Planner 的政策已经写明：软件开发任务在项目还没进 World 时，**完整路径可以从 orientation（`context.search` / `context.list`）开始**；空 World 不是缺 capability，不要因此 `blocked`。
+政策已经写明：软件开发任务在项目还没进 World 时，**完整路径可以从 orientation（`context.search` / `context.list`）开始**；空 World 不是缺 capability，不要因此 `blocked`。
 
-Worker（`code_edit` / `deployment.monitor`）的 frame 也带同一份 `CONTEXT_ENTITY`，但 **worker 不调用 `context.*`**：它们拿的是 Constructs 里的委托提示，正文工作在自己的 workspace 里完成。Discovery 是 planner 的事。
+Worker（`code_edit` / `deployment.monitor`）的 frame **同样**带 `CONTEXT_ENTITY` 和 `{{CONSTRUCTS}}`（含 `context.*`）。缺项目知识时 worker 走同一套三件套，不另开一条「在工作区里全局 grep 来发现」的路。分工只是：planner 常在派发 `code_edit` 之前先读约定；worker 在改代码中途发现还缺约定时，自己再 `search` / `get`。
 
 ### 3.2 运维写路径：HTTP / CLI / UI
 
@@ -129,19 +131,20 @@ Agent **不要**计划 `context.register` / `context.sync` / `context.delete`：
 
 ### 3.4 另一套「context」：会话预算
 
-控制面（agent-control-plane）有任务简报裁剪、历史携带、digest / compaction、ContextMeter——那是 **LLM 会话窗口** 的管理，由平台在注入 prompt 时处理，**不是** Autonomy 的 capability，planner 不能调用。两套词都叫 context，职责相反：一个是「项目知识怎么被发现」，一个是「这轮 prompt 塞得下多少」。
+控制面（agent-control-plane）有任务简报裁剪、历史携带、digest / compaction、ContextMeter——那是 **LLM 会话窗口** 的管理，由平台在注入 prompt 时处理，**不是** Autonomy 的 capability，任何一只 agent 都不能当 Constructs 来调。两套词都叫 context，职责相反：一个是「项目知识怎么被发现」，一个是「这轮 prompt 塞得下多少」。
 
 ---
 
-## 4. Agent 怎样实现这些能力（派发方案）
+## 4. Agent 怎样实现这些能力（planner 与 worker 同一套）
 
 ### 4.1 总原则
 
-1. **只从 Constructs 派发。** step = capability + 它声明过的 input。不要发明 `context.read_all`、`docs.grep`、`rag.query`。
-2. **Discovery 属于计划，不属于「planner 自己读完再计划」。** 政策要求：能写成 capability 调用就写成 step，读到的结果下一轮以 `previous_actions` 回来。
-3. **输入必须有来源。** 只有三种：planner 字面量、`{"source":"step:<name>.output.<key>"}`、`{"source":"world_model:asset.…"}`。Runtime 不会从共享 Context 里猜 `project_id` 或 `section_id`。
-4. **空结果不是缺能力。** list 为空、search 零命中、get 找不到，都是观察，用来换 query、换词、或 `need_input`。不要 `blocked` 要一个新的读文档 capability。
-5. **够用就停。** 一旦能定义后续执行 step（例如 `code_edit` 的 instruction），不要继续把项目文档读完。
+1. **只从 Constructs 调用。** 调用 = capability + 它声明过的 input。不要发明 `context.read_all`、`docs.grep`、`rag.query`。
+2. **Planner 和 worker 用同一套机制。** 角色只是分工：planner 把读到的约定写进后续 step；worker 在实现中途同样可以 `list` / `search` / `get`。禁止把 discovery 写成「只有 planner 能做」。
+3. **禁止用全局文件系统 grep 做项目发现。** 不许扫整机、其它 task 目录、runtime、整个宿主工程树来找文档或约定。允许的局部阅读：本 agent workspace 里**已经 clone、且当前工作圈定的仓库根**，以及 `AGENT.md` / `project_map/`；再加上用户在 `need_input` 里明确批准的路径。那是实现期找符号，不是 discovery 的替代品。
+4. **输入必须有来源。** planner 的 plan step 只有三种：字面量、`{"source":"step:<name>.output.<key>"}`、`{"source":"world_model:asset.…"}`。worker 从同一份 `CONTEXT_ENTITY` 抄 `project_id`。Runtime 不会猜。
+5. **空结果不是缺能力。** list 为空、search 零命中、get 找不到，都是观察，用来换 query、换词、或 `need_input`。不要 `blocked`，也不要因此去全盘 grep。
+6. **够用就停。** 已经能做下一步该做的事（planner 能写 `code_edit.instruction`，worker 能改对文件）就停。不要把项目文档读完。
 
 ### 4.2 标准闭环
 
@@ -162,8 +165,10 @@ CONTEXT_ENTITY.project.id
         │
         ▼
   工作上下文够了？
-     ├─ 否 → 换 query 再 search，或 list 后针对某一资源收窄
-     └─ 是 → 停止 discovery，派发 code_edit / watch / …
+     ├─ 否 → 换 1～2 个更短的专有名词再 search
+     ├─ 否，且缺口是已圈定 checkout 里的实现细节 → 只在白名单路径里局部搜符号
+     ├─ 否，项目知识仍不在索引里 → need_input（resource / information）
+     └─ 是 → 停止 discovery，做本职（planner 派发下一步 / worker 改代码）
 ```
 
 同一份 plan 里可以把 list → search → 一次 get 串起来。**一次 get 只取一段**；要读多段，就写多个 get step，或先 search、下一 cycle 再按 `previous_actions` 里的 `section_id` 逐个 get。不要指望一个 step 返回「所有相关文档」。
@@ -173,7 +178,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 - **同 cycle 里** search 之后立刻 get：planner 还没有具体 `section_id`，不能合法绑定 `step:search.output.results` 当 `section_id`。正确做法是 **这一轮只跑 list/search**，下一轮把选中的 id 当字面量传给 get。
 - 或者，若清单已经够小、Task 点名了某一节，planner 可以在 list 之后直接 search，再在再下一轮 get。
 
-这是当前契约下最重要的实现约束：**search → get 的「挑选」发生在 planner 的两次 Decision Cycle 之间，而不是 Runtime 内部。**
+这是当前契约下最重要的实现约束：**search → get 的「挑选」发生在两次调用之间，而不是 Runtime 内部。** Planner 表现为两个 Decision Cycle；worker 表现为先看 `results`，再带着选出的 `section_id` 调 `context.get`。
 
 ### 4.3 输入从哪里来
 
@@ -200,16 +205,38 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 | `INDEX_FAILED` / not configured | 基础设施不可用（常见：sqlite）。报告事实；不要假装搜过、也不要改去打运维 HTTP |
 | `SOURCE_UNAVAILABLE` / `PARSE_FAILED` | 只出现在运维 sync，不会从这三件 capability 冒出来 |
 
-零命中（成功但 `results` 为空）不是错误：换更短的词、去掉过滤、或先 `list` 确认是否根本没有 `document`。
+零命中（成功但 `results` 为空）不是错误：换更短的词、去掉过滤、或先 `list` 确认是否根本没有 `document`。换过 1～2 次仍没有可用 section，进入 §4.5，不要开始全盘 grep。
 
-### 4.5 与 World、`code_edit`、完成契约
+### 4.5 `need_input`：search 仍不够时请人补，然后重试
+
+`need_input` 收束本轮；用户下一条 `POST /api/tasks` 进同一只 agent 的 inbox，带着 `runtime_context.additional_input` 再 decide。不必新造状态机。
+
+不要用 `need.type: capability` 要一个「全盘 grep」或新的读文档能力。用人已经有的类型：
+
+- `resource`：索引里没有这份知识。请人在运维面登记并 sync 一篇文档，或指出应登记的路径。
+- `information`：请人把原文贴进下一条指令。
+- 人如果批准「允许在某相对路径里搜」：那条路径成为本 task 的显式白名单，只用于实现期局部搜，不是放开全盘。
+
+`need.description` 必须写清：缺什么、已经试过的 list/query 与结果、人可以怎么补、补完后重试哪一步。缺任何一项，下一轮还会猜。
+
+Worker 不走 Decision Output Schema 时：把同样四件事写进本次委托的报告并失败/停住，让本 task 的 planner 发出 `need_input`。机制仍是同一套，只是由谁落 `type: need_input` 这一笔。
+
+`INDEX_FAILED` / Context Service 未配置，也走 `need_input`（`type: resource`），说明是基础设施不可用。
+
+### 4.6 与 World、`code_edit`、完成契约
 
 - Orientation **不改变 World**。`expected_effect` 可以为空；不要因为 World 仍是 `assets: []` 就认为 list/search 失败。
 - 软件开发任务的完成锚点仍是 `code_edit.pr_url`（kind `pull_request`）+ `pr.check`。`context.get` 的 `content` **没有 kind**，不能当 Completion Contract 的 evidence 槽。
-- 读到的正文用来**写好**后续 `code_edit` 的 `instruction`（「按 runtime.md Heartbeat Protocol 那一节改 …」），而不是把整段 content 再塞进 World。
-- Worker 在自己的 workspace 里读 `AGENT.md` / 仓库文件，是 checkout 之后的局部阅读，**补的是当前仓库**，补不了「项目跨多个仓库 / 服务 / ADR」的那一层——那一层才是 Context Service 存在的理由。
+- 读到的正文用来**写好**后续工作（planner 写 `code_edit.instruction`，worker 按约定改文件），而不是把整段 content 再塞进 World。
+- Checkout 里读 `AGENT.md` / 当前仓库源码，补的是**已经圈定的那一份代码**；跨仓库 / 服务 / ADR 的项目知识仍走 Context Service。两者叠用，不是互相替代。
 
-### 4.6 示例：两轮 orientation 再执行
+### 4.7 Worker 怎么真正调到这三件
+
+Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / `get`）和 `CONTEXT_ENTITY`。政策要求它按 Constructs 调用，不要另做一套。
+
+今天 planner 经 Decision Cycle 的 `Execute` 跑这些能力；worker 的 harness 默认是编辑器工具。要让「都可以用」在运行时成立，worker 会话必须能 **Run 同一份 `contextcap`**（同一 Context Service、同一个 `project_id`），而不是改去打运维 HTTP，也不是用 `rg` 冒充 search。接线可以后做；在接到之前，worker **仍然禁止**用全局 grep 填这个洞——报缺口，升到 `need_input`。
+
+### 4.8 示例：两轮 orientation 再执行
 
 第一轮 Decision Cycle（只发现，不改世界）：
 
@@ -297,7 +324,8 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 2. **把本次 Task 读过的 `(resource_id, section_id, revision)` 记成 TaskContext。** 设计 spec §9 已要求能回答「当时基于哪个版本」；现在只能靠 planner 自己把 get 输出写进 evidence。
 3. **空索引的可观察信号。** list 返回 `count=0` 与「service 未配置」应继续保持不同类型，避免 Agent 把基础设施故障当成「项目没有文档」。
 4. **不要把 register/sync 做成 capability。** 写路径碰的是 runtime 主机文件系统与索引生命周期，应留在运维面；Agent 缺资源时 `need_input`。
-5. **embedding 只能加在 Service 后面。** Agent 面的三件名字与「search 返回候选、get 取一段」应保持稳定；换检索实现不应迫使 planner 改派发方式。
+5. **embedding 只能加在 Service 后面。** Agent 面的三件名字与「search 返回候选、get 取一段」应保持稳定；换检索实现不应迫使任何一只 agent 改调用方式。
+6. **Worker 调用入口。** 给 worker 会话一条 Run `context.*` 的路（同一 `contextcap`），这样「planner / worker 同一套」不只写在政策里。
 
 ---
 
@@ -307,9 +335,10 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 |------|------|
 | Agent 现在能调用哪些 context 管理能力？ | 只有 `context.list`、`context.search`、`context.get` |
 | 谁真正做检索？ | Context Service；Agent 只派发 |
-| `project_id` 谁填？ | Planner 从 `CONTEXT_ENTITY` 抄成字面量 |
-| 能不能同一步从 search 绑到 get？ | 不能；挑选发生在两个 Decision Cycle 之间 |
+| `project_id` 谁填？ | 调用方从 `CONTEXT_ENTITY` 抄成字面量 |
+| 能不能同一步从 search 绑到 get？ | 不能；挑选发生在两次调用之间 |
 | 空 World 要不要 blocked？ | 不要；先 orientation |
 | 登记文档是不是 Agent 的事？ | 不是；HTTP / CLI / `GET /context` |
-| Worker 会不会调这三件？ | 不会；discovery 在 planner |
+| Worker 会不会调这三件？ | 会；和 planner 同一套，只是分工不同 |
+| 可以全盘 grep 找文档吗？ | 不可以；search 不够就 `need_input` |
 | 会话裁剪、digest 算不算？ | 不算；那是控制面的窗口管理 |
