@@ -31,7 +31,7 @@
 
 - **cycle**：相对某只 agent 的第几轮 prompt→reply（从 1 计）。被截断后的重试不占新 cycle。
 - **step**：一份 plan 里的一个能力调用。落库是 `execution_step_plan` / `execution_step`。
-- `AUTONOMY_MAX_STEPS` 数的是 planner 自己的 cycle，名字是历史包袱。
+- `AUTONOMY_MAX_STEPS` 数的是 planner 自己的 cycle，名字是历史包袱。未设置时默认 `DefaultMaxSteps = 10`。
 
 Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行等本轮结果。详见 `docs/execution-loop.md`。
 

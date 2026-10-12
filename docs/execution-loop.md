@@ -66,7 +66,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
 
 代码：`src/autonomy.go:Run` · `src/agent.go:DecideAtCycle` · `src/prompt.go:parseDecision` · `src/decision.go` · `src/runtime.go:Execute`。
 
-- 每轮：`DecideAtCycle(cycle)` → `Decision` → **dispatch** `Runtime.Execute(decision)`（独立 worker goroutine）→ 事件 `cycleDone` → `Agent.Observe(result)` → 下一轮。Planner 主循环在 dispatch 之后停在事件等待上，**不**锁在 `Execute` 里（`src/autonomy.go:dispatchExecute`；见 [runtime.md](runtime.md)、[principles.md](principles.md) §Event Driven）。同 task 仍保持 decide → execute → observe 的顺序，下一轮 Decide 必须先看到本轮 `previous_actions`。`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)（`Autonomy.MaxSteps`，默认 `4`）。
+- 每轮：`DecideAtCycle(cycle)` → `Decision` → **dispatch** `Runtime.Execute(decision)`（独立 worker goroutine）→ 事件 `cycleDone` → `Agent.Observe(result)` → 下一轮。Planner 主循环在 dispatch 之后停在事件等待上，**不**锁在 `Execute` 里（`src/autonomy.go:dispatchExecute`；见 [runtime.md](runtime.md)、[principles.md](principles.md) §Event Driven）。同 task 仍保持 decide → execute → observe 的顺序，下一轮 Decide 必须先看到本轮 `previous_actions`。`Execute` 先把这一轮的计划写进 `execution_plan` / `execution_step_plan`，再逐步执行并写 `execution_step` —— 见 [execution-step.md](execution-step.md)（`Autonomy.MaxSteps`，默认 `10`）。
 - **决策先过闸，再执行**：`Runtime.Execute` 的第一件事是校验这份 Decision ——
   ①**类型契约**（AGENT_V2 §Type-specific Requirements：`plan` 非空、每个 step 说清 `expected_effect`、引用的 evidence 存在；`done` 不带 plan/need 且必须带 evidence；`blocked` / `need_input` 不带 plan 且必须写清 `need.description`；给了 `need.options` 就必须是 2–9 个互不重复、非空的选项——要么留空：开放问题由人用自己的话回答、只有一个选项那不叫选择），
   ②**计划的数据血缘**（每个入参来源可读、必填入参齐备，见 [execution-step.md](execution-step.md)）。
@@ -105,7 +105,7 @@ Goal → Task → Agent → Capability → World State → Event → Agent → C
   这一轮**照样过闸、照样落库**（`Runtime.Execute`：校验类型契约 + 写出 `execution_plan` 那一行 —— 答案也是记录，`done` 的证据、`blocked` / `need_input` 的 `need` 都在那一行上），所以「是不是答案」由**决策本身**（它的 `type`）决定，读它的时机在执行之前 —— 执行结果不会、也不能改变它。
   但**只有站得住的答案**才收束：被拒绝的答案（没有证据的 `done`、没写清 `need.description` 的 `blocked` / `need_input`）是一个**失败的轮**，和别的失败完全一样 —— 不写、不执行、下一轮 planner 拿着规则名重规划。这正是上一层「决策先过闸」那句承诺的兑现：闸门把原因写进了错误里，就得有人有机会看它 —— 只看 `type` 就收束的话，一个「补上证据即可」的 `done` 会被直接判成任务失败。
   任务行跟着落同一个结论：`done` **验证通过** → `completed`；一个始终没验过的 `done`（被拒、或世界不满足、或判不了）→ `unverified`，`tasks.error` 写它为什么没通过；`blocked` / `need_input` → 同名状态（`TaskStatusFor`，`src/decision.go`）—— 任务在等东西不是跑完了；为什么在等是那次决策的 `need`，`tasks.error` 仍然只写失败的原因。预算用尽而最后一轮仍是 `plan` → `error`，`tasks.error` 写 `cycle budget exhausted (N): last decision (plan) did not conclude the task` —— 循环停了，目标没有达成。
-- 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 4`；它数的是 **decision cycle**，`step` 这个词现在专指「执行步」）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下调大 —— 只有把它设为 ≥2，"失败后进入下一轮 decide"才真的会发生。用尽这笔预算而没有 `done` / `blocked` / `need_input` 时，任务收成 `error`，不是 `completed`。
+- 轮数上限 `Autonomy.MaxSteps`（默认 `DefaultMaxSteps = 10`；它数的是 **decision cycle**，`step` 这个词现在专指「执行步」）；`AUTONOMY_MAX_STEPS=N` 可在不重编的情况下覆盖。用尽这笔预算而没有 `done` / `blocked` / `need_input` 时，任务收成 `error`，不是 `completed`。
 
 ## 不变式
 
