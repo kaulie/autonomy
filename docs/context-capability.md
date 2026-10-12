@@ -143,7 +143,7 @@ Agent **不要**计划 `context.register` / `context.sync` / `context.delete`：
 2. **Planner 和 worker 用同一套机制。** 角色只是分工：planner 把读到的约定写进后续 step；worker 在实现中途同样可以 `list` / `search` / `get`。禁止把 discovery 写成「只有 planner 能做」。
 3. **文件系统默认只搜自己的 workspace。** 每只 agent 的 workspace 是 `{account_root}/{agent-name}/`（见 `{{CONSTRAINTS}}` 的 `workspace`）。Grep / Glob / 读文件默认不得越出这个目录：不搜其它 agent、不搜 runtime、不搜宿主工程树。项目知识仍走 `context.*`；workspace 里没有、索引里也没有，就 `need_input`，不要把搜索范围扩大到 workspace 外。
 4. **输入必须有来源。** planner 的 plan step 只有三种：字面量、`{"source":"step:<name>.output.<key>"}`、`{"source":"world_model:asset.…"}`。worker 从同一份 `CONTEXT_ENTITY` 抄 `project_id`。Runtime 不会猜。
-5. **空结果不是缺能力。** list 为空、search 零命中、get 找不到，都是观察，用来换 query、换词、或 `need_input`。不要 `blocked`，也不要因此去搜自己的 workspace 之外。
+5. **一次正经的零命中就问人。** `INVALID_QUERY`（空 query、坏 metadata）是调用方写错了，改请求再搜一次，不要把修 query 推给人。`list` 没有 document、或一次用任务术语发出的 `search` 返回空结果：索引里没有这份知识，立刻 `need_input`。不要仪式性地换词再搜两轮——那只会推迟问人，也掩盖「资源根本没登记」。
 6. **够用就停。** 已经能做下一步该做的事（planner 能写 `code_edit.instruction`，worker 能改对文件）就停。不要把项目文档读完。
 
 ### 4.2 标准闭环
@@ -165,9 +165,9 @@ CONTEXT_ENTITY.project.id
         │
         ▼
   工作上下文够了？
-     ├─ 否 → 换 1～2 个更短的专有名词再 search
-     ├─ 否，且缺口是本 workspace 里已有代码的实现细节 → 只在自己的 workspace 里搜
-     ├─ 否，项目知识不在索引、也不在自己的 workspace → need_input（resource / information）
+     ├─ INVALID_QUERY → 改请求再 search 一次
+     ├─ list 无 document，或一次正经 search 零命中 → need_input
+     ├─ 缺口只是本 workspace 里已有代码的实现细节 → 只在自己的 workspace 里搜
      └─ 是 → 停止 discovery，做本职（planner 派发下一步 / worker 改代码）
 ```
 
@@ -205,7 +205,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 | `INDEX_FAILED` / not configured | 基础设施不可用（常见：sqlite）。报告事实；不要假装搜过、也不要改去打运维 HTTP |
 | `SOURCE_UNAVAILABLE` / `PARSE_FAILED` | 只出现在运维 sync，不会从这三件 capability 冒出来 |
 
-零命中（成功但 `results` 为空）不是错误：换更短的词、去掉过滤、或先 `list` 确认是否根本没有 `document`。换过 1～2 次仍没有可用 section，进入 §4.5，不要把文件系统搜索扩到自己的 workspace 之外。
+零命中（成功但 `results` 为空）不是基础设施错误，而是「这份知识不在 Context Space 里」。进入 §4.5 问人登记或粘贴。不要再换词搜一轮，也不要把文件系统搜索扩到自己的 workspace 之外。
 
 ### 4.5 `need_input`：search 仍不够时请人补，然后重试
 
