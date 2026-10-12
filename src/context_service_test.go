@@ -1,32 +1,26 @@
 package autonomy
 
 import (
+	"context"
 	"testing"
 
 	ctxsvc "github.com/kaulie/autonomy/src/context"
+	"github.com/kaulie/autonomy/src/knowledgebase"
 )
 
-// contextStoreStub is a Store that also serves the Context Service port.
-type contextStoreStub struct {
-	Store
-	repo ctxsvc.Repository
-}
-
-func (s contextStoreStub) ContextRepository() ctxsvc.Repository { return s.repo }
-
-// plainStoreStub is a Store that cannot serve the Context Service.
-type plainStoreStub struct{ Store }
-
-func TestBuildContextServiceUsesTheStorePort(t *testing.T) {
-	repo := ctxsvc.NewMemoryRepository()
-	svc := buildContextService(contextStoreStub{repo: repo})
+func TestBuildContextServiceReadsKnowledgeBase(t *testing.T) {
+	svc := buildContextService()
 	if svc == nil {
-		t.Fatal("a store implementing ContextStore must yield a configured Context Service")
+		t.Fatal("context reads must be wired to knowledge-base")
 	}
-	if got := buildContextService(plainStoreStub{}); got != nil {
-		t.Fatalf("a store without the port must leave the service unconfigured, got %T", got)
+	client, ok := svc.(*knowledgebase.Client)
+	if !ok {
+		t.Fatalf("got %T, want *knowledgebase.Client", svc)
 	}
-	if got := buildContextService(contextStoreStub{repo: nil}); got != nil {
-		t.Fatalf("a store returning no repository must leave the service unconfigured, got %T", got)
+	if client.BaseURL() != knowledgebase.DefaultURL {
+		t.Fatalf("base URL = %s", client.BaseURL())
+	}
+	if _, err := svc.Register(context.Background(), ctxsvc.Resource{ProjectID: "p"}); ctxsvc.CodeOf(err) != ctxsvc.ErrIndexFailed {
+		t.Fatalf("writes must stay on knowledge-base, got %v", err)
 	}
 }

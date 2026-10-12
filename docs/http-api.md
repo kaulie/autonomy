@@ -133,49 +133,9 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 {"watches":[{"id":"pull_request:kaulie/agent-watchdog#9","kind":"pull_request","target":"https://github.com/kaulie/agent-watchdog/pull/9","until":"merged","watching":true}],"count":1}
 ```
 
-### `POST /api/context/resources` — Context Service：登记一个资源
+### 项目知识不在本 runtime 维护
 
-Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填。先选知识库 **`kind` + `provider`**（各实现分开，未实现的直接 `INVALID_QUERY`）：
-
-| kind | 已实现 provider | 未实现（拒绝） |
-|------|-----------------|----------------|
-| `filesystem`（默认） | `local` | `sftp` / `ssh` |
-| `source_code_repository` | `git-local`（本机 checkout） | `github` / `gitlab` / `gitea` / `git` |
-| `cloud` | （无） | `s3` / `gcs` / `azure` / `oss` |
-
-省略 kind/provider 时按旧 `source.type` 回退：`local_file` → filesystem/local，`git` → source_code_repository/git-local，`external` → cloud（仍无 provider）。`shape` 为 `file`（默认）或 `directory`；`suffixes` 只对 directory 生效，空则全部搜索默认文档后缀（`.md` / `.markdown`）；`type` 为 `document`（默认）/ `repository` / `service`（directory 形态一律当 document）；`id` 为空时生成 `ctx-<hex>`。本地实现的 `source.location` 是 **runtime 所在主机**上的路径，不是远程 URL。
-
-```json
-{"project_id":"project-749a0238","kind":"filesystem","provider":"local","shape":"file","name":"runtime.md","type":"document","source":{"location":"/srv/docs/runtime.md"}}
-```
-
-`shape=file` 时 `201` 回那一个资源（`source` 带 `kind` / `provider`）。`shape=directory` 时 `201` 回 `{"kind","provider","shape":"directory","count":N,"resources":[…]}`。file 形态把目录当成 location 且没有 `path` → `400 INVALID_QUERY`。directory 指定了 `suffixes` 但没有匹配文件 → `400 INVALID_QUERY`。`GET /api/context/backends` 列出已实现的 (kind, provider)。
-
-### `POST /api/context/resources/{resourceID}/sync` — Context Service：同步进全文索引
-
-读源 → 按 Markdown 标题切段 → 写全文索引。回 `{"resource_id","project_id","type","status","revision","checksum","sections"}`，`status`：`indexed`（已重建）/ `unchanged`（checksum 与 revision 未变，不重建）/ `skipped`（`repository` / `service` 在 V1 只登记，**只有 `document` 产生 section**）。
-
-两个端点的错误都是 `{"code","message"}`：`INVALID_QUERY` / `PROJECT_NOT_FOUND`（缺 project_id）→ `400`，`RESOURCE_NOT_FOUND` → `404`，`SOURCE_UNAVAILABLE` / `PARSE_FAILED` → `422`，其余 `INDEX_FAILED` → `500`。**索引需要 postgres store engine**（`AUTONOMY_STORE_ENGINE=postgres`）；sqlite 下 Context Service 未配置，答 `503` + `INDEX_FAILED`。
-
-命令行同一条路（`cmd/autonomy/context_cmd.go`）：
-
-```bash
-autonomy context register --project project-749a0238 --name runtime.md \
-  --source-type git --location /srv/autonomy --path docs/runtime.md --sync
-autonomy context sync ctx-1a2b3c4d5e6f7a8b
-```
-
-运维读/删（给 `GET /context` 页用，**不是** capability；Agent 只经 `context.search` / `get` / `list`）：
-
-| 方法 | 路径 | 作用 |
-|------|------|------|
-| `GET` | `/api/context/backends` | 已实现的知识库 (kind, provider) |
-| `GET` | `/api/context/resources?project_id=` | 清单（语义同 `context.list`） |
-| `GET` | `/api/context/resources/{resourceID}` | 一条资源的登记信息（无对应 capability） |
-| `DELETE` | `/api/context/resources/{resourceID}` | 删登记与索引，不碰源文件 |
-| `GET` | `/api/context/search?project_id=&q=` | 检索候选 section |
-| `GET` | `/api/context/sections/{sectionID}` | 读一段全文 |
-| `GET` | `/context` | 自包含运维页 |
+登记、绑定、同步、检索页在 **knowledge-base**（`KNOWLEDGE_BASE_URL`，默认 `127.0.0.1:4360`）。本 runtime 不再提供 `/context` 或 `/api/context/*`。Agent 仍经 `context.list` / `search` / `get` 读；实现是 `src/knowledgebase`，把 `project_id` 映射成 CONTEXT entity `{type:project,id}`。`autonomy context` 只提示去 knowledge-base。
 
 Agent 侧的派发方案见 [context-capability.md](context-capability.md)。
 

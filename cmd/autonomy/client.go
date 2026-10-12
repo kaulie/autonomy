@@ -225,7 +225,7 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 // apiError is the runtime's own reason for refusing: the API answers errors as
-// {"error": "…"} (the Context Service write path as {"code", "message"});
+// {"error": "…"} (or {"code", "message"} from a typed refusal);
 // anything else is passed through as it came.
 func apiError(raw []byte) string {
 	var e struct {

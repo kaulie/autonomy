@@ -18,7 +18,7 @@ type Deps struct {
 	// Optional: when nil the capability builds its own HTTP observer from the
 	// request (or $AUTONOMY_DEPLOYMENT_ENDPOINT).
 	Deployments deployment.Observer
-	// Context is the Context Service the context.search / get / list
+	// Context is the knowledge-base client the context.search / get / list
 	// capabilities call. Optional: when nil those capabilities are still
 	// registered for the planner but report a typed "not configured" error.
 	Context ctxsvc.Service
@@ -56,8 +56,8 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	// The monitor prefers the agent-backed observer when the host provides an
 	// agent broker; Deps.Deployments pins a specific (deterministic) source.
 	f.Register(deployment.Monitor{Observer: deps.Deployments, Agents: deps.Agents})
-	// The Context Service's agent-facing surface (spec 13): an agent discovers
-	// project context through these instead of SQL. Deps.Context is the service.
+	// Agent-facing discovery of project knowledge: an agent reads through
+	// these instead of talking to knowledge-base itself. Deps.Context is the client.
 	f.Register(ctxcap.Search{Svc: deps.Context})
 	f.Register(ctxcap.Get{Svc: deps.Context})
 	f.Register(ctxcap.List{Svc: deps.Context})

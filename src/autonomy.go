@@ -48,9 +48,8 @@ type Autonomy struct {
 	// event-center, not GitHub.
 	Watcher           *watcher.Watcher
 	CapabilityFactory *capability.Factory
-	// Context is the Context Service the context.* capabilities read and the
-	// operator write path (POST /api/context/resources…) writes. Nil when the
-	// store engine cannot back it (sqlite): src/context_service.go.
+	// Context is the knowledge-base client the context.* capabilities read
+	// through (src/knowledgebase). Writes stay on knowledge-base.
 	Context ctxsvc.Service
 	Runtime *Runtime
 	World   *World
@@ -101,7 +100,7 @@ func BootstrapAutonomy() (*Autonomy, error) {
 	eventCenter := newEventCenterClient()
 	worldWatcher := newWorldWatcher(eventCenter)
 
-	contextService := buildContextService(store)
+	contextService := buildContextService()
 	capabilityFactory := capability.NewFactory()
 	capability.RegisterDefaults(capabilityFactory, capability.Deps{
 		Assets:  worldAssetMutator(),
