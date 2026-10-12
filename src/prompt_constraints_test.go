@@ -117,8 +117,8 @@ func TestTheShippedPolicyKeepsDeployingTheRuntimesMove(t *testing.T) {
 	if got, want := keys["deploy"], "the Runtime's move, not the agent's"; got != want {
 		t.Fatalf("deploy=%q want %q (src/agent_policy/CONSTRAINTS.json)", got, want)
 	}
-	if got := keys["context_discovery"]; !strings.Contains(got, "planner and worker share that set") || !strings.Contains(got, "own workspace only") || !strings.Contains(got, "do not aimless-grep") || !strings.Contains(got, "do not ritual-retry") {
-		t.Fatalf("context_discovery=%q, want shared context.*, workspace default, directed-path exception, and miss-to-need_input", got)
+	if got := keys["context_discovery"]; !strings.Contains(got, "planner and worker share that set") || !strings.Contains(got, "do not use grep to perceive context") || !strings.Contains(got, "does not restrict grep") || !strings.Contains(got, "do not ritual-retry") {
+		t.Fatalf("context_discovery=%q, want shared context.*, no discovery-grep, task grep unrestricted, miss-to-need_input", got)
 	}
 	if _, ok := keys["worker_workspace"]; ok {
 		t.Fatalf("constraints=%v, worker authorization is not a shared policy sentence", keys)
