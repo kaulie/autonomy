@@ -79,6 +79,8 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `context.get` | `contextcap/get.go` | Context Service：取一个 section 的完整内容与来源 |
 | `context.list` | `contextcap/list.go` | Context Service：列出一个 project 已注册的 context 资源 |
 
+Agent 如何派发这三件、以及哪些 Context 面**不是** capability，见 [context-capability.md](../docs/context-capability.md)。写路径（登记 / 同步 / 删除）走 HTTP / CLI / `GET /context`，不进 Constructs。
+
 ## Context Service（`src/context`）
 
 设计见 `/Users/gaolei/agent-policies/context_service.md` 的 V1 范围。`src/context` 是检索基础设施，不做 reasoning：

@@ -157,6 +157,19 @@ autonomy context register --project project-749a0238 --name runtime.md \
 autonomy context sync ctx-1a2b3c4d5e6f7a8b
 ```
 
+运维读/删（给 `GET /context` 页用，**不是** capability；Agent 只经 `context.search` / `get` / `list`）：
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| `GET` | `/api/context/resources?project_id=` | 清单（语义同 `context.list`） |
+| `GET` | `/api/context/resources/{resourceID}` | 一条资源的登记信息（无对应 capability） |
+| `DELETE` | `/api/context/resources/{resourceID}` | 删登记与索引，不碰源文件 |
+| `GET` | `/api/context/search?project_id=&q=` | 检索候选 section |
+| `GET` | `/api/context/sections/{sectionID}` | 读一段全文 |
+| `GET` | `/context` | 自包含运维页 |
+
+Agent 侧的派发方案见 [context-capability.md](context-capability.md)。
+
 ### `POST /api/tasks`
 
 接受一条任务指令：立刻返回 `task_id` / `agent_id`，并把这条指令作为**消息**放进这只 agent 的 inbox
