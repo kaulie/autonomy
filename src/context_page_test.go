@@ -33,17 +33,18 @@ func TestTheContextPageIsServedAndOfferedByTheShell(t *testing.T) {
 func TestTheContextPageIsBuiltOnTheContextServiceAPI(t *testing.T) {
 	for _, want := range []string{
 		`id="f-project" value="project-749a0238"`, // the project the page works on
-		`id="rows"`, // the resource table
-		`<th>last sync</th>`,
+		`id="rows"`, // the resource table, grouped by kind / provider
+		`<th>last sync</th>`, `id="f-filter"`, `tr class="group"`,
 		`id="register"`, `id="f-kind"`, `id="f-provider"`, `value="filesystem"`, `value="source_code_repository"`, `value="cloud"`,
-		`id="f-shape"`, `name="f-shape"`, `value="file"`, `value="directory"`,
-		`id="f-name"`, `id="f-type"`,
-		`id="f-location"`, `id="f-suffixes"`, `id="f-path"`, `id="f-uri"`, `id="f-sync"`,
-		`function knowledgeKind()`, `function shape()`, `shape: kind`, `kind: kb`, `body.suffixes = suffixes`,
+		`id="f-shape"`, `name="f-shape"`, `value="file"`, `value="directory"`, `recursive collection`,
+		`id="f-name"`,
+		`id="f-location"`, `id="f-suffixes"`, `id="f-path"`, `id="f-sync"`,
+		`function knowledgeKind()`, `function inferKind(source)`, `function shape()`, `shape: kind`, `kind: kb`, `body.suffixes = suffixes`,
 		`id="search"`, `id="f-query"`, `id="results"`, `id="section"`, // search and the section view
 		`async function api(method, path, body)`, // its own fetch helper, relative paths
 		`function say(text, kind)`,
 		`"embedded"`, // drops its title inside the shell
+		`api("GET", "/api/context/backends")`,
 		`api("GET", "/api/context/resources?project_id=" + encodeURIComponent(project()))`,
 		`api("POST", "/api/context/resources", body)`,
 		`api("POST", "/api/context/resources/" + encodeURIComponent(id) + "/sync")`,

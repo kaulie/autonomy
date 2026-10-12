@@ -4,11 +4,10 @@ package autonomy
 //
 // Same shape as the accounts page: one self-contained file — no build step, no bundler, no
 // external asset — whose whole job is to call the Context Service's operator API
-// (src/context_write.go and its handlers in http_server.go) and render the answer: register a
-// knowledge base by kind + provider (filesystem/local, source_code_repository/git-local),
-// as one file or a recursive collection, sync it into the index, list a project's resources,
-// search their sections, read one section, delete a resource. Agents still only read,
-// through context.search / get / list.
+// (src/context_write.go and its handlers in http_server.go) and render the answer: manage a
+// project's knowledge bases by kind + provider (filesystem/local,
+// source_code_repository/git-local), register one file or a recursive collection, sync,
+// search, read and delete. Agents still only read, through context.search / get / list.
 //
 // The Context Service needs the postgres store engine; without it every call answers 503
 // INDEX_FAILED, and the page says that instead of showing an empty table as if it were the truth.
@@ -29,12 +28,14 @@ const contextPageHTML = `<!DOCTYPE html>
   table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.06); }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eaecf0; vertical-align: middle; }
   th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #475467; }
+  tr.group td { background: #f2f4f7; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: #344054; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #f2f4f7; color: #344054; }
   button { font: inherit; padding: 3px 9px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; }
   button:hover { background: #f9fafb; }
   button.primary { background: #1c4ed8; border-color: #1c4ed8; color: #fff; }
   button.danger { color: #b42318; border-color: #fda29b; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   form, .panel { background: #fff; padding: 14px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.06); }
   .grid > div { padding: 9px 0; border-bottom: 1px dashed #eaecf0; }
   .grid > div:last-child { border-bottom: none; }
@@ -63,9 +64,9 @@ const contextPageHTML = `<!DOCTYPE html>
 <body>
 <h1>Context</h1>
 <div class="sub">
-  A project's context space. Pick a knowledge base (filesystem, source code
-  repository, cloud storage) and a provider, then register one file or a recursive
-  collection. Sync into the full-text index, search sections and read one.
+  Manage a project's knowledge bases by kind and provider: filesystem, source
+  code repository, or cloud storage. Each provider has its own register form.
+  Sync into the full-text index, search sections and read one.
   Needs the postgres store engine.
 </div>
 
@@ -79,10 +80,16 @@ const contextPageHTML = `<!DOCTYPE html>
   </div>
 </div>
 
-<h2>Resources</h2>
+<h2>Knowledge bases</h2>
+<div class="shape" id="f-filter" style="margin-bottom:10px">
+  <label class="check"><input type="radio" name="f-filter" value="" checked> all</label>
+  <label class="check"><input type="radio" name="f-filter" value="filesystem"> filesystem</label>
+  <label class="check"><input type="radio" name="f-filter" value="source_code_repository"> source code repository</label>
+  <label class="check"><input type="radio" name="f-filter" value="cloud"> cloud storage</label>
+</div>
 <table>
-  <thead><tr><th>name</th><th>type</th><th>source</th><th>revision</th><th>last sync</th><th></th></tr></thead>
-  <tbody id="rows"><tr><td colspan="6" class="hint">loading…</td></tr></tbody>
+  <thead><tr><th>name</th><th>location</th><th>revision</th><th>last sync</th><th></th></tr></thead>
+  <tbody id="rows"><tr><td colspan="5" class="hint">loading…</td></tr></tbody>
 </table>
 
 <h2>Register</h2>
@@ -105,22 +112,14 @@ const contextPageHTML = `<!DOCTYPE html>
       <div class="formtitle">shape</div>
       <div class="shape" id="f-shape">
         <label class="check"><input type="radio" name="f-shape" value="file" checked> single file</label>
-        <label class="check"><input type="radio" name="f-shape" value="directory"> recursive directory</label>
+        <label class="check"><input type="radio" name="f-shape" value="directory"> recursive collection</label>
       </div>
-      <div class="hint only-file">One document on this provider.</div>
-      <div class="hint only-dir">Recursively. Skips hidden dirs, <code>node_modules</code>. Suffixes empty = all document types (<code>.md</code>, <code>.markdown</code>).</div>
+      <div class="hint only-file" id="f-file-hint">One document on this provider.</div>
+      <div class="hint only-dir" id="f-dir-hint">Recursively. Suffixes empty = all document types.</div>
     </div>
     <div class="only-file needs-provider"><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
-    <div class="only-file needs-provider">
-      <label for="f-type">type</label>
-      <select id="f-type">
-        <option value="document">document</option>
-        <option value="repository">repository</option>
-        <option value="service">service</option>
-      </select>
-    </div>
     <div class="needs-provider">
-      <label for="f-location"><span class="only-file">file path</span><span class="only-dir">directory path</span></label>
+      <label for="f-location" id="f-location-label">path</label>
       <input type="text" id="f-location" placeholder="/path/to/doc.md">
     </div>
     <div class="only-dir needs-provider">
@@ -128,8 +127,7 @@ const contextPageHTML = `<!DOCTYPE html>
       <input type="text" id="f-suffixes" placeholder="md, markdown">
       <div class="hint">Comma-separated extensions to keep. Leave empty to search every available document.</div>
     </div>
-    <div class="only-file needs-provider"><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
-    <div class="only-file needs-provider"><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
+    <div class="only-file needs-provider" id="f-path-wrap"><label for="f-path">path <span class="hint">(inside the location, optional)</span></label><input type="text" id="f-path"></div>
     <div class="needs-provider"><label class="check"><input type="checkbox" id="f-sync" checked> sync after register</label></div>
   </div>
   <div class="actions"><button type="submit" class="primary" id="f-register">Register</button></div>
@@ -185,9 +183,42 @@ function esc(value) {
 
 function project() { return $("f-project").value.trim(); }
 
-const BACKENDS = {
-  filesystem: [{ id: "local", hint: "A path on the runtime host." }],
-  source_code_repository: [{ id: "git-local", hint: "A git checkout on the runtime host. Host providers (github, gitlab, gitea) are not implemented yet." }],
+const KIND_ORDER = ["filesystem", "source_code_repository", "cloud"];
+const KIND_LABEL = {
+  filesystem: "filesystem",
+  source_code_repository: "source code repository",
+  cloud: "cloud storage",
+};
+const KIND_HINT = {
+  filesystem: {
+    file: "One Markdown file on the runtime host.",
+    dir: "Every matching file under the directory, recursively. Skips hidden dirs and node_modules.",
+    fileLoc: "file path",
+    dirLoc: "directory path",
+    filePh: "/path/to/doc.md",
+    dirPh: "/path/to/docs",
+  },
+  source_code_repository: {
+    file: "One file in a local git checkout. Revision is the commit SHA.",
+    dir: "Walk a local git checkout or subtree. Must be inside a work tree.",
+    fileLoc: "file path",
+    dirLoc: "checkout or subtree",
+    filePh: "/path/to/repo/docs/runtime.md",
+    dirPh: "/path/to/checkout",
+  },
+  cloud: {
+    file: "No cloud provider is implemented yet.",
+    dir: "No cloud provider is implemented yet (s3, gcs, azure, oss).",
+    fileLoc: "object key",
+    dirLoc: "prefix",
+    filePh: "",
+    dirPh: "",
+  },
+};
+
+let backends = {
+  filesystem: ["local"],
+  source_code_repository: ["git-local"],
   cloud: [],
 };
 
@@ -201,17 +232,41 @@ function shape() {
   return picked ? picked.value : "file";
 }
 
+function listFilter() {
+  const picked = document.querySelector('input[name="f-filter"]:checked');
+  return picked ? picked.value : "";
+}
+
+function inferKind(source) {
+  if (!source) return "filesystem";
+  if (source.kind) return source.kind;
+  if (source.type === "git") return "source_code_repository";
+  if (source.type === "external") return "cloud";
+  return "filesystem";
+}
+
+function inferProvider(source) {
+  if (!source) return "";
+  if (source.provider) return source.provider;
+  if (source.type === "git") return "git-local";
+  if (source.type === "external") return "";
+  return "local";
+}
+
 function applyKind() {
   const kind = knowledgeKind();
-  const list = BACKENDS[kind] || [];
+  const list = backends[kind] || [];
   const sel = $("f-provider");
   sel.innerHTML = list.length
-    ? list.map((p) => '<option value="' + p.id + '">' + p.id + "</option>").join("")
+    ? list.map((id) => '<option value="' + esc(id) + '">' + esc(id) + "</option>").join("")
     : '<option value="">none implemented</option>';
   sel.disabled = !list.length;
+  const copy = KIND_HINT[kind] || KIND_HINT.filesystem;
   $("f-provider-hint").textContent = list.length
-    ? list[0].hint
-    : "No cloud provider is implemented yet (s3, gcs, azure, oss).";
+    ? (kind === "source_code_repository"
+        ? "Implemented: git-local (a checkout on the runtime host). Host providers are not implemented yet."
+        : "A path on the runtime host.")
+    : copy.dir;
   $("register").classList.toggle("no-provider", !list.length);
   $("f-register").disabled = !list.length;
   applyShape();
@@ -223,21 +278,45 @@ function applyShape() {
   form.classList.toggle("file", kind === "file");
   form.classList.toggle("dir", kind === "directory");
   const kb = knowledgeKind();
-  $("f-location").placeholder = kind === "directory"
-    ? (kb === "source_code_repository" ? "/path/to/checkout" : "/path/to/docs")
-    : "/path/to/doc.md";
+  const copy = KIND_HINT[kb] || KIND_HINT.filesystem;
+  $("f-file-hint").textContent = copy.file;
+  $("f-dir-hint").textContent = copy.dir;
+  $("f-location-label").textContent = kind === "directory" ? copy.dirLoc : copy.fileLoc;
+  $("f-location").placeholder = kind === "directory" ? copy.dirPh : copy.filePh;
 }
 
 document.querySelectorAll('input[name="f-kind"]').forEach((el) => el.addEventListener("change", applyKind));
 document.querySelectorAll('input[name="f-shape"]').forEach((el) => el.addEventListener("change", applyShape));
+document.querySelectorAll('input[name="f-filter"]').forEach((el) => el.addEventListener("change", render));
 applyKind();
 
 function sourceText(s) {
   if (!s) return "";
-  return [s.kind, s.provider, s.type, s.location, s.repository, s.path].filter(Boolean).join(" · ");
+  return [s.location, s.repository, s.path].filter(Boolean).join(" · ");
+}
+
+function backendLabel(source) {
+  const kind = inferKind(source);
+  const provider = inferProvider(source);
+  return KIND_LABEL[kind] || kind || "unknown";
 }
 
 let resources = [];
+
+async function loadBackends() {
+  try {
+    const out = await api("GET", "/api/context/backends");
+    const next = { filesystem: [], source_code_repository: [], cloud: [] };
+    for (const b of (out && out.backends) || []) {
+      if (!next[b.kind]) next[b.kind] = [];
+      if (b.provider) next[b.kind].push(b.provider);
+    }
+    backends = next;
+  } catch (e) {
+    // Keep the built-in implemented pair if the listing endpoint is down.
+  }
+  applyKind();
+}
 
 async function load() {
   if (!project()) { say("project_id is required", "err"); return; }
@@ -247,27 +326,53 @@ async function load() {
     render();
   } catch (e) {
     resources = [];
-    $("rows").innerHTML = '<tr><td colspan="6" class="hint">could not load resources</td></tr>';
+    $("rows").innerHTML = '<tr><td colspan="5" class="hint">could not load resources</td></tr>';
     say(e.message, "err");
   }
 }
 
 function render() {
   const rows = $("rows");
-  if (!resources.length) {
-    rows.innerHTML = '<tr><td colspan="6" class="hint">no resources registered in this project yet — register one below</td></tr>';
+  const filter = listFilter();
+  const visible = resources.filter((r) => !filter || inferKind(r.source) === filter);
+  if (!visible.length) {
+    rows.innerHTML = '<tr><td colspan="5" class="hint">' +
+      (resources.length ? "no resources in this knowledge base" : "no resources registered in this project yet — register one below") +
+      "</td></tr>";
     return;
   }
-  rows.innerHTML = resources.map((r) =>
-    "<tr>" +
-      "<td>" + esc(r.name || r.id) + '<div class="hint"><code>' + esc(r.id) + "</code></div></td>" +
-      '<td><span class="pill">' + esc(r.type) + "</span></td>" +
-      "<td><code>" + esc(sourceText(r.source)) + "</code></td>" +
-      "<td><code>" + esc(r.revision || (r.checksum ? r.checksum.slice(0, 12) : "—")) + "</code></td>" +
-      "<td>" + esc(r.checksum ? new Date(r.updated_at).toLocaleString() : "never") + "</td>" +
-      '<td><button type="button" data-sync="' + esc(r.id) + '">Sync</button> ' +
-      '<button type="button" class="danger" data-delete="' + esc(r.id) + '">Delete</button></td>' +
-    "</tr>").join("");
+  const groups = {};
+  for (const r of visible) {
+    const kind = inferKind(r.source);
+    const provider = inferProvider(r.source) || "(none)";
+    const key = kind + "/" + provider;
+    if (!groups[key]) groups[key] = { kind, provider, items: [] };
+    groups[key].items.push(r);
+  }
+  const keys = Object.keys(groups).sort((a, b) => {
+    const ia = KIND_ORDER.indexOf(groups[a].kind);
+    const ib = KIND_ORDER.indexOf(groups[b].kind);
+    if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    return a.localeCompare(b);
+  });
+  let html = "";
+  for (const key of keys) {
+    const g = groups[key];
+    html += '<tr class="group"><td colspan="5">' +
+      esc(KIND_LABEL[g.kind] || g.kind) + " / " + esc(g.provider) +
+      " · " + g.items.length + (g.items.length === 1 ? " document" : " documents") +
+      "</td></tr>";
+    html += g.items.map((r) =>
+      "<tr>" +
+        "<td>" + esc(r.name || r.id) + '<div class="hint"><code>' + esc(r.id) + "</code></div></td>" +
+        "<td><code>" + esc(sourceText(r.source)) + "</code></td>" +
+        "<td><code>" + esc(r.revision || (r.checksum ? r.checksum.slice(0, 12) : "—")) + "</code></td>" +
+        "<td>" + esc(r.checksum ? new Date(r.updated_at).toLocaleString() : "never") + "</td>" +
+        '<td><button type="button" data-sync="' + esc(r.id) + '">Sync</button> ' +
+        '<button type="button" class="danger" data-delete="' + esc(r.id) + '">Delete</button></td>' +
+      "</tr>").join("");
+  }
+  rows.innerHTML = html;
 }
 
 async function syncResource(id) {
@@ -304,7 +409,7 @@ $("register").addEventListener("submit", async (event) => {
   if (!provider) { say("this knowledge base has no implemented provider yet", "err"); return; }
   const kind = shape();
   const location = $("f-location").value.trim();
-  if (!location) { say(kind === "directory" ? "directory path is required" : "file path is required", "err"); return; }
+  if (!location) { say((KIND_HINT[kb] || KIND_HINT.filesystem)[kind === "directory" ? "dirLoc" : "fileLoc"] + " is required", "err"); return; }
   const body = {
     project_id: project(),
     kind: kb,
@@ -314,8 +419,6 @@ $("register").addEventListener("submit", async (event) => {
   };
   if (kind === "file") {
     body.name = $("f-name").value.trim();
-    body.type = $("f-type").value;
-    body.uri = $("f-uri").value.trim();
     body.source.path = $("f-path").value.trim();
   } else {
     const suffixes = $("f-suffixes").value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
@@ -326,8 +429,8 @@ $("register").addEventListener("submit", async (event) => {
     const items = kind === "directory" ? ((created && created.resources) || []) : (created && created.id ? [created] : []);
     if (!items.length) { say("registered nothing", "err"); return; }
     let text = kind === "directory"
-      ? "registered " + items.length + " files under " + location
-      : "registered " + created.id;
+      ? "registered " + items.length + " documents via " + kb + "/" + provider
+      : "registered " + created.id + " via " + kb + "/" + provider;
     if ($("f-sync").checked) {
       let sections = 0, synced = 0;
       try {
@@ -384,7 +487,9 @@ $("results").addEventListener("click", async (event) => {
       "<strong>" + esc(s.heading || "(untitled)") + "</strong> " +
       '<span class="hint">' + esc(s.path || "") + " · lines " + esc(s.start_line) + "–" + esc(s.end_line) +
       (s.revision ? " · rev <code>" + esc(s.revision) + "</code>" : "") + "</span>" +
-      '<div class="hint">' + esc(sourceText(s.source)) + "</div>" +
+      '<div class="hint">' + esc(backendLabel(s.source)) +
+      (inferProvider(s.source) ? " / " + esc(inferProvider(s.source)) : "") +
+      " · " + esc(sourceText(s.source)) + "</div>" +
       '<pre class="content">' + esc(s.content) + "</pre></div>";
   } catch (e) {
     say(e.message, "err");
@@ -393,7 +498,7 @@ $("results").addEventListener("click", async (event) => {
 
 $("reload").addEventListener("click", load);
 $("f-project").addEventListener("keydown", (event) => { if (event.key === "Enter") load(); });
-load();
+loadBackends().then(load);
 </script>
 </body>
 </html>
