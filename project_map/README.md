@@ -33,4 +33,6 @@
 
 6. **`scripts/stop.sh` 曾经只认 `backend/runtime.pid`。** 平台 rsync --delete 不保留该文件，远程机器上旧 `autonomyd` 会继续占着 4300，restart 的 start 一步报「端口已被占用」把整次部署判失败（`pipeline-ba9a2e00`、`pipeline-4d3462fa`，同一 pid 跨两天）。现 stop 在 pid 文件缺失时按端口回收本 runtime 的二进制；`start.sh` 对同一类残留先 stop 再起。别人的进程仍不杀。
 
+7. **`docs/capability.md` 仍写「内置的六个都声明」，实现列表也漏了 `contextcap`。** 事实：`RegisterDefaults` 登记十个能力（`capability_test.go` 钉 `len==10`），其中 `context.search` / `get` / `list` 是 Context Service 的 Agent 读面。处理：补上实现路径与「十个」；Agent 派发方案落在 [context-capability.md](../docs/context-capability.md)，`docs/http-api.md` 补上已存在的 GET/DELETE 运维端点（路由表在 `src/http_server.go` 的 `routes()`，此前只写了 POST register/sync）。
+
 后续 agent 若发现上述条目已被新代码推翻，删除或改写它们，不要累积过期异议。

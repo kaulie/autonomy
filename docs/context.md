@@ -31,6 +31,7 @@ Organization + Project + Service + Environment + Task-local
 - Context Ref 在决策周期开始前被解析成世界（[context-builder.md](context-builder.md)：本进程的容器 + 平台的注册表 —— project、它所属的 organization、那个 organization 登记的 services；引用也可以指向一条 task，那就从那条 task 的 world 接着走）
 - [Project](project.md) 是 Context 的一种常见实现
 - [Agent](agent.md) 通过 Context 解析 [Asset](asset.md) 与 [Capability](capability.md) 的可用范围
+- Agent **主动发现**项目知识走 [context-capability.md](context-capability.md)（`context.list` / `context.search` / `context.get`）；启动时注入的只是最小身份，不是全文
 - [Domain](domain.md) 描述语义空间；Context 提供该空间在当下的具体实例化
 
 ## 不变式

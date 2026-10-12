@@ -10,7 +10,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 
 1. [principles.md](principles.md) — 十二条原则
 2. [task.md](task.md) / [completion-contract.md](completion-contract.md) — 工作契约与完成锚点
-3. [context.md](context.md) / [project.md](project.md) — 世界与命名空间
+3. [context.md](context.md) / [project.md](project.md) — 世界与命名空间；Agent 可调用的发现能力见 [context-capability.md](context-capability.md)
 4. [agent.md](agent.md) / [delegation.md](delegation.md) — 责任主体与委托
 5. [session.md](session.md) — 一只 agent 与 LLM 的会话（planner 与 worker 跑同一套）
 5b. [accounts.md](accounts.md) — 账号池：一个账号 = harness + vendor + 一把凭据（凭据只从这里来）
@@ -30,6 +30,7 @@ Autonomy 的核心不是 Workflow Engine，而是一套可演化的 ontology：
 16. [inbox.md](inbox.md) — 每个 agent 的消息队列：用户 / 别的 agent / runtime 发的消息，按到达顺序一条条处理
 17. [execution-step.md](execution-step.md) — 计划与执行两层记录（`execution_plan` / `execution_step_plan` / `execution_step` / `execution_step_interaction`）：计划先写、不可改、结果派生，且按 message id 追溯到是哪条回复、哪条输入
 18. [context-builder.md](context-builder.md) — `context_ref` 的解析器（独立模块）：在 prompt 之前把引用解析成世界（本进程的容器 + 平台的 project / organization / service / task 注册表），失败不致命
+18b. [context-capability.md](context-capability.md) — Agent 可调用的 Context 管理能力（`context.list` / `search` / `get`）以及 planner 怎样派发它们；运维写路径不是 capability
 19. [broadcast.md](broadcast.md) — 广播：一句话投递给某个 project 下的、或所有 project 下的所有 agent（`AcceptTask` 的复数，消息本身还是一条普通指令）
 20. [llm-backend.md](llm-backend.md) — LLM 后端（cursor / cline）与怎么切换：后端是 runtime 进程的设置（`AUTONOMY_LLM_BACKEND`），`GET /health` 报当前后端，本地 / 部署两条切换路径
 21. [local-replica.md](local-replica.md) — 本地副本（写远端、读本地）：把远端主库的一份 streaming replica 立在本机，观察类的读走本地、写与「读完就写」的读走远端
