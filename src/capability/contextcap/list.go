@@ -21,7 +21,7 @@ func (List) Domain() string   { return Domain }
 func (List) Provider() string { return Provider }
 
 func (List) Description() string {
-	return `context.list: list a project's registered context resources (inventory, not content). input: {"project_id":"<project id>"}. output: {"resources":[{id, name, type, uri, revision, source_type}]}. Errors are typed: PROJECT_NOT_FOUND / INDEX_FAILED.`
+	return `context.list: list a project's registered context resources (inventory, not content). input: {"project_id":"<project id>"}. output: {"resources":[{id, name, type, uri, revision, source_type, path, files}]}. files are indexed document paths — look here for AGENT.md before searching. Errors are typed: PROJECT_NOT_FOUND / INDEX_FAILED.`
 }
 
 func (List) Inputs() []spec.Field {
@@ -32,7 +32,7 @@ func (List) Inputs() []spec.Field {
 
 func (List) Outputs() []spec.Field {
 	return []spec.Field{
-		{Name: "resources", Description: `JSON array of {id, name, type, uri, revision, source_type}`},
+		{Name: "resources", Description: `JSON array of {id, name, type, uri, revision, source_type, path, files}`},
 	}
 }
 
@@ -46,16 +46,18 @@ func (c List) Run(in map[string]string) (map[string]string, error) {
 		return nil, err
 	}
 	type row struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		Type       string `json:"type"`
-		URI        string `json:"uri,omitempty"`
-		Revision   string `json:"revision,omitempty"`
-		SourceType string `json:"source_type,omitempty"`
+		ID         string   `json:"id"`
+		Name       string   `json:"name"`
+		Type       string   `json:"type"`
+		URI        string   `json:"uri,omitempty"`
+		Revision   string   `json:"revision,omitempty"`
+		SourceType string   `json:"source_type,omitempty"`
+		Path       string   `json:"path,omitempty"`
+		Files      []string `json:"files,omitempty"`
 	}
 	rows := make([]row, 0, len(resources))
 	for _, r := range resources {
-		rows = append(rows, row{r.ID, r.Name, string(r.Type), r.URI, r.Revision, r.Source.Type})
+		rows = append(rows, row{r.ID, r.Name, string(r.Type), r.URI, r.Revision, r.Source.Type, r.Source.Path, r.Files})
 	}
 	encoded, err := json.Marshal(map[string]any{"resources": rows})
 	if err != nil {

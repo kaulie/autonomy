@@ -44,8 +44,10 @@ func TestSearchGetList(t *testing.T) {
 	}
 	var listed struct {
 		Resources []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID    string   `json:"id"`
+			Name  string   `json:"name"`
+			Files []string `json:"files"`
+			Path  string   `json:"path"`
 		} `json:"resources"`
 	}
 	if err := json.Unmarshal([]byte(list["resources"]), &listed); err != nil {
