@@ -141,9 +141,9 @@ Agent **不要**计划 `context.register` / `context.sync` / `context.delete`：
 
 1. **只从 Constructs 调用。** 调用 = capability + 它声明过的 input。不要发明 `context.read_all`、`docs.grep`、`rag.query`。
 2. **Planner 和 worker 用同一套机制。** 角色只是分工：planner 把读到的约定写进后续 step；worker 在实现中途同样可以 `list` / `search` / `get`。禁止把 discovery 写成「只有 planner 能做」。
-3. **禁止用全局文件系统 grep 做项目发现。** 不许扫整机、其它 task 目录、runtime、整个宿主工程树来找文档或约定。允许的局部阅读：本 agent workspace 里**已经 clone、且当前工作圈定的仓库根**，以及 `AGENT.md` / `project_map/`；再加上用户在 `need_input` 里明确批准的路径。那是实现期找符号，不是 discovery 的替代品。
+3. **文件系统默认只搜自己的 workspace。** 每只 agent 的 workspace 是 `{account_root}/{agent-name}/`（见 `{{CONSTRAINTS}}` 的 `workspace`）。Grep / Glob / 读文件默认不得越出这个目录：不搜其它 agent、不搜 runtime、不搜宿主工程树。项目知识仍走 `context.*`；workspace 里没有、索引里也没有，就 `need_input`，不要把搜索范围扩大到 workspace 外。
 4. **输入必须有来源。** planner 的 plan step 只有三种：字面量、`{"source":"step:<name>.output.<key>"}`、`{"source":"world_model:asset.…"}`。worker 从同一份 `CONTEXT_ENTITY` 抄 `project_id`。Runtime 不会猜。
-5. **空结果不是缺能力。** list 为空、search 零命中、get 找不到，都是观察，用来换 query、换词、或 `need_input`。不要 `blocked`，也不要因此去全盘 grep。
+5. **空结果不是缺能力。** list 为空、search 零命中、get 找不到，都是观察，用来换 query、换词、或 `need_input`。不要 `blocked`，也不要因此去搜自己的 workspace 之外。
 6. **够用就停。** 已经能做下一步该做的事（planner 能写 `code_edit.instruction`，worker 能改对文件）就停。不要把项目文档读完。
 
 ### 4.2 标准闭环
@@ -166,8 +166,8 @@ CONTEXT_ENTITY.project.id
         ▼
   工作上下文够了？
      ├─ 否 → 换 1～2 个更短的专有名词再 search
-     ├─ 否，且缺口是已圈定 checkout 里的实现细节 → 只在白名单路径里局部搜符号
-     ├─ 否，项目知识仍不在索引里 → need_input（resource / information）
+     ├─ 否，且缺口是本 workspace 里已有代码的实现细节 → 只在自己的 workspace 里搜
+     ├─ 否，项目知识不在索引、也不在自己的 workspace → need_input（resource / information）
      └─ 是 → 停止 discovery，做本职（planner 派发下一步 / worker 改代码）
 ```
 
@@ -205,7 +205,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 | `INDEX_FAILED` / not configured | 基础设施不可用（常见：sqlite）。报告事实；不要假装搜过、也不要改去打运维 HTTP |
 | `SOURCE_UNAVAILABLE` / `PARSE_FAILED` | 只出现在运维 sync，不会从这三件 capability 冒出来 |
 
-零命中（成功但 `results` 为空）不是错误：换更短的词、去掉过滤、或先 `list` 确认是否根本没有 `document`。换过 1～2 次仍没有可用 section，进入 §4.5，不要开始全盘 grep。
+零命中（成功但 `results` 为空）不是错误：换更短的词、去掉过滤、或先 `list` 确认是否根本没有 `document`。换过 1～2 次仍没有可用 section，进入 §4.5，不要把文件系统搜索扩到自己的 workspace 之外。
 
 ### 4.5 `need_input`：search 仍不够时请人补，然后重试
 
@@ -215,7 +215,7 @@ Search 的 `results` 是 JSON 数组。Runtime **不会**从数组里替你挑 `
 
 - `resource`：索引里没有这份知识。请人在运维面登记并 sync 一篇文档，或指出应登记的路径。
 - `information`：请人把原文贴进下一条指令。
-- 人如果批准「允许在某相对路径里搜」：那条路径成为本 task 的显式白名单，只用于实现期局部搜，不是放开全盘。
+- 不要用 `need_input` 申请「到 workspace 外去 grep」。默认搜索范围就是自己的 workspace；缺的知识走 Context Service 或人贴进来。
 
 `need.description` 必须写清：缺什么、已经试过的 list/query 与结果、人可以怎么补、补完后重试哪一步。缺任何一项，下一轮还会猜。
 
@@ -228,13 +228,13 @@ Worker 不走 Decision Output Schema 时：把同样四件事写进本次委托�
 - Orientation **不改变 World**。`expected_effect` 可以为空；不要因为 World 仍是 `assets: []` 就认为 list/search 失败。
 - 软件开发任务的完成锚点仍是 `code_edit.pr_url`（kind `pull_request`）+ `pr.check`。`context.get` 的 `content` **没有 kind**，不能当 Completion Contract 的 evidence 槽。
 - 读到的正文用来**写好**后续工作（planner 写 `code_edit.instruction`，worker 按约定改文件），而不是把整段 content 再塞进 World。
-- Checkout 里读 `AGENT.md` / 当前仓库源码，补的是**已经圈定的那一份代码**；跨仓库 / 服务 / ADR 的项目知识仍走 Context Service。两者叠用，不是互相替代。
+- 文件系统阅读只发生在**自己的 workspace**（通常是 clone 进来的那份代码和它的 `AGENT.md` / `project_map/`）。跨仓库 / 服务 / ADR 的项目知识走 Context Service。两者叠用，不是互相替代，也不是把搜索范围扩到别人的目录。
 
 ### 4.7 Worker 怎么真正调到这三件
 
 Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / `get`）和 `CONTEXT_ENTITY`。政策要求它按 Constructs 调用，不要另做一套。
 
-今天 planner 经 Decision Cycle 的 `Execute` 跑这些能力；worker 的 harness 默认是编辑器工具。要让「都可以用」在运行时成立，worker 会话必须能 **Run 同一份 `contextcap`**（同一 Context Service、同一个 `project_id`），而不是改去打运维 HTTP，也不是用 `rg` 冒充 search。接线可以后做；在接到之前，worker **仍然禁止**用全局 grep 填这个洞——报缺口，升到 `need_input`。
+今天 planner 经 Decision Cycle 的 `Execute` 跑这些能力；worker 的 harness 默认是编辑器工具。要让「都可以用」在运行时成立，worker 会话必须能 **Run 同一份 `contextcap`**（同一 Context Service、同一个 `project_id`），而不是改去打运维 HTTP，也不是用 `rg` 冒充 search。接线可以后做；在接到之前，worker **仍然禁止**搜自己 workspace 以外的目录——报缺口，升到 `need_input`。
 
 ### 4.8 示例：两轮 orientation 再执行
 
@@ -340,5 +340,5 @@ Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / 
 | 空 World 要不要 blocked？ | 不要；先 orientation |
 | 登记文档是不是 Agent 的事？ | 不是；HTTP / CLI / `GET /context` |
 | Worker 会不会调这三件？ | 会；和 planner 同一套，只是分工不同 |
-| 可以全盘 grep 找文档吗？ | 不可以；search 不够就 `need_input` |
+| 文件系统默认搜哪里？ | 只搜自己的 workspace；search 不够就 `need_input` |
 | 会话裁剪、digest 算不算？ | 不算；那是控制面的窗口管理 |
