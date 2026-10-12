@@ -106,6 +106,9 @@ func TestThePlannerPolicyDoesNotAskTheOwnerToAuthorizeCodeEdit(t *testing.T) {
 		"already has `kind: pull_request` for `pr.check`",
 		"An empty World is not a missing capability",
 		"functional-acceptance capability",
+		"Project knowledge is discovered only through `context.list`",
+		"Planner and worker share that set",
+		"Do not use host-wide filesystem grep",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the planner policy no longer says %q", want)
@@ -130,6 +133,8 @@ func TestTheWorkerPromptIsStillTheWorkersOwn(t *testing.T) {
 		"{{WORKSPACE}}", "{{GOAL}}", "{{AGENT}}", "{{CONSTRUCTS}}",
 		"## Project Orientation",
 		"prefer `AGENT.md` at the project root",
+		"You share the same context capabilities as the planner",
+		"Do not invent a second discovery path",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the worker prompt no longer carries %q", want)

@@ -117,6 +117,9 @@ func TestTheShippedPolicyKeepsDeployingTheRuntimesMove(t *testing.T) {
 	if got, want := keys["deploy"], "the Runtime's move, not the agent's"; got != want {
 		t.Fatalf("deploy=%q want %q (src/agent_policy/CONSTRAINTS.json)", got, want)
 	}
+	if got := keys["context_discovery"]; !strings.Contains(got, "planner and worker share that set") {
+		t.Fatalf("context_discovery=%q, want planner and worker to share context.*", got)
+	}
 	if _, ok := keys["worker_workspace"]; ok {
 		t.Fatalf("constraints=%v, worker authorization is not a shared policy sentence", keys)
 	}
