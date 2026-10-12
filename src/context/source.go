@@ -52,7 +52,7 @@ func sourcePath(r Resource) string {
 // gitRevision best-effort resolves the commit SHA of a git-sourced resource.
 // A source that is not git, or has no local checkout, simply has no revision.
 func gitRevision(ctx context.Context, r Resource, path string) string {
-	if !strings.EqualFold(strings.TrimSpace(r.Source.Type), "git") {
+	if !isGitLocalSource(r.Source) {
 		return r.Revision
 	}
 	dir := strings.TrimSpace(r.Source.Location)
@@ -64,4 +64,12 @@ func gitRevision(ctx context.Context, r Resource, path string) string {
 		return r.Revision
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func isGitLocalSource(src ResourceSource) bool {
+	if strings.EqualFold(strings.TrimSpace(src.Kind), KindSourceCodeRepository) &&
+		strings.EqualFold(strings.TrimSpace(src.Provider), ProviderGitLocal) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(src.Type), "git")
 }

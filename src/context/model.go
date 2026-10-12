@@ -36,7 +36,11 @@ func (t ResourceType) Valid() bool {
 // ResourceSource is where a Resource actually lives — the fact the index must
 // be able to be rebuilt from (Source of Truth != Search Index).
 type ResourceSource struct {
-	// Type is the source kind: local_file, git, external.
+	// Kind is the knowledge-base class: filesystem, source_code_repository, cloud.
+	Kind string `json:"kind,omitempty"`
+	// Provider is the implementation of that class: local, git-local, github, s3, …
+	Provider string `json:"provider,omitempty"`
+	// Type is the legacy loader hint: local_file, git, external.
 	Type string `json:"type,omitempty"`
 	// Location is the concrete place: a filesystem path or a remote URL.
 	Location string `json:"location,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,9 @@ func TestContextWritePathRegisterSyncSearch(t *testing.T) {
 	decodeContextBody(t, rec, &registered)
 	if registered.ID == "" || registered.Type != ctxsvc.ResourceDocument || registered.ProjectID != "project-749a0238" {
 		t.Fatalf("registered resource = %+v", registered)
+	}
+	if registered.Source.Kind != ctxsvc.KindFilesystem || registered.Source.Provider != ctxsvc.ProviderLocal {
+		t.Fatalf("stamped source = %+v", registered.Source)
 	}
 
 	syncPath := "/api/context/resources/" + registered.ID + "/sync"
@@ -157,6 +161,12 @@ func TestContextWritePathRegisterDirectory(t *testing.T) {
 	if !names["readme.md"] || !names["docs/runtime.md"] {
 		t.Fatalf("names = %v", names)
 	}
+	if out.Kind != ctxsvc.KindFilesystem || out.Provider != ctxsvc.ProviderLocal {
+		t.Fatalf("backend = %+v", out)
+	}
+	if out.Resources[0].Source.Kind != ctxsvc.KindFilesystem || out.Resources[0].Source.Provider != ctxsvc.ProviderLocal {
+		t.Fatalf("stamped source = %+v", out.Resources[0].Source)
+	}
 
 	listed, err := svc.ListResources(context.Background(), "p")
 	if err != nil || len(listed) != 2 {
@@ -196,6 +206,65 @@ func TestContextWritePathRegisterDirectory(t *testing.T) {
 	decodeContextBody(t, rec, &got)
 	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
 		t.Fatalf("no matching suffix: %d %+v", rec.Code, got)
+	}
+}
+
+func TestContextWritePathKnowledgeBackends(t *testing.T) {
+	srv, _ := contextWriteServer(t)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/context/backends", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("backends: %d %s", rec.Code, rec.Body.String())
+	}
+	var listed contextBackendsResponse
+	decodeContextBody(t, rec, &listed)
+	if len(listed.Backends) != 2 {
+		t.Fatalf("backends = %+v", listed)
+	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","kind":"cloud","provider":"s3","shape":"directory","source":{"location":"/tmp"}}`)
+	var got contextErrResponse
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("cloud/s3: %d %+v", rec.Code, got)
+	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","kind":"source_code_repository","provider":"github","shape":"directory","source":{"location":"owner/repo"}}`)
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("github: %d %+v", rec.Code, got)
+	}
+
+	plain := t.TempDir()
+	if err := os.WriteFile(filepath.Join(plain, "readme.md"), []byte("# X\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","kind":"source_code_repository","provider":"git-local","shape":"directory","source":{"location":"`+plain+`"}}`)
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("git-local on plain dir: %d %+v", rec.Code, got)
+	}
+
+	repo := t.TempDir()
+	init := exec.Command("git", "-C", repo, "init")
+	init.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "readme.md"), []byte("# X\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","kind":"source_code_repository","provider":"git-local","shape":"directory","source":{"location":"`+repo+`"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("git-local: %d %s", rec.Code, rec.Body.String())
+	}
+	var out contextDirectoryRegisterResponse
+	decodeContextBody(t, rec, &out)
+	if out.Kind != ctxsvc.KindSourceCodeRepository || out.Provider != ctxsvc.ProviderGitLocal || out.Count != 1 {
+		t.Fatalf("git-local register = %+v", out)
+	}
+	if out.Resources[0].Source.Type != "git" {
+		t.Fatalf("git source type = %+v", out.Resources[0].Source)
 	}
 }
 

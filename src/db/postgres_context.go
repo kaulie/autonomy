@@ -66,6 +66,8 @@ func (r *postgresContextRepository) ensureSchema(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_resources_project ON context_resources (project_id)`,
+		`ALTER TABLE context_resources ADD COLUMN IF NOT EXISTS source_kind TEXT`,
+		`ALTER TABLE context_resources ADD COLUMN IF NOT EXISTS source_provider TEXT`,
 		`CREATE TABLE IF NOT EXISTS context_sections (
 			id TEXT PRIMARY KEY,
 			resource_id TEXT NOT NULL,
@@ -95,17 +97,18 @@ func (r *postgresContextRepository) SaveResource(ctx context.Context, resource c
 	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO context_resources
-			(id, project_id, type, name, uri, source_type, source_location, source_repository,
-			 source_path, revision, checksum, metadata, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+			(id, project_id, type, name, uri, source_kind, source_provider, source_type, source_location,
+			 source_repository, source_path, revision, checksum, metadata, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)
 		ON CONFLICT (id) DO UPDATE SET
 			project_id=EXCLUDED.project_id, type=EXCLUDED.type, name=EXCLUDED.name, uri=EXCLUDED.uri,
+			source_kind=EXCLUDED.source_kind, source_provider=EXCLUDED.source_provider,
 			source_type=EXCLUDED.source_type, source_location=EXCLUDED.source_location,
 			source_repository=EXCLUDED.source_repository, source_path=EXCLUDED.source_path,
 			revision=EXCLUDED.revision, checksum=EXCLUDED.checksum, metadata=EXCLUDED.metadata,
 			created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at`,
 		resource.ID, resource.ProjectID, string(resource.Type), resource.Name, resource.URI,
-		resource.Source.Type, resource.Source.Location,
+		resource.Source.Kind, resource.Source.Provider, resource.Source.Type, resource.Source.Location,
 		resource.Source.Repository, resource.Source.Path, resource.Revision, resource.Checksum,
 		string(metadata), resource.CreatedAt, resource.UpdatedAt)
 	if err != nil {

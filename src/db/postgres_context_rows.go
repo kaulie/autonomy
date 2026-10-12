@@ -9,8 +9,9 @@ import (
 	ctxsvc "github.com/kaulie/autonomy/src/context"
 )
 
-const selectContextResource = `SELECT id, project_id, type, name, uri, source_type, source_location,
-	source_repository, source_path, revision, checksum, metadata, created_at, updated_at
+const selectContextResource = `SELECT id, project_id, type, name, uri, source_kind, source_provider,
+	source_type, source_location, source_repository, source_path, revision, checksum, metadata,
+	created_at, updated_at
 	FROM context_resources`
 
 // rowScanner is the one method *sql.Row and *sql.Rows share that scanning needs.
@@ -56,6 +57,8 @@ func scanContextResource(row rowScanner) (ctxsvc.Resource, error) {
 		createdAt  time.Time
 		updatedAt  time.Time
 		uri        sql.NullString
+		sourceKind sql.NullString
+		sourceProv sql.NullString
 		sourceType sql.NullString
 		location   sql.NullString
 		repository sql.NullString
@@ -63,14 +66,16 @@ func scanContextResource(row rowScanner) (ctxsvc.Resource, error) {
 		revision   sql.NullString
 		checksum   sql.NullString
 	)
-	if err := row.Scan(&resource.ID, &resource.ProjectID, &typ, &resource.Name, &uri, &sourceType,
-		&location, &repository, &path, &revision, &checksum, &metadata, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&resource.ID, &resource.ProjectID, &typ, &resource.Name, &uri, &sourceKind,
+		&sourceProv, &sourceType, &location, &repository, &path, &revision, &checksum, &metadata,
+		&createdAt, &updatedAt); err != nil {
 		return ctxsvc.Resource{}, err
 	}
 	resource.Type = ctxsvc.ResourceType(typ)
 	resource.URI = uri.String
 	resource.Source = ctxsvc.ResourceSource{
-		Type: sourceType.String, Location: location.String, Repository: repository.String, Path: path.String,
+		Kind: sourceKind.String, Provider: sourceProv.String, Type: sourceType.String,
+		Location: location.String, Repository: repository.String, Path: path.String,
 	}
 	resource.Revision = revision.String
 	resource.Checksum = checksum.String

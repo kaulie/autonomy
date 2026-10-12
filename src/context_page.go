@@ -5,9 +5,10 @@ package autonomy
 // Same shape as the accounts page: one self-contained file — no build step, no bundler, no
 // external asset — whose whole job is to call the Context Service's operator API
 // (src/context_write.go and its handlers in http_server.go) and render the answer: register a
-// resource (one file, or every Markdown file under a directory), sync it into the index, list a
-// project's resources, search their sections, read one section, delete a resource. Agents still
-// only read, through context.search / get / list.
+// knowledge base by kind + provider (filesystem/local, source_code_repository/git-local),
+// as one file or a recursive collection, sync it into the index, list a project's resources,
+// search their sections, read one section, delete a resource. Agents still only read,
+// through context.search / get / list.
 //
 // The Context Service needs the postgres store engine; without it every call answers 503
 // INDEX_FAILED, and the page says that instead of showing an empty table as if it were the truth.
@@ -48,6 +49,7 @@ const contextPageHTML = `<!DOCTYPE html>
   .shape label.check { padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 8px; background: #f9fafb; cursor: pointer; }
   .shape input { width: auto; margin: 0; }
   form.dir .only-file, form.file .only-dir { display: none; }
+  form.no-provider .needs-provider { opacity: .5; pointer-events: none; }
   .msg { margin: 10px 0; padding: 8px 10px; border-radius: 6px; display: none; white-space: pre-wrap; }
   .msg.ok { display: block; background: #e6f4ea; color: #1a7f37; }
   .msg.err { display: block; background: #fde8e8; color: #b42318; }
@@ -61,8 +63,9 @@ const contextPageHTML = `<!DOCTYPE html>
 <body>
 <h1>Context</h1>
 <div class="sub">
-  A project's context space: register a single Markdown file or a directory of them
-  (recursive), sync into the full-text index, search sections and read one.
+  A project's context space. Pick a knowledge base (filesystem, source code
+  repository, cloud storage) and a provider, then register one file or a recursive
+  collection. Sync into the full-text index, search sections and read one.
   Needs the postgres store engine.
 </div>
 
@@ -86,16 +89,29 @@ const contextPageHTML = `<!DOCTYPE html>
 <form id="register" class="file" autocomplete="off">
   <div class="grid">
     <div>
+      <div class="formtitle">knowledge base</div>
+      <div class="shape" id="f-kind">
+        <label class="check"><input type="radio" name="f-kind" value="filesystem" checked> filesystem</label>
+        <label class="check"><input type="radio" name="f-kind" value="source_code_repository"> source code repository</label>
+        <label class="check"><input type="radio" name="f-kind" value="cloud"> cloud storage</label>
+      </div>
+    </div>
+    <div>
+      <label for="f-provider">provider</label>
+      <select id="f-provider"></select>
+      <div class="hint" id="f-provider-hint"></div>
+    </div>
+    <div class="needs-provider">
       <div class="formtitle">shape</div>
       <div class="shape" id="f-shape">
         <label class="check"><input type="radio" name="f-shape" value="file" checked> single file</label>
         <label class="check"><input type="radio" name="f-shape" value="directory"> recursive directory</label>
       </div>
-      <div class="hint only-file">One Markdown file on the runtime host.</div>
-      <div class="hint only-dir">Recursively. Skips <code>.git</code>, hidden dirs, <code>node_modules</code>. Suffixes empty = all document types (<code>.md</code>, <code>.markdown</code>).</div>
+      <div class="hint only-file">One document on this provider.</div>
+      <div class="hint only-dir">Recursively. Skips hidden dirs, <code>node_modules</code>. Suffixes empty = all document types (<code>.md</code>, <code>.markdown</code>).</div>
     </div>
-    <div class="only-file"><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
-    <div class="only-file">
+    <div class="only-file needs-provider"><label for="f-name">name</label><input type="text" id="f-name" placeholder="runtime.md"></div>
+    <div class="only-file needs-provider">
       <label for="f-type">type</label>
       <select id="f-type">
         <option value="document">document</option>
@@ -103,28 +119,20 @@ const contextPageHTML = `<!DOCTYPE html>
         <option value="service">service</option>
       </select>
     </div>
-    <div>
-      <label for="f-source-type">source type</label>
-      <select id="f-source-type">
-        <option value="local_file">local_file</option>
-        <option value="git">git</option>
-        <option value="external">external</option>
-      </select>
-    </div>
-    <div>
+    <div class="needs-provider">
       <label for="f-location"><span class="only-file">file path</span><span class="only-dir">directory path</span></label>
       <input type="text" id="f-location" placeholder="/path/to/doc.md">
     </div>
-    <div class="only-dir">
+    <div class="only-dir needs-provider">
       <label for="f-suffixes">suffixes <span class="hint">(optional; empty = all)</span></label>
       <input type="text" id="f-suffixes" placeholder="md, markdown">
       <div class="hint">Comma-separated extensions to keep. Leave empty to search every available document.</div>
     </div>
-    <div class="only-file"><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
-    <div class="only-file"><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
-    <div><label class="check"><input type="checkbox" id="f-sync" checked> sync after register</label></div>
+    <div class="only-file needs-provider"><label for="f-path">path <span class="hint">(inside a repository, optional)</span></label><input type="text" id="f-path"></div>
+    <div class="only-file needs-provider"><label for="f-uri">uri <span class="hint">(optional)</span></label><input type="text" id="f-uri"></div>
+    <div class="needs-provider"><label class="check"><input type="checkbox" id="f-sync" checked> sync after register</label></div>
   </div>
-  <div class="actions"><button type="submit" class="primary">Register</button></div>
+  <div class="actions"><button type="submit" class="primary" id="f-register">Register</button></div>
 </form>
 
 <h2>Search</h2>
@@ -177,9 +185,36 @@ function esc(value) {
 
 function project() { return $("f-project").value.trim(); }
 
+const BACKENDS = {
+  filesystem: [{ id: "local", hint: "A path on the runtime host." }],
+  source_code_repository: [{ id: "git-local", hint: "A git checkout on the runtime host. Host providers (github, gitlab, gitea) are not implemented yet." }],
+  cloud: [],
+};
+
+function knowledgeKind() {
+  const picked = document.querySelector('input[name="f-kind"]:checked');
+  return picked ? picked.value : "filesystem";
+}
+
 function shape() {
   const picked = document.querySelector('input[name="f-shape"]:checked');
   return picked ? picked.value : "file";
+}
+
+function applyKind() {
+  const kind = knowledgeKind();
+  const list = BACKENDS[kind] || [];
+  const sel = $("f-provider");
+  sel.innerHTML = list.length
+    ? list.map((p) => '<option value="' + p.id + '">' + p.id + "</option>").join("")
+    : '<option value="">none implemented</option>';
+  sel.disabled = !list.length;
+  $("f-provider-hint").textContent = list.length
+    ? list[0].hint
+    : "No cloud provider is implemented yet (s3, gcs, azure, oss).";
+  $("register").classList.toggle("no-provider", !list.length);
+  $("f-register").disabled = !list.length;
+  applyShape();
 }
 
 function applyShape() {
@@ -187,15 +222,19 @@ function applyShape() {
   const kind = shape();
   form.classList.toggle("file", kind === "file");
   form.classList.toggle("dir", kind === "directory");
-  $("f-location").placeholder = kind === "directory" ? "/path/to/docs" : "/path/to/doc.md";
+  const kb = knowledgeKind();
+  $("f-location").placeholder = kind === "directory"
+    ? (kb === "source_code_repository" ? "/path/to/checkout" : "/path/to/docs")
+    : "/path/to/doc.md";
 }
 
+document.querySelectorAll('input[name="f-kind"]').forEach((el) => el.addEventListener("change", applyKind));
 document.querySelectorAll('input[name="f-shape"]').forEach((el) => el.addEventListener("change", applyShape));
-applyShape();
+applyKind();
 
 function sourceText(s) {
   if (!s) return "";
-  return [s.type, s.location, s.repository, s.path].filter(Boolean).join(" · ");
+  return [s.kind, s.provider, s.type, s.location, s.repository, s.path].filter(Boolean).join(" · ");
 }
 
 let resources = [];
@@ -260,13 +299,18 @@ $("rows").addEventListener("click", async (event) => {
 $("register").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!project()) { say("project_id is required", "err"); return; }
+  const kb = knowledgeKind();
+  const provider = $("f-provider").value.trim();
+  if (!provider) { say("this knowledge base has no implemented provider yet", "err"); return; }
   const kind = shape();
   const location = $("f-location").value.trim();
   if (!location) { say(kind === "directory" ? "directory path is required" : "file path is required", "err"); return; }
   const body = {
     project_id: project(),
+    kind: kb,
+    provider: provider,
     shape: kind,
-    source: { type: $("f-source-type").value, location: location },
+    source: { location: location },
   };
   if (kind === "file") {
     body.name = $("f-name").value.trim();
@@ -301,7 +345,7 @@ $("register").addEventListener("submit", async (event) => {
     }
     say(text);
     $("register").reset();
-    applyShape();
+    applyKind();
     await load();
   } catch (e) {
     say(e.message, "err");
