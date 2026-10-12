@@ -182,6 +182,21 @@ func TestContextWritePathRegisterDirectory(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
 		t.Fatalf("empty directory: %d %+v", rec.Code, got)
 	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p2","shape":"directory","suffixes":["txt"],"source":{"location":"`+root+`"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("suffix filter: %d %s", rec.Code, rec.Body.String())
+	}
+	decodeContextBody(t, rec, &out)
+	if out.Count != 1 || len(out.Resources) != 1 || out.Resources[0].Name != "notes.txt" {
+		t.Fatalf("suffix filter = %+v", out)
+	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p2","shape":"directory","suffixes":["rst"],"source":{"location":"`+root+`"}}`)
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("no matching suffix: %d %+v", rec.Code, got)
+	}
 }
 
 func TestContextWritePathWithoutService(t *testing.T) {

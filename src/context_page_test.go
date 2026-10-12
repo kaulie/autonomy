@@ -37,8 +37,8 @@ func TestTheContextPageIsBuiltOnTheContextServiceAPI(t *testing.T) {
 		`<th>last sync</th>`,
 		`id="register"`, `id="f-shape"`, `name="f-shape"`, `value="file"`, `value="directory"`,
 		`id="f-name"`, `id="f-type"`, `id="f-source-type"`, // the register form
-		`id="f-location"`, `id="f-path"`, `id="f-uri"`, `id="f-sync"`,
-		`function shape()`, `shape: kind`,
+		`id="f-location"`, `id="f-suffixes"`, `id="f-path"`, `id="f-uri"`, `id="f-sync"`,
+		`function shape()`, `shape: kind`, `body.suffixes = suffixes`,
 		`id="search"`, `id="f-query"`, `id="results"`, `id="section"`, // search and the section view
 		`async function api(method, path, body)`, // its own fetch helper, relative paths
 		`function say(text, kind)`,

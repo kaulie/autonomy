@@ -39,6 +39,9 @@ type RegisterContextResourceRequest struct {
 	Source    ctxsvc.ResourceSource `json:"source"`
 	// Shape is the operator form: file (default) or directory (recursive).
 	Shape string `json:"shape,omitempty"`
+	// Suffixes filters a directory walk by file extension (md, .markdown).
+	// Empty means every default document suffix — search all.
+	Suffixes []string `json:"suffixes,omitempty"`
 }
 
 // Resource is the request as the Context Service stores it.
@@ -81,12 +84,15 @@ func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req Regis
 			root = filepath.Join(root, sub)
 		}
 	}
-	files, err := ctxsvc.DocumentFiles(root)
+	files, err := ctxsvc.DocumentFiles(root, req.Suffixes)
 	if err != nil {
 		return contextDirectoryRegisterResponse{}, err
 	}
 	if len(files) == 0 {
-		return contextDirectoryRegisterResponse{}, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "no markdown files under %q", root)
+		if len(req.Suffixes) == 0 {
+			return contextDirectoryRegisterResponse{}, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "no markdown files under %q", root)
+		}
+		return contextDirectoryRegisterResponse{}, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "no files matching suffixes %v under %q", req.Suffixes, root)
 	}
 	srcType := strings.TrimSpace(req.Source.Type)
 	if srcType == "" {
