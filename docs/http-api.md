@@ -135,13 +135,21 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 
 ### `POST /api/context/resources` — Context Service：登记一个资源
 
-Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填；`shape` 为 `file`（默认，一个文件）或 `directory`（递归登记目录下每个文档，跳过 `.git` / `node_modules` 等）；`suffixes` 只对 directory 生效，按扩展名过滤（`md`、`.markdown`），空则全部搜索默认文档后缀（`.md` / `.markdown`）；`type` 为 `document`（默认）/ `repository` / `service`（directory 形态一律当 document）；`id` 为空时生成 `ctx-<hex>`，已存在的 `id` 重新登记。`source.location`（+ `source.path`）是 **runtime 所在主机**上的文件或目录。
+Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填。先选知识库 **`kind` + `provider`**（各实现分开，未实现的直接 `INVALID_QUERY`）：
+
+| kind | 已实现 provider | 未实现（拒绝） |
+|------|-----------------|----------------|
+| `filesystem`（默认） | `local` | `sftp` / `ssh` |
+| `source_code_repository` | `git-local`（本机 checkout） | `github` / `gitlab` / `gitea` / `git` |
+| `cloud` | （无） | `s3` / `gcs` / `azure` / `oss` |
+
+省略 kind/provider 时按旧 `source.type` 回退：`local_file` → filesystem/local，`git` → source_code_repository/git-local，`external` → cloud（仍无 provider）。`shape` 为 `file`（默认）或 `directory`；`suffixes` 只对 directory 生效，空则全部搜索默认文档后缀（`.md` / `.markdown`）；`type` 为 `document`（默认）/ `repository` / `service`（directory 形态一律当 document）；`id` 为空时生成 `ctx-<hex>`。本地实现的 `source.location` 是 **runtime 所在主机**上的路径，不是远程 URL。
 
 ```json
-{"project_id":"project-749a0238","shape":"file","name":"runtime.md","type":"document","source":{"type":"git","location":"/srv/autonomy","path":"docs/runtime.md"}}
+{"project_id":"project-749a0238","kind":"filesystem","provider":"local","shape":"file","name":"runtime.md","type":"document","source":{"location":"/srv/docs/runtime.md"}}
 ```
 
-`shape=file` 时 `201` 回那一个资源。`shape=directory` 时 `201` 回 `{"shape":"directory","count":N,"resources":[…]}`，每个文件一行（`name` 是相对路径）。file 形态把目录当成 location 且没有 `path` → `400 INVALID_QUERY`。directory 指定了 `suffixes` 但没有匹配文件 → `400 INVALID_QUERY`。
+`shape=file` 时 `201` 回那一个资源（`source` 带 `kind` / `provider`）。`shape=directory` 时 `201` 回 `{"kind","provider","shape":"directory","count":N,"resources":[…]}`。file 形态把目录当成 location 且没有 `path` → `400 INVALID_QUERY`。directory 指定了 `suffixes` 但没有匹配文件 → `400 INVALID_QUERY`。`GET /api/context/backends` 列出已实现的 (kind, provider)。
 
 ### `POST /api/context/resources/{resourceID}/sync` — Context Service：同步进全文索引
 
@@ -161,6 +169,7 @@ autonomy context sync ctx-1a2b3c4d5e6f7a8b
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
+| `GET` | `/api/context/backends` | 已实现的知识库 (kind, provider) |
 | `GET` | `/api/context/resources?project_id=` | 清单（语义同 `context.list`） |
 | `GET` | `/api/context/resources/{resourceID}` | 一条资源的登记信息（无对应 capability） |
 | `DELETE` | `/api/context/resources/{resourceID}` | 删登记与索引，不碰源文件 |

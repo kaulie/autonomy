@@ -105,6 +105,7 @@ func (s *HTTPServer) routes() []httpsRoute {
 		{"DELETE /api/context/resources/{resourceID}", s.handleDeleteContextResource},
 		{"GET /api/context/search", s.handleSearchContext},
 		{"GET /api/context/sections/{sectionID}", s.handleGetContextSection},
+		{"GET /api/context/backends", s.handleListContextBackends},
 		// /health is the path the deployment platform probes for every service;
 		// /healthz stays as an alias for callers that already used it.
 		{"GET /health", s.handleHealth},
@@ -992,7 +993,7 @@ func (s *HTTPServer) handleUIHome(w http.ResponseWriter, _ *http.Request) {
 // @Tags     context
 // @Accept   json
 // @Produce  json
-// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；shape=file（默认，一个文件）或 directory（递归目录下每个文档）；suffixes 按扩展名过滤，空则全部；type 默认 document；id 为空时生成 ctx-<hex>"
+// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；kind+provider 选知识库实现（默认 filesystem/local）；shape=file|directory；suffixes 按扩展名过滤，空则全部"
 // @Success  201      {object}  context.Resource                         "shape=file：已登记的资源；shape=directory：{shape,count,resources}"
 // @Failure  400      {object}  contextErrResponse                       "INVALID_QUERY / PROJECT_NOT_FOUND：非法 JSON、缺 project_id、未知 type"
 // @Failure  500      {object}  contextErrResponse                       "INDEX_FAILED：写注册表失败"
@@ -1021,7 +1022,12 @@ func (s *HTTPServer) handleRegisterContextResource(w http.ResponseWriter, req *h
 			writeContextServiceErr(w, err)
 			return
 		}
-		resource, err := svc.Register(req.Context(), body.Resource())
+		resource, err := stampFileRegister(body)
+		if err != nil {
+			writeContextServiceErr(w, err)
+			return
+		}
+		resource, err = svc.Register(req.Context(), resource)
 		if err != nil {
 			writeContextServiceErr(w, err)
 			return
@@ -1188,6 +1194,18 @@ func (s *HTTPServer) handleGetContextSection(w http.ResponseWriter, req *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, section)
+}
+
+// handleListContextBackends lists implemented knowledge-base (kind, provider)
+// pairs. Unimplemented names (github, s3, …) are not listed.
+//
+// @Summary  Context Service：已实现的知识库 kind + provider
+// @Tags     context
+// @Produce  json
+// @Success  200  {object}  contextBackendsResponse  "backends：filesystem/local、source_code_repository/git-local"
+// @Router   /api/context/backends [get]
+func (s *HTTPServer) handleListContextBackends(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, contextBackendsResponse{Backends: contextImplementedBackends()})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

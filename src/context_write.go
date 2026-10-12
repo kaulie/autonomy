@@ -37,6 +37,10 @@ type RegisterContextResourceRequest struct {
 	URI       string                `json:"uri,omitempty"`
 	Metadata  map[string]string     `json:"metadata,omitempty"`
 	Source    ctxsvc.ResourceSource `json:"source"`
+	// Kind is the knowledge-base class: filesystem, source_code_repository, cloud.
+	Kind string `json:"kind,omitempty"`
+	// Provider is the implementation of that class (local, git-local, …).
+	Provider string `json:"provider,omitempty"`
 	// Shape is the operator form: file (default) or directory (recursive).
 	Shape string `json:"shape,omitempty"`
 	// Suffixes filters a directory walk by file extension (md, .markdown).
@@ -70,12 +74,30 @@ func (r RegisterContextResourceRequest) shape() string {
 
 // contextDirectoryRegisterResponse is POST /api/context/resources with shape=directory.
 type contextDirectoryRegisterResponse struct {
+	Kind      string            `json:"kind"`
+	Provider  string            `json:"provider"`
 	Shape     string            `json:"shape"`
 	Count     int               `json:"count"`
 	Resources []ctxsvc.Resource `json:"resources"`
 }
 
+func resolveRegisterBackend(req RegisterContextResourceRequest) (ctxsvc.Backend, error) {
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = strings.TrimSpace(req.Source.Kind)
+	}
+	provider := strings.TrimSpace(req.Provider)
+	if provider == "" {
+		provider = strings.TrimSpace(req.Source.Provider)
+	}
+	return ctxsvc.ResolveBackend(kind, provider, req.Source.Type)
+}
+
 func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req RegisterContextResourceRequest) (contextDirectoryRegisterResponse, error) {
+	backend, err := resolveRegisterBackend(req)
+	if err != nil {
+		return contextDirectoryRegisterResponse{}, err
+	}
 	root := strings.TrimSpace(req.Source.Location)
 	if sub := strings.TrimSpace(req.Source.Path); sub != "" {
 		if root == "" {
@@ -84,7 +106,7 @@ func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req Regis
 			root = filepath.Join(root, sub)
 		}
 	}
-	files, err := ctxsvc.DocumentFiles(root, req.Suffixes)
+	files, err := backend.List(ctx, root, req.Suffixes)
 	if err != nil {
 		return contextDirectoryRegisterResponse{}, err
 	}
@@ -94,21 +116,16 @@ func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req Regis
 		}
 		return contextDirectoryRegisterResponse{}, ctxsvc.Errorf(ctxsvc.ErrInvalidQuery, "no files matching suffixes %v under %q", req.Suffixes, root)
 	}
-	srcType := strings.TrimSpace(req.Source.Type)
-	if srcType == "" {
-		srcType = "local_file"
-	}
 	out := make([]ctxsvc.Resource, 0, len(files))
-	for _, rel := range files {
+	for _, item := range files {
 		resource, err := svc.Register(ctx, ctxsvc.Resource{
 			ProjectID: strings.TrimSpace(req.ProjectID),
 			Type:      ctxsvc.ResourceDocument,
-			Name:      rel,
-			Source: ctxsvc.ResourceSource{
-				Type:     srcType,
-				Location: root,
-				Path:     rel,
-			},
+			Name:      item.Name,
+			Source: ctxsvc.StampSource(ctxsvc.ResourceSource{
+				Location: item.Location,
+				Path:     item.Path,
+			}, backend),
 			Metadata: req.Metadata,
 		})
 		if err != nil {
@@ -116,7 +133,23 @@ func registerContextDirectory(ctx context.Context, svc ctxsvc.Service, req Regis
 		}
 		out = append(out, resource)
 	}
-	return contextDirectoryRegisterResponse{Shape: contextShapeDirectory, Count: len(out), Resources: out}, nil
+	return contextDirectoryRegisterResponse{
+		Kind: backend.Kind(), Provider: backend.Provider(),
+		Shape: contextShapeDirectory, Count: len(out), Resources: out,
+	}, nil
+}
+
+func stampFileRegister(req RegisterContextResourceRequest) (ctxsvc.Resource, error) {
+	resource := req.Resource()
+	if resource.Type != "" && resource.Type != ctxsvc.ResourceDocument {
+		return resource, nil
+	}
+	backend, err := resolveRegisterBackend(req)
+	if err != nil {
+		return ctxsvc.Resource{}, err
+	}
+	resource.Source = ctxsvc.StampSource(resource.Source, backend)
+	return resource, nil
 }
 
 func rejectFileShapeOnDirectory(req RegisterContextResourceRequest) error {
@@ -175,6 +208,24 @@ func (s *HTTPServer) contextService(w http.ResponseWriter) ctxsvc.Service {
 		return nil
 	}
 	return s.Autonomy.Context
+}
+
+// contextBackendInfo is one implemented knowledge-base backend.
+type contextBackendInfo struct {
+	Kind     string `json:"kind"`
+	Provider string `json:"provider"`
+}
+
+type contextBackendsResponse struct {
+	Backends []contextBackendInfo `json:"backends"`
+}
+
+func contextImplementedBackends() []contextBackendInfo {
+	out := make([]contextBackendInfo, 0, 2)
+	for _, b := range ctxsvc.ImplementedBackends() {
+		out = append(out, contextBackendInfo{Kind: b.Kind(), Provider: b.Provider()})
+	}
+	return out
 }
 
 // contextResourcesResponse is the body of GET /api/context/resources.
