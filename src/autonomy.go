@@ -553,9 +553,11 @@ func (r *Autonomy) runLoop(ctx context.Context, agent *Agent, task *Task, input 
 			task.Status = TaskStatusFor(decision)
 			persistTask(task)
 		default:
-			// No failure and no conclusion: the budget ran out after a plan.
-			task.Status = TaskStatusCompleted //completed not means success, it means the task is completed
-			persistTask(task)
+			// No failure and no conclusion: the budget ran out after a plan. That is
+			// not `completed` — completed is a `done` that held up (docs/task.md).
+			// The run failed to conclude within its cycle budget.
+			err = errCycleBudgetExhausted(r.maxSteps(), decision)
+			failTask(task, err)
 		}
 	}
 	return err
@@ -632,9 +634,10 @@ func markStopped(task *Task) {
 }
 
 // failTask ends the task in error, with the reason the runtime gave up on it —
-// the decide that failed, or the last cycle's failing action. Both used to be
-// printed and thrown away: a task row said "error" and nothing said why, so the
-// only account of the failure was the terminal it happened in.
+// the decide that failed, the last cycle's failing action, or the cycle budget
+// running out before a concluding decision. Those used to be printed and thrown
+// away: a task row said "error" and nothing said why, so the only account of
+// the failure was the terminal it happened in.
 //
 // The row describes the attempt that recorded an outcome: it is written here and
 // where a task completes, not when a run starts, so an unrecorded run cannot
@@ -677,11 +680,24 @@ func (r *Autonomy) executeDecision(agent *Agent, decision Decision) Result {
 	return result
 }
 
+// errCycleBudgetExhausted is why a run that spent its cycle budget without a
+// concluding decision (done / blocked / need_input) ends in error: the last
+// decision is named so the row says what it was still doing, not only that it
+// stopped.
+func errCycleBudgetExhausted(budget int, last Decision) error {
+	typ := strings.TrimSpace(last.Type)
+	if typ == "" {
+		typ = "none"
+	}
+	return fmt.Errorf("cycle budget exhausted (%d): last decision (%s) did not conclude the task", budget, typ)
+}
+
 // maxSteps is how many decision cycles a task may run: Autonomy.MaxSteps, or
 // AUTONOMY_MAX_STEPS when set. It is the loop's budget, not its goal (see
 // docs/execution-loop.md): a decision that concludes the task (done / blocked /
 // need_input) ends the run before the budget is spent, and the budget is what bounds
-// re-planning after a failed cycle.
+// re-planning after a failed cycle. Exhausting it without a conclusion is an
+// error, not a completed task.
 func (r *Autonomy) maxSteps() int {
 	if env := strings.TrimSpace(os.Getenv("AUTONOMY_MAX_STEPS")); env != "" {
 		if n, err := strconv.Atoi(env); err == nil && n > 0 {

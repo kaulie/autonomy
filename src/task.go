@@ -10,7 +10,8 @@ import (
 // `blocked` / `need_input` when the concluding decision said the task cannot go on
 // without something, `unverified` when the run ended with a `done` that never held up
 // (verification refused it, docs/verification.md), and `error` when the run failed —
-// with the reason in Error.
+// a decide that failed, the last cycle's failing action, or the cycle budget running
+// out before any of those answers — with the reason in Error.
 const (
 	TaskStatusRunning    = "running"
 	TaskStatusPending    = "pending"
@@ -38,10 +39,11 @@ type Task struct {
 	GoalType    GoalType
 	Status      string
 	// Error is why this task ended in status "error" or "unverified": the runtime's
-	// own reason — a decide that failed, the last cycle's failing action, or the verdict
-	// that kept the last `done` from holding up. It is recorded so the reason outlives
-	// the process that printed it (`tasks.error`): a row that says "error" and nothing
-	// else cannot be diagnosed later.
+	// own reason — a decide that failed, the last cycle's failing action, the cycle
+	// budget running out before a concluding decision, or the verdict that kept the
+	// last `done` from holding up. It is recorded so the reason outlives the process
+	// that printed it (`tasks.error`): a row that says "error" and nothing else cannot
+	// be diagnosed later.
 	Error      string
 	AgentID    int64 // current agent responsible for executing this task
 	CreatedAt  time.Time

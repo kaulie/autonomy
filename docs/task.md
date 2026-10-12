@@ -40,12 +40,15 @@ Task 是系统的**工作契约（Work Contract）**：对某个目标负责到�
 **运行结果也是数据**（`tasks` 表，见 [store.md](store.md)）：`status` 是落点，取值就是**收束这次运行的
 那个决策**：`running`（还在跑）→ `completed`（`done` **且验证通过**：完成契约的每条判据都被权威来源证实，
 见 [verification.md](verification.md)）／`unverified`（运行结束时最后一个答复是 `done`，而它始终没通过验证 ——
-被类型规则拒、被验证拒、或世界不满足）／`blocked`／`need_input`（任务在等东西，不是跑完了）／`error`（失败）。
-`error` 是**为什么**——这一轮 decide 失败（`decide: ...`），或最后一个 cycle 里失败的 action 及其原因；`unverified`
-这一行的 `error` 写的是**为什么没验过**（哪条判据、期望什么、权威来源答了什么）；`blocked` / `need_input` 的"为什么"
-是那次决策自己的 `need`（在 `execution_plan.need` 与那条回复里），不写进 `error`。两者都只在「记下结果」时写，不在
-起跑时写：一行只在真的有结果时才改口。这样一次失败不会随进程退出而消失（此前只有终端上那行，库里只留一个
-`status=error`）。
+被类型规则拒、被验证拒、或世界不满足）／`blocked`／`need_input`（任务在等东西，不是跑完了）／`error`（失败：
+decide 失败、最后一轮的 action 失败，或 **cycle 预算用尽却没有结论**）。
+`error` 是**为什么**——这一轮 decide 失败（`decide: ...`），最后一个 cycle 里失败的 action 及其原因，或
+`cycle budget exhausted (N): last decision (plan) did not conclude the task`（预算用尽时最后一轮仍是
+plan，不是 `done` / `blocked` / `need_input`）；`unverified` 这一行的 `error` 写的是**为什么没验过**（哪条判据、
+期望什么、权威来源答了什么）；`blocked` / `need_input` 的"为什么"是那次决策自己的 `need`（在
+`execution_plan.need` 与那条回复里），不写进 `error`。两者都只在「记下结果」时写，不在起跑时写：一行只在真的
+有结果时才改口。这样一次失败不会随进程退出而消失（此前只有终端上那行，库里只留一个 `status=error`）。
+**预算用尽不是 `completed`**：`completed` 只属于验证通过的 `done`。轮数上限把循环兜住，并不宣布目标达成。
 
 ## 关系
 

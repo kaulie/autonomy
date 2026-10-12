@@ -255,7 +255,8 @@ export AUTONOMY_STORE_READ_DSN="postgres://autonomy:…@127.0.0.1:5433/autonomy?
 **失败必须落成可查的数据，而不是只留在终端上**：
 
 - `tasks.status` 是结果（`running` / `completed` / `blocked` / `need_input` / `error` —— **收束这次运行的那个决策**），
-  `tasks.error` 是原因：这一轮 **decide 失败**（`decide: ...`）或**最后一个 cycle 的 action 失败**；`blocked` /
+  `tasks.error` 是原因：这一轮 **decide 失败**（`decide: ...`）、**最后一个 cycle 的 action 失败**，或 **cycle 预算用尽
+  却没有结论**（`cycle budget exhausted …`）。`completed` 只属于验证通过的 `done`，不是「循环停了」。`blocked` /
   `need_input` 的原因在 `execution_plan.need` 里，不写进 `error`。写在「记下结果」的两处，不在起跑时写（见 [task.md](task.md)）。
 - `reason_turns.status` / `error_code` / `error_message` 是每一轮 LLM run 自己的结果：provider 说
   `finished` 却一个字都没回也算**失败**（`status=error`），它自己那句话（如 `Insufficient Balance`）留在

@@ -435,8 +435,16 @@ func TestRunDoesNotStopOnAnAnswerTheRuntimeRefused(t *testing.T) {
 func TestRunRecordsThePlanAndWhatItTalkedTo(t *testing.T) {
 	store, rt := plannerRun(t, "give me a plan")
 	req := AcceptTaskRequest{ID: "task-e2e", Description: "give me a plan", Domain: string(TaskDomainServer), GoalType: GoalType_FEATURE}
-	if _, err := rt.Run(req); err != nil {
-		t.Fatalf("Run: %v", err)
+	_, err := rt.Run(req)
+	if err == nil || !strings.Contains(err.Error(), "cycle budget exhausted") {
+		t.Fatalf("Run err=%v, want cycle budget exhausted after two plans (budget was 2)", err)
+	}
+	var status, taskError string
+	if qerr := store.RawDB().QueryRow(`SELECT status, error FROM tasks WHERE id = ?`, req.ID).Scan(&status, &taskError); qerr != nil {
+		t.Fatal(qerr)
+	}
+	if status != TaskStatusError || !strings.Contains(taskError, "cycle budget exhausted") {
+		t.Fatalf("task status/error=%q/%q, want error with the budget, not completed", status, taskError)
 	}
 
 	plans, err := store.ListExecutionPlans("task-e2e")

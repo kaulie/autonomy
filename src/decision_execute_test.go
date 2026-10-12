@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -162,6 +163,49 @@ func TestMaxStepsComesFromTheEnvironment(t *testing.T) {
 	t.Setenv("AUTONOMY_MAX_STEPS", "nonsense")
 	if got := rt.maxSteps(); got != 5 {
 		t.Fatalf("maxSteps=%d, want the struct's 5 again", got)
+	}
+}
+
+// TestRunEndsInErrorWhenTheCycleBudgetRunsOutAfterAPlan: MaxSteps bounds re-planning;
+// it is not a completion. A run that spends the budget on successful plans and never
+// answers done / blocked / need_input ends `error`, with the budget on the row —
+// never `completed` (docs/task.md, docs/execution-loop.md).
+func TestRunEndsInErrorWhenTheCycleBudgetRunsOutAfterAPlan(t *testing.T) {
+	store := executionTestStore(t)
+	factory := NewAgentFactory()
+	rt := NewRuntime(factory)
+	auto := &Autonomy{AgentFactory: factory, Runtime: rt, Store: store, MaxSteps: 1}
+
+	agent, err := NewAgentInitializer(factory).Initialize(AgentInitOptions{})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	script := &scriptedReasoner{decisions: []Decision{{
+		Type:    decisionPlanType,
+		Reason:  "one observation, then the budget is gone",
+		Actions: []Action{&fakeAction{name: "observe"}},
+	}}}
+	agent.DecideMaker = &DecisionMaker{reasoner: script}
+
+	task := &Task{ID: "task-budget", Description: "do the thing", Status: TaskStatusRunning, AgentID: agent.ID}
+	agent.CurrentTask = task
+
+	err = auto.runLoop(context.Background(), agent, task, "do the thing")
+	if err == nil || !strings.Contains(err.Error(), "cycle budget exhausted") {
+		t.Fatalf("runLoop err=%v, want cycle budget exhausted", err)
+	}
+	if !strings.Contains(err.Error(), "plan") {
+		t.Fatalf("runLoop err=%v, want the last decision named", err)
+	}
+	if task.Status != TaskStatusError {
+		t.Fatalf("status=%q want %q: spending the budget on a plan is not completing the task", task.Status, TaskStatusError)
+	}
+	if task.Error != err.Error() {
+		t.Fatalf("tasks.error=%q runLoop=%v, want the same reason on the row and the return", task.Error, err)
+	}
+	plans, err := store.ListExecutionPlans(task.ID)
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%v err=%v, want the plan that used the budget", plans, err)
 	}
 }
 
