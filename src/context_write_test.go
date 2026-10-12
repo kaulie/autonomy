@@ -122,6 +122,68 @@ func TestContextWritePathErrors(t *testing.T) {
 	}
 }
 
+func TestContextWritePathRegisterDirectory(t *testing.T) {
+	srv, svc := contextWriteServer(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "readme.md"), []byte("# Root\n\nhello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "runtime.md"), []byte("# Runtime\n\n## Tick\n\nheartbeat\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("skip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","shape":"directory","source":{"type":"local_file","location":"`+root+`"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("register directory: %d %s", rec.Code, rec.Body.String())
+	}
+	var out contextDirectoryRegisterResponse
+	decodeContextBody(t, rec, &out)
+	if out.Shape != contextShapeDirectory || out.Count != 2 || len(out.Resources) != 2 {
+		t.Fatalf("directory register = %+v", out)
+	}
+	names := map[string]bool{}
+	for _, r := range out.Resources {
+		names[r.Name] = true
+		if r.Type != ctxsvc.ResourceDocument || r.Source.Location != root || r.Source.Path == "" {
+			t.Fatalf("resource = %+v", r)
+		}
+	}
+	if !names["readme.md"] || !names["docs/runtime.md"] {
+		t.Fatalf("names = %v", names)
+	}
+
+	listed, err := svc.ListResources(context.Background(), "p")
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("list = %+v, %v", listed, err)
+	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","shape":"file","source":{"location":"`+root+`"}}`)
+	var got contextErrResponse
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("file shape on a directory: %d %+v", rec.Code, got)
+	}
+
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","shape":"tree"}`)
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("bad shape: %d %+v", rec.Code, got)
+	}
+
+	empty := t.TempDir()
+	rec = doContextPost(t, srv, "/api/context/resources", `{"project_id":"p","shape":"directory","source":{"location":"`+empty+`"}}`)
+	decodeContextBody(t, rec, &got)
+	if rec.Code != http.StatusBadRequest || got.Code != ctxsvc.ErrInvalidQuery {
+		t.Fatalf("empty directory: %d %+v", rec.Code, got)
+	}
+}
+
 func TestContextWritePathWithoutService(t *testing.T) {
 	srv := NewHTTPServer(&Autonomy{})
 	for _, path := range []string{"/api/context/resources", "/api/context/resources/x/sync"} {

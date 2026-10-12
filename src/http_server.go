@@ -992,8 +992,8 @@ func (s *HTTPServer) handleUIHome(w http.ResponseWriter, _ *http.Request) {
 // @Tags     context
 // @Accept   json
 // @Produce  json
-// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；type 默认 document；id 为空时生成 ctx-<hex>"
-// @Success  201      {object}  context.Resource                         "已登记的资源（含生成的 id 与时间戳）"
+// @Param    request  body      autonomy.RegisterContextResourceRequest  true  "project_id 必填；shape=file（默认，一个文件）或 directory（递归目录下每个 Markdown）；type 默认 document；id 为空时生成 ctx-<hex>"
+// @Success  201      {object}  context.Resource                         "shape=file：已登记的资源；shape=directory：{shape,count,resources}"
 // @Failure  400      {object}  contextErrResponse                       "INVALID_QUERY / PROJECT_NOT_FOUND：非法 JSON、缺 project_id、未知 type"
 // @Failure  500      {object}  contextErrResponse                       "INDEX_FAILED：写注册表失败"
 // @Failure  503      {object}  contextErrResponse                       "INDEX_FAILED：Context Service 未配置（需要 postgres store engine）"
@@ -1008,12 +1008,28 @@ func (s *HTTPServer) handleRegisterContextResource(w http.ResponseWriter, req *h
 		writeContextErr(w, http.StatusBadRequest, ctxsvc.ErrInvalidQuery, "invalid json: "+err.Error())
 		return
 	}
-	resource, err := svc.Register(req.Context(), body.Resource())
-	if err != nil {
-		writeContextServiceErr(w, err)
-		return
+	switch body.shape() {
+	case contextShapeDirectory:
+		out, err := registerContextDirectory(req.Context(), svc, body)
+		if err != nil {
+			writeContextServiceErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, out)
+	case contextShapeFile:
+		if err := rejectFileShapeOnDirectory(body); err != nil {
+			writeContextServiceErr(w, err)
+			return
+		}
+		resource, err := svc.Register(req.Context(), body.Resource())
+		if err != nil {
+			writeContextServiceErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, resource)
+	default:
+		writeContextErr(w, http.StatusBadRequest, ctxsvc.ErrInvalidQuery, "shape must be file or directory")
 	}
-	writeJSON(w, http.StatusCreated, resource)
 }
 
 // handleSyncContextResource loads a registered resource's source, splits it

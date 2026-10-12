@@ -105,7 +105,7 @@ Worker（`code_edit` / `deployment.monitor`）的 frame **同样**带 `CONTEXT_E
 
 | 入口 | 作用 |
 |------|------|
-| `POST /api/context/resources` | 登记资源（不建索引） |
+| `POST /api/context/resources` | 登记资源（不建索引）：`shape=file` 一个文件，`shape=directory` 递归目录下每个 Markdown |
 | `POST /api/context/resources/{id}/sync` | 读源 → 按 Markdown 标题切段 → 写全文索引 |
 | `GET /api/context/resources?project_id=` | 清单（运维 UI 用，语义同 `context.list`） |
 | `GET /api/context/resources/{id}` | 取一个资源的登记信息（**没有**对应 capability） |

@@ -135,13 +135,13 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 
 ### `POST /api/context/resources` — Context Service：登记一个资源
 
-Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填；`type` 为 `document`（默认）/ `repository` / `service`；`id` 为空时生成 `ctx-<hex>`，已存在的 `id` 重新登记。`source.location`（+ `source.path`）是 **runtime 所在主机**上的文件或目录。
+Context Service（`src/context`）的运维写入口；agent 只经 `context.search` / `get` / `list` 读，这条路不是 capability。只登记、不建索引。`project_id` 必填；`shape` 为 `file`（默认，一个文件）或 `directory`（递归登记目录下每个 Markdown，跳过 `.git` / `node_modules` 等）；`type` 为 `document`（默认）/ `repository` / `service`（directory 形态一律当 document）；`id` 为空时生成 `ctx-<hex>`，已存在的 `id` 重新登记。`source.location`（+ `source.path`）是 **runtime 所在主机**上的文件或目录。
 
 ```json
-{"project_id":"project-749a0238","name":"runtime.md","type":"document","source":{"type":"git","location":"/srv/autonomy","path":"docs/runtime.md"}}
+{"project_id":"project-749a0238","shape":"file","name":"runtime.md","type":"document","source":{"type":"git","location":"/srv/autonomy","path":"docs/runtime.md"}}
 ```
 
-`201` 回登记后的资源。
+`shape=file` 时 `201` 回那一个资源。`shape=directory` 时 `201` 回 `{"shape":"directory","count":N,"resources":[…]}`，每个文件一行（`name` 是相对路径）。file 形态把目录当成 location 且没有 `path` → `400 INVALID_QUERY`。
 
 ### `POST /api/context/resources/{resourceID}/sync` — Context Service：同步进全文索引
 
