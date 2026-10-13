@@ -92,6 +92,20 @@ func statusURLFor(req Request) (string, error) {
 	return base + statusPath + url.PathEscape(req.Deployment), nil
 }
 
+// FetchLogsURL reads log lines from a deployment-style logs endpoint (JSON or plain text).
+// Other capabilities (e.g. issue.reproduce) reuse the same decode path as deployment.monitor.
+func (o *HTTPObserver) FetchLogsURL(ctx context.Context, logsURL string) ([]string, error) {
+	logsURL = strings.TrimSpace(logsURL)
+	if logsURL == "" {
+		return nil, fmt.Errorf("missing logs url")
+	}
+	body, err := o.get(ctx, logsURL)
+	if err != nil {
+		return nil, err
+	}
+	return decodeLogs(body), nil
+}
+
 func (o *HTTPObserver) get(ctx context.Context, rawURL string) ([]byte, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
