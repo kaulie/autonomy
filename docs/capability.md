@@ -34,7 +34,7 @@ Capability 是系统对外的**能力语义接口**：描述「我能做什么�
 
 ## 代码位置与提示词
 
-- 实现：`src/capability/`（`asset_change.go`、`watch.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`software_development/pr_check.go`、`deployment/monitor.go`、`contextcap/{search,get,list}.go`），注册在 `capability.RegisterDefaults`（内置十个，见 `capability_test.go`）。
+- 实现：`src/capability/`（`asset_change.go`、`watch.go`、`software_development/code_edit.go`、`software_development/deploy.go`、`software_development/pull_request_review.go`、`software_development/pr_check.go`、`deployment/monitor.go`、`general/issue_reproduce.go`、`contextcap/{search,get,list}.go`），注册在 `capability.RegisterDefaults`（内置十一个，见 `capability_test.go`）。
 - `context.search` / `context.get` / `context.list`：knowledge-base 的只读发现面；planner 和 worker 共用。禁止用 grep 在 context 不清时感知世界；不限制任务本身需要的 grep。写路径在 knowledge-base，不是 capability（见 [context-capability.md](context-capability.md)）。
 - `deployment.monitor`：跟随一次部署、发现并解释问题（见 [deployment-monitor.md](deployment-monitor.md)）。
 - `watch`：观察**一类**世界对象（kind + target：pull request、deployment、以后别的资产），直到 `until`；经 [watcher](watcher.md) 后台观察、[event-gateway](event-gateway.md) 唤醒 agent。PR 快照读 [event-center](event-center.md)，不读 GitHub。不要为每类资产再写一个 `*.watch`。不 merge / 不部署。验真仍是 `pr.check` / `deployment.monitor`。
@@ -80,7 +80,7 @@ planner 的 policy 和每个被委托的 worker 提示词拿到的是**同一份
 "哪个 backend 跑了这个 worker"，那是它返回的值。）
 
 - 内置能力都声明了 `input` / `output`（`spec.Declared`，类型在 `src/capability/spec`）：plan step 里哪个键写什么、下一步从输出的哪个键读，只看这份列表就能决定，不必解析散文。`src/capability` 渲染列表、`spec` 提供类型，是因为子包（能力实现）不能反向 import 父包。
-- 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的十个都声明**，这条被 `capability_test.go` 钉住。
+- 声明**可选**（和 `broker.WorkerPromptContext` 一样是可选实现的接口）：只有 `description` 的能力照样注册、照样出现，只是没有 `input` / `output`；**内置的十一个都声明**，这条被 `capability_test.go` 钉住。
 - 链路在列表里就能看出来：`service.deploy` 输出的 `poll` 正是 `deployment.monitor` 入参的 `poll`；`code_edit` 输出的 `pr_url` 就是它开的那条 PR。产出字段带 `kind`（`pull_request` / `deployment`），Verifier 按 kind 找唯一的 `system_check` 工具。审查意见走 `pull_request.review`，不参与验真。
 - **planner 只按 capability 派发，不按 agent 派发**：plan step 就是「capability + input」，没有任何字段能写「派给谁」—— 哪个 capability 背后有 agent（`code_edit` / `deployment.monitor` 会 acquire 一个 worker）由 runtime 决定，planner 也不需要知道（`src/agent_policy/AGENT_V2.md` 的 `## Capability Dispatch`）。这正是本节开头那句「我能做什么，而不是谁来做」和[不变式](#不变式) 第 2 条：谁干活由 runtime 决定，「把这一步交给某个 agent」不是计划里能写的动作。
 - **字段名是本能力的局部约定**：`output` 里的键只对**这个**能力有意义，下一个能力怎么叫、要不要它，由 planner 在计划里显式绑定（`{"source":"step:<name>.output.<key>"}`）—— runtime 从不跨能力猜名字、也不把共享 Context 当数据通道（见 [execution-step.md](execution-step.md) 的「计划的数据来源」）。所以能力声明里 `input`/`output` 的**描述**要写清语义：那是 planner 唯一能据以做映射的东西。
@@ -111,6 +111,16 @@ planner 的 frame 与每轮 delta、每个被委托 worker 的提示词拿到的
 - 输出：`{"exists","valid","state","draft","merged","number","pr","title","repo"}`。host 上没有这条 PR 时 `exists`/`valid` 为 `false`，不报错（判定是 fail，不是 inconclusive）。
 - **不读 reviews、不评论、不合并**。意见是 `pull_request.review` 的事。
 - `code_edit.pr_url` 的默认验证读者就是它。Verifier 只问带 `system_check` 的工具。
+
+## `issue.reproduce`（线上问题确认：异常日志或 UI 截图）
+
+- 语义：为线上定位收集**可展示**的证据，只读、不改部署也不改页面。域为 `general`。
+- 输入：`{"mode":"exception_log"|"ui"}`（`exception` / `log` / `screenshot` 等别名同义）。
+  - **exception_log**：沿用 `deployment.monitor` 的日志读取路径——`deployment` / `poll` / `endpoint` / `logs_url`（控制面 `GET /api/pipelines/<id>/logs` 同款 decode）；或直接 `log_path`；都未给时默认 `$RUNTIME_DIR/backend/server.log`（与 `scripts/start.sh` 的 `backend/server.log` 一致）。可选 `tail`（默认 80）、`pattern`（正则，只保留匹配行写入 `log_text` / `matched_lines`）。
+  - **ui**：`url` 必填。若 URL 直接返回 `image/*` 则原样 base64；否则在配置了 `ISSUE_REPRODUCE_BROWSER` 或 `CHROMIUM_PATH` 时用 headless Chromium 截图。可选 `viewport_width` / `viewport_height`。
+- 输出：`exception_log` → `log_text`、`logs`（JSON 数组）、`line_count`、可选 `matched_lines`；`ui` → `screenshot_base64`、`content_type`、`url`。
+- **是代码，不是 agent**：与 `pr.check` / `deployment.monitor` 的 HTTP 读面一样，确定性调用，无 worker frame。
+- **无 HTTP 路由**：Planner/worker 经 capability 调用即可；不新增 `src/http_server.go` 路由。
 
 ## `pull_request.review`（读某个 PR 的评审意见，**不合并**）
 

@@ -40,11 +40,11 @@ func TestRegisterDefaultsIncludesBuiltins(t *testing.T) {
 	assets := memAssets{"1": "alive"}
 	capability.RegisterDefaults(f, capability.Deps{Assets: assets})
 	all := f.GetAll()
-	if len(all) != 10 {
-		t.Fatalf("GetAll len=%d want 10", len(all))
+	if len(all) != 11 {
+		t.Fatalf("GetAll len=%d want 11", len(all))
 	}
 	for _, name := range []string{"asset.change", "code_edit", "service.deploy", "pull_request.review", "pr.check", "watch", deployment.Name,
-		"context.search", "context.get", "context.list"} {
+		"context.search", "context.get", "context.list", "issue.reproduce"} {
 		if f.Get(name) == nil {
 			t.Fatalf("capability %s not registered; GetAll=%v", name, all)
 		}
@@ -132,8 +132,8 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.FormatConstructs()), &constructs); err != nil {
 		t.Fatalf("constructs are not the documented JSON: %v", err)
 	}
-	if len(constructs) != 10 {
-		t.Fatalf("constructs=%d want the 10 built-ins", len(constructs))
+	if len(constructs) != 11 {
+		t.Fatalf("constructs=%d want the 11 built-ins", len(constructs))
 	}
 	inputs := map[string][]spec.Field{}
 	outputs := map[string][]spec.Field{}
@@ -194,6 +194,7 @@ func TestConstructsCarryInputsAndOutputs(t *testing.T) {
 		// A deployment is followed by its id or by the poll path service.deploy
 		// hands back, and signals is where a problem shows up.
 		{"deployment.monitor", "deployment", "pipeline_id", false, "signals"},
+		{"issue.reproduce", "mode", "", true, "log_text"},
 	} {
 		field, ok := fieldNamed(inputs[tc.capability], tc.input)
 		if !ok {
