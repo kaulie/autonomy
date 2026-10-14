@@ -105,9 +105,11 @@ func (r *Run) WaitStream(ctx context.Context, onEvent func(RunEvent)) (*RunResul
 			Trace("Wait", "using terminal result despite drain error status=%s", r.terminal.Status)
 			return r.terminal, nil
 		}
-		if ctx.Err() != nil {
-			// The context ended (idle timeout or caller cancel): err already
-			// carries the cause and the run is not recoverable.
+		if ctx.Err() != nil || isActiveRunErr(err) {
+			// The local stream is done, but Cursor still marks the run active
+			// on the agent until CancelRun. Leaving it makes the next Send fail
+			// with "already has active run" for as long as this agent is reused.
+			r.releaseProviderRun()
 			return nil, err
 		}
 		// Dropped live stream: fall back to WaitLiveRun when we know run id.
@@ -160,7 +162,9 @@ func (r *Run) waitLive(ctx context.Context) (*RunResult, error) {
 	if err != nil {
 		Trace("WaitLiveRun", "rpc error after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		if ctx.Err() != nil {
-			// Idle timeout / caller cancel tore down the RPC: surface the cause.
+			// Idle timeout / caller cancel tore down the RPC. The provider
+			// still holds the run until it is cancelled.
+			r.releaseProviderRun()
 			return nil, llmrun.CtxErr(ctx)
 		}
 		return nil, wrapConnectErr(err)
@@ -385,6 +389,46 @@ func textFromPayload(payload map[string]any) string {
 		return b.String()
 	}
 	return ""
+}
+
+// releaseProviderRun tells the provider this run is over. The caller's context
+// is already finished (idle timeout, stop, or a stream that rejected the send),
+// so the RPC uses its own short deadline. A known run id is cancelled directly;
+// otherwise every non-terminal run on the agent is cancelled.
+func (r *Run) releaseProviderRun() {
+	if r == nil || r.client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if r.runID != "" {
+		agentID := r.agentID
+		Trace("CancelRun", "release after local abort run_id=%s agent_id=%s", r.runID, agentID)
+		_, err := r.client.agentRPC.CancelRun(ctx, connect.NewRequest(&sdkv1.CancelRunRequest{
+			RunId:   r.runID,
+			AgentId: &agentID,
+		}))
+		if err != nil {
+			Trace("CancelRun", "release error: %v", wrapConnectErr(err))
+			return
+		}
+		Trace("CancelRun", "release ok run_id=%s", r.runID)
+		return
+	}
+	if r.agentID == "" {
+		return
+	}
+	agent := &Agent{client: r.client, ID: r.agentID}
+	if err := agent.CancelActiveRuns(ctx); err != nil {
+		Trace("CancelRun", "release active runs error: %v", err)
+	}
+}
+
+// isActiveRunErr reports a stream that was refused because this agent already
+// has a run open. The message is what the bridge returns (code internal); the
+// typed AgentBusyError is the same condition when the RPC maps it.
+func isActiveRunErr(err error) bool {
+	return IsActiveRun(err)
 }
 
 // Cancel requests cancellation of the in-flight run.

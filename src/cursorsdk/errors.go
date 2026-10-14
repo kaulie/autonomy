@@ -119,3 +119,17 @@ func IsNotFound(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "not_found") || strings.Contains(msg, "not found")
 }
+
+// IsActiveRun reports whether err means the provider still has a run open on
+// this agent, so another Send is rejected until that run is cancelled.
+func IsActiveRun(err error) bool {
+	if err == nil {
+		return false
+	}
+	var busy *AgentBusyError
+	if errors.As(err, &busy) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already has active run") || strings.Contains(msg, "already has an active run")
+}

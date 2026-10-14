@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +26,10 @@ type fakeAgentService struct {
 
 	onSend     func(ctx context.Context, stream *connect.ServerStream[sdkv1.RunStreamMessage]) error
 	waitLiveDB atomic.Int32
+
+	mu        sync.Mutex
+	runs      []*sdkv1.RunSnapshot
+	cancelIDs []string
 }
 
 func (f *fakeAgentService) CreateAgent(context.Context, *connect.Request[sdkv1.CreateAgentRequest]) (*connect.Response[sdkv1.CreateAgentResponse], error) {
@@ -40,6 +45,26 @@ func (f *fakeAgentService) WaitLiveRun(context.Context, *connect.Request[sdkv1.W
 		Status: sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_FINISHED,
 		Result: "recovered-by-waitlive",
 	}}), nil
+}
+
+func (f *fakeAgentService) ListRuns(context.Context, *connect.Request[sdkv1.ListRunsRequest]) (*connect.Response[sdkv1.ListRunsResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := append([]*sdkv1.RunSnapshot(nil), f.runs...)
+	return connect.NewResponse(&sdkv1.ListRunsResponse{Items: items}), nil
+}
+
+func (f *fakeAgentService) CancelRun(_ context.Context, req *connect.Request[sdkv1.CancelRunRequest]) (*connect.Response[sdkv1.CancelRunResponse], error) {
+	f.mu.Lock()
+	f.cancelIDs = append(f.cancelIDs, req.Msg.GetRunId())
+	f.mu.Unlock()
+	return connect.NewResponse(&sdkv1.CancelRunResponse{}), nil
+}
+
+func (f *fakeAgentService) cancelled() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.cancelIDs...)
 }
 
 func (f *fakeAgentService) Send(ctx context.Context, _ *connect.Request[sdkv1.SendRequest], stream *connect.ServerStream[sdkv1.RunStreamMessage]) error {
@@ -127,6 +152,9 @@ func TestRunSurvivesActivityPastIdleGap(t *testing.T) {
 	if res.Text != "hello" || !res.OK() {
 		t.Fatalf("res=%+v, want a finished run with text %q", res, "hello")
 	}
+	if ids := svc.cancelled(); len(ids) != 0 {
+		t.Fatalf("CancelRun ids=%v, a finished run must stay on the provider", ids)
+	}
 }
 
 // TestRunAbortedAfterIdleGap proves the watchdog still cuts a run that goes
@@ -181,6 +209,9 @@ func TestRunAbortedAfterIdleGap(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider stream was not torn down by the idle cutoff")
 	}
+	if ids := svc.cancelled(); len(ids) != 1 || ids[0] != "run-1" {
+		t.Fatalf("CancelRun ids=%v, want the idle run released on the provider", ids)
+	}
 }
 
 // TestRunCollectsTerminalResultRacingIdleCutoff makes sure a cutoff that lands
@@ -220,5 +251,41 @@ func TestRunCollectsTerminalResultRacingIdleCutoff(t *testing.T) {
 	}
 	if res == nil || res.Text != "late" {
 		t.Fatalf("res=%+v, want the terminal result %q", res, "late")
+	}
+	if ids := svc.cancelled(); len(ids) != 0 {
+		t.Fatalf("CancelRun ids=%v, a run that already finished must not be cancelled", ids)
+	}
+}
+
+// TestRunReleasesProviderWhenStreamSaysActiveRun is the failure from
+// task-6979c292e76e4fc2: the stream opens and immediately says the agent
+// already has a run, with no run id of its own. Closing that stream leaves the
+// earlier run active, so the next Send is refused the same way.
+func TestRunReleasesProviderWhenStreamSaysActiveRun(t *testing.T) {
+	svc := &fakeAgentService{
+		runs: []*sdkv1.RunSnapshot{{
+			RunId:   "run-stuck",
+			AgentId: "agent-1",
+			Status:  sdkv1.RunLifecycleStatus_RUN_LIFECYCLE_STATUS_RUNNING,
+		}},
+		onSend: func(context.Context, *connect.ServerStream[sdkv1.RunStreamMessage]) error {
+			return connect.NewError(connect.CodeInternal, errors.New("Agent agent-1 already has active run"))
+		},
+	}
+	client := newFakeClient(t, svc)
+
+	run := startRun(t, client, context.Background())
+	res, err := run.WaitStream(context.Background(), nil)
+	if err == nil {
+		t.Fatal("a busy agent must not look like a finished run")
+	}
+	if !cursorsdk.IsActiveRun(err) {
+		t.Fatalf("err=%v, want the active-run refusal", err)
+	}
+	if res != nil {
+		t.Fatalf("res=%+v, want nil", res)
+	}
+	if ids := svc.cancelled(); len(ids) != 1 || ids[0] != "run-stuck" {
+		t.Fatalf("CancelRun ids=%v, want the run the provider still holds", ids)
 	}
 }
