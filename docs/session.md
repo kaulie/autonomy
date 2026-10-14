@@ -27,6 +27,7 @@
 | 看门狗 | 按**空闲**超时（`AUTONOMY_LLM_TIMEOUT`，默认 3m），不是墙钟：一轮跑多久都行，只要 provider 一直在出声 |
 | 调用 ≠ run | 开会话那几次 bridge 调用（Ping / Create / Resume）是**调用**：`CURSOR_SDK_CALL_TIMEOUT`（默认 1m）一过就放弃它（`no answer from the bridge within 1m0s`），不会拿 run 的空闲预算去等一个卡住的桥；而**流**不受这个上限约束 |
 | 结束原因要留下来 | 这个 run 的上下文自己结束时（空闲被掐、被 stop），报的是它带着的原因（`run idle for 3m0s: no provider activity`），不是传输层的 `context canceled`（`bridgeCallErr` / `llmrun.CtxErr`） |
+| 掐掉要放开 provider 上的 run | 本地流结束不等于 provider 把这次 run 忘掉。Cursor 在空闲超时、stop，或流自己拒绝（`already has active run`）时要 `CancelRun`。只拆本地流的话，常驻 agent 下一次 Send 会立刻报这句话，重试也过不去。流报了这句话时，先取消仍开着的 run，再把这一轮重试一次 |
 | 开 run header | `BeginLLMTraceFrom`：`reason_turns` 一行（task / agent / round / mode / provider / model）＋ 输入 `llm_messages` 行（role 见上表） |
 | provider 流 | `Agent.PromptLLMStream`：折成对话消息落 `llm_messages`、写一行 stderr；原始事件落 `llm_events`（叶子表，默认不写，`AUTONOMY_LLM_EVENTS=1` 打开） |
 | 收尾 | `trace.Finish`：status / usage / tokens / duration 写回 run header；成功的轮才 `markLLMFrameSent()`（首轮发的 frame 算送达） |

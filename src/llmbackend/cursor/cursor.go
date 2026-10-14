@@ -87,10 +87,28 @@ func (c *cursorSession) Attach(ctx context.Context, _ llmbackend.Mode) (bool, er
 }
 
 // prompt sends one turn and streams the provider's run events as neutral Events.
-func (c *cursorSession) Prompt(ctx context.Context, text string, _ llmbackend.Mode, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
+// A send refused because a previous run is still active is cleared and tried once:
+// that refusal means the provider never started this turn.
+func (c *cursorSession) Prompt(ctx context.Context, text string, mode llmbackend.Mode, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	if c.agent == nil {
 		return "", llmbackend.RunResult{Status: llmbackend.StatusError, ErrorMessage: "cursor session not attached"}, llmbackend.ErrNoSession
 	}
+	out, meta, err := c.promptOnce(ctx, text, mode, onEvent)
+	if err == nil || ctx.Err() != nil || !cursorsdk.IsActiveRun(err) {
+		return out, meta, err
+	}
+	fmt.Fprintf(os.Stderr, "[autonomy] cursor agent %s still has an active run (%v); cancelling it and retrying this turn once\n", c.agent.ID, err)
+	clearCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	clearErr := c.agent.CancelActiveRuns(clearCtx)
+	cancel()
+	if clearErr != nil {
+		fmt.Fprintf(os.Stderr, "[autonomy] cancel active runs on %s: %v\n", c.agent.ID, clearErr)
+		return out, meta, err
+	}
+	return c.promptOnce(ctx, text, mode, onEvent)
+}
+
+func (c *cursorSession) promptOnce(ctx context.Context, text string, _ llmbackend.Mode, onEvent func(llmbackend.Event)) (string, llmbackend.RunResult, error) {
 	facts := c.host.Facts()
 	provider := facts.Provider
 	if provider == "" {
