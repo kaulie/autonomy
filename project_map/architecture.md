@@ -85,14 +85,14 @@ Planner 与 worker **共用**这三件（角色只是分工）。禁止在 conte
 
 登记、绑定、切段、索引在独立的 knowledge-base 服务。本 runtime 只读：
 
-- **接口**：`ctxsvc.Service`。生产实现是 `knowledgebase.Client`（`KNOWLEDGE_BASE_URL`，默认 `127.0.0.1:4360`）。`project_id` 映射成 CONTEXT entity `{type:project,id}`；knowledge-base 没有 `project_id` 字段。
+- **接口**：`ctxsvc.Service`。生产实现是 `knowledgebase.Client`（`KNOWLEDGE_BASE_URL`，默认 `49.234.45.173:4360`）。`project_id` 映射成 CONTEXT entity `{type:project,id}`；knowledge-base 没有 `project_id` 字段。
 - **领域类型**：`src/context` 仍提供 `Resource` / `Section` / 类型化错误，给 capability 和单测用。内存 Service 只给 `contextcap` 单测，不给运行时写索引。
 - **写**：客户端的 Register / Sync / Delete 直接拒绝。维护面在 knowledge-base 的 dashboard 与 `/api/knowledge`。
 - **错误**：`RESOURCE_NOT_FOUND` / `PROJECT_NOT_FOUND` / `SOURCE_UNAVAILABLE` / `PARSE_FAILED` / `INDEX_FAILED` / `INVALID_QUERY`。knowledge-base 的 `NOT_FOUND` 映射成 `RESOURCE_NOT_FOUND`。
 
 V1 不含 vector DB / embedding / LLM 摘要 / 知识图谱 / agent memory / planner 集成 / 自动爬取。
 
-`service.deploy` 打 `DEPLOYMENT_API_URL`（默认 `http://127.0.0.1:4220`）的 `POST /api/deploy-notify`，并带 `identity_role` / `identity_id`（默认 `agent` / `autonomy`）。返回 `pipeline_id`，观察走 `GET /api/pipelines/<id>` 或 `deployment.monitor`。
+`service.deploy` 打 `DEPLOYMENT_API_URL`（默认 `http://49.234.45.173:4220`）的 `POST /api/deploy-notify`，并带 `identity_role` / `identity_id`（默认 `agent` / `autonomy`）。返回 `pipeline_id`，观察走 `GET /api/pipelines/<id>` 或 `deployment.monitor`。
 
 ## 存储
 
@@ -142,11 +142,11 @@ Agent / 账号 / UI：
 
 | 依赖 | 默认 | 本进程用途 |
 |---|---|---|
-| 控制面 projects / tasks | `http://127.0.0.1:4211`（`PROJECTS_API_URL` / `TASKS_API_URL`） | project 名、仓库、所属部门；面板侧 task |
-| organization | `http://127.0.0.1:4244` | 部门目录补全 |
-| 服务中心 | `http://127.0.0.1:4240` | `GET /v1/orgs/{orgId}/services` |
-| 部署平台 | `http://127.0.0.1:4220` | `service.deploy` / `deployment.monitor` |
-| 事件中心 | `http://127.0.0.1:9099`（`EVENT_CENTER_API_URL`） | `watch` 的 PR 快照；后台 tail `github` 流 → event gateway。**不**直连 GitHub 观察世界 |
+| 控制面 projects / tasks | `http://49.234.45.173:4211`（`PROJECTS_API_URL` / `TASKS_API_URL`） | project 名、仓库、所属部门；面板侧 task |
+| organization | `http://49.234.45.173:4244` | 部门目录补全 |
+| 服务中心 | `http://49.234.45.173:4240` | `GET /v1/orgs/{orgId}/services` |
+| 部署平台 | `http://49.234.45.173:4220` | `service.deploy` / `deployment.monitor` |
+| 事件中心 | `http://49.234.45.173:9099`（`EVENT_CENTER_API_URL`） | `watch` 的 PR 快照；后台 tail `github` 流 → event gateway。**不**直连 GitHub 观察世界 |
 | GitHub | `GITHUB_TOKEN` / `gh` / GitHub App（`docs/github-app.md`） | 仅 `pull_request.review`、`pr.check`、worker 推送（验真/动作，不是观察） |
 
 本进程自己的 world 容器（`RegisterContextContainer`，`cmd/autonomyd/world.go` 播种 demo）只补充它知道的描述与领域。

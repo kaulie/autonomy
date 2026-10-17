@@ -24,10 +24,10 @@ const (
 	// backend, the provider says where the effect really happens.
 	DeployProvider = "agent-control-plane"
 
-	// DefaultDeploymentAPIURL is where the local deployment control plane
-	// listens. DEPLOYMENT_API_URL overrides it — the same variable the gateway
+	// DefaultDeploymentAPIURL is where the deployment control plane listens.
+	// DEPLOYMENT_API_URL overrides it — the same variable the gateway
 	// uses — so a non-default host/port needs no code change.
-	DefaultDeploymentAPIURL = "http://127.0.0.1:4220"
+	DefaultDeploymentAPIURL = "http://49.234.45.173:4220"
 
 	// deployNotifyPath is the control plane's "package this ref, then deploy it"
 	// entry point (agent-control-plane POST /api/deploy-notify).
@@ -52,7 +52,7 @@ const (
 // the control plane accepts the request; watching a pipeline to its end is a
 // later observation (GET /api/pipelines/<id>), not part of triggering it.
 type DeployService struct {
-	// APIURL overrides DEPLOYMENT_API_URL / the local default (tests, or an
+	// APIURL overrides DEPLOYMENT_API_URL / the compiled default (tests, or an
 	// explicit per-call host).
 	APIURL string
 	// HTTPClient overrides the default client (tests).
@@ -171,7 +171,7 @@ func (c DeployService) Run(in map[string]string) (map[string]string, error) {
 }
 
 // baseURL resolves where the deployment control plane listens: the explicit
-// override, then DEPLOYMENT_API_URL, then the local default.
+// override, then DEPLOYMENT_API_URL, then the compiled default.
 func (c DeployService) baseURL() string {
 	if url := strings.TrimSpace(c.APIURL); url != "" {
 		return url

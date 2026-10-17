@@ -37,7 +37,7 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	f.Register(AssetChange{Assets: deps.Assets})
 	f.Register(sd.CodeEdit{Agents: deps.Agents})
 	// service.deploy talks to the deployment control plane over HTTP, so it needs
-	// no host hook: DEPLOYMENT_API_URL (or the local default) is its wiring.
+	// no host hook: DEPLOYMENT_API_URL (or the compiled default) is its wiring.
 	f.Register(sd.DeployService{})
 	// pull_request.review reads a pull request's review opinions — named by its
 	// URL or by the branch pair it was opened from. It does NOT merge; landing is

@@ -135,7 +135,7 @@ Event Gateway 的入口（概念见 [event-gateway.md](event-gateway.md)）。�
 
 ### 项目知识不在本 runtime 维护
 
-登记、绑定、同步、检索页在 **knowledge-base**（`KNOWLEDGE_BASE_URL`，默认 `127.0.0.1:4360`）。本 runtime 不再提供 `/context` 或 `/api/context/*`。Agent 仍经 `context.list` / `search` / `get` 读；实现是 `src/knowledgebase`，把 `project_id` 映射成 CONTEXT entity `{type:project,id}`。`autonomy context` 只提示去 knowledge-base。
+登记、绑定、同步、检索页在 **knowledge-base**（`KNOWLEDGE_BASE_URL`，默认 `49.234.45.173:4360`）。本 runtime 不再提供 `/context` 或 `/api/context/*`。Agent 仍经 `context.list` / `search` / `get` 读；实现是 `src/knowledgebase`，把 `project_id` 映射成 CONTEXT entity `{type:project,id}`。`autonomy context` 只提示去 knowledge-base。
 
 Agent 侧的派发方案见 [context-capability.md](context-capability.md)。
 
@@ -260,7 +260,7 @@ Agent 侧的派发方案见 [context-capability.md](context-capability.md)。
 | `project.organization` | **project 所属的组织（部门）**：`{"id": "D0005", "name": "AI研发部"}` |
 
 `project` 由两处合成，都不强求：runtime 自己注册过的 context container 提供它知道的（`name` / `description` / `domain`），
-平台的 **project 注册表**（控制面 `GET /api/projects`，`PROJECTS_API_URL` 覆盖，默认 `http://127.0.0.1:4211`）提供 project 的名字、
+平台的 **project 注册表**（控制面 `GET /api/projects`，`PROJECTS_API_URL` 覆盖，默认 `http://49.234.45.173:4211`）提供 project 的名字、
 仓库与**所属部门** —— 一个 project 属于哪个组织是平台的事实，autonomy 只读、不另立一份注册表。注册表读不到（未启动/超时 2s）
 不影响这个接口：详情照常返回，`project` 只剩 id（和本进程世界知道的那点信息），不会因为一个注册表挂了而失败。注册表结果缓存 30s
 （失败缓存 5s），所以每次读详情不会真的每次都去问。
@@ -564,7 +564,7 @@ src/http_server.go       每个 handler 一段（@Summary/@Tags/@Param/@Success/
 | `SERVICE_NAME` | `autonomy` | 注册用的服务名 |
 | `DEPARTMENT_ID` | `D0005`（AI研发部） | 归属部门；服务端会拿组织接口把 ID/名称对齐 |
 | `INSTANCES` | `127.0.0.1:4300` | 实例地址，逗号分隔（端口即本服务的契约端口） |
-| `REGISTRY_URL` / `REGISTRY_NS` | `http://127.0.0.1:4240` / `default` | 服务中心（只绑本机）；写接口收紧后用 `REGISTRY_TOKEN` |
+| `REGISTRY_URL` / `REGISTRY_NS` | `http://49.234.45.173:4240` / `default` | 服务中心；写接口收紧后用 `REGISTRY_TOKEN` |
 | `VERSION` | `$APP_VERSION` 或 `git describe` | 上报版本；**契约没变时不会写库**（比对规范 sha256，避免刷 revision） |
 | `SWAG_MAIN` | `cmd/autonomyd/main.go` | swag 的入口（`cmd/autonomy` 是客户端，自动探测会选错，所以显式指定） |
 | `OWNER` / `HEALTH_PATH` / `TAGS` / `GIT_REPO` | `kaulie` / `/health` / `tasks` / 本仓库 | 契约元数据 |

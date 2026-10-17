@@ -34,7 +34,7 @@ const (
 	// DefaultProjectsAPIURL is where the project registry lives when PROJECTS_API_URL
 	// says nothing: the control plane, which serves this service (see the deployment
 	// contract).
-	DefaultProjectsAPIURL = "http://127.0.0.1:4211"
+	DefaultProjectsAPIURL = "http://49.234.45.173:4211"
 	// EnvProjectsAPIURL names the project registry.
 	EnvProjectsAPIURL = "PROJECTS_API_URL"
 )
@@ -45,7 +45,7 @@ func NewProjectRegistry() *ProjectRegistryResolver { return &ProjectRegistryReso
 func (r *ProjectRegistryResolver) Name() string { return "project_registry" }
 
 // BaseURL is where this resolver reads: its own URL when set, else the env var,
-// else the local default.
+// else the compiled default.
 func (r *ProjectRegistryResolver) BaseURL() string {
 	if r != nil && r.URL != "" {
 		return r.URL

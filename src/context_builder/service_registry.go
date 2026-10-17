@@ -41,7 +41,7 @@ const (
 	// SERVICE_REGISTRY_API_URL says nothing: the 服务中心, where every service of the
 	// platform is registered (the same default scripts/register-contract.sh registers
 	// with).
-	DefaultServiceRegistryAPIURL = "http://127.0.0.1:4240"
+	DefaultServiceRegistryAPIURL = "http://49.234.45.173:4240"
 	// EnvServiceRegistryAPIURL names the service registry.
 	EnvServiceRegistryAPIURL = "SERVICE_REGISTRY_API_URL"
 )
@@ -52,7 +52,7 @@ func NewServiceRegistry() *ServiceRegistryResolver { return &ServiceRegistryReso
 func (r *ServiceRegistryResolver) Name() string { return "service_registry" }
 
 // BaseURL is where this resolver reads: its own URL when set, else the env var, else
-// the local default.
+// the compiled default.
 func (r *ServiceRegistryResolver) BaseURL() string {
 	if r != nil && r.URL != "" {
 		return r.URL

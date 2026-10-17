@@ -33,7 +33,7 @@ Deploy → deployment.monitor → 有问题？→ 看 evidence/diagnosis → Fix
 | `task_id` | 否 | — | 本次观察所属 Task（runtime 会自动带上）；agent 监控时记在它的 run 上 |
 | `poll` | 否 | — | 触发能力返回的相对状态路径（如 service.deploy 的 `poll`：`/api/pipelines/<id>`），会拼到 `endpoint` 上 |
 | `status_url` | 否 | — | 完整状态 URL（优先级最高） |
-| `endpoint` | 否 | `$DEPLOYMENT_API_URL` → `http://127.0.0.1:4220` | 部署服务 base URL；状态地址 = `<endpoint>/api/pipelines/<deployment>` |
+| `endpoint` | 否 | `$DEPLOYMENT_API_URL` → `http://49.234.45.173:4220` | 部署服务 base URL；状态地址 = `<endpoint>/api/pipelines/<deployment>` |
 | `logs_url` | 否 | `<status_url>/logs` | 单独的日志地址（状态里已带 `logs` 时不会去取） |
 | `watch` | 否 | `false` | `true` 时轮询到终态或超时为止（**轮询是免费的读 API；整次调用只问 agent 一次**，见下） |
 | `interval` | 否 | `5`（秒） | 轮询间隔，最小 1s |

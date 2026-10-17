@@ -208,7 +208,7 @@ chmod +x "${OUT}/bin/"* "${OUT}/scripts/"*.sh
 # ---- 契约自动登记（注解是唯一真源）----
 # 读 cmd/autonomyd/main.go（General API Info）+ src/http_server.go（每个 handler 的注解）
 # → swag 生成 OpenAPI → 上报服务中心（幂等：契约没变化不写库、不刷 revision）。
-# 发版流程本来就跑在本机，而服务中心只绑 127.0.0.1:4240，所以这里是天然合适的触发点。
+# 发版结束时把刚生成的契约登记到服务中心（默认 http://49.234.45.173:4240）。
 # 默认「尽力而为」：服务中心不可达只告警，不阻塞发版（REGISTER_CONTRACT_STRICT=1 改成硬失败，
 # SKIP_REGISTER_CONTRACT=1 跳过；两种情况下都可以事后用 scripts/register-contract.sh 补登记）。
 if [ "${SKIP_REGISTER_CONTRACT:-0}" = "1" ]; then
