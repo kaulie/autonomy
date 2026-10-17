@@ -97,8 +97,8 @@ StoreEngine（Name / DefaultDSN / Open）
 | `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()` |
 | `AUTONOMY_DATA_DIR` | sqlite 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
 | `AUTONOMY_POSTGRES_DSN` | postgres 的默认 DSN（`DATABASE_URL` 亦可） | 两个都空且 `AUTONOMY_STORE_DSN` 也空 → 报错 |
-| `AUTONOMY_STORE_READ_DSN` | **读侧**（本地副本）连接串，见下文「读写分离」 | 未设置 → 不分离，读都在写侧 |
-| `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（上一个优先） | 未设置 → 不分离 |
+| `AUTONOMY_STORE_READ_DSN` | **读侧**（本地副本）连接串，见下文「读写分离」 | 未设置 → 不分离。部署的 `start.sh` 载入 `.env` 后会清掉它 |
+| `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（上一个优先） | 未设置 → 不分离。部署的 `start.sh` 同样清掉 |
 
 `OpenDefaultStore()` 读取以上变量并分发到对应 engine：
 
@@ -152,16 +152,23 @@ RFC3339 UTC 文本，`cost_cents` 是 NULL 还是 0 仍然区分，`llm_messages
 
 ## 读写分离
 
-一个 store 可以由**两台服务器**承担：写（以及「读完就写」的读）走远端主库，只观察的读走
-本机那份 streaming replica。这不是第二种 engine，而是同一个 engine 的第二种**连接**：
-契约（七个端口）、SQL、schema 都不变，变的只是某一次读去哪台服务器取数。怎么立这份本地副本、
-怎么验证、坏了怎么办在 [local-replica.md](local-replica.md)；这里讲规则。
+部署起来的 autonomy **读写同一份库**。`scripts/start.sh` 载入 `backend/.env` 之后调用
+`unify_store_reads_onto_writer`（`scripts/store_env.sh`），把 `AUTONOMY_STORE_READ_DSN` 和
+`AUTONOMY_POSTGRES_READ_DSN` 丢掉，所以 HTTP 读接口、数据 API、UI 轮询和写都落在写侧
+（`AUTONOMY_STORE_DSN`，本机是 `49.234.45.173:5432`）。`.env` 被平台跨部署保留，旧的
+`127.0.0.1:5433` 留在文件里也不会再生效。
+
+engine 仍可以把一个 store 拆成两台服务器：写（以及「读完就写」的读）走主库，只观察的读走
+另一份 streaming replica。这不是第二种 engine，而是同一个 engine 的第二种**连接**：
+契约（七个端口）、SQL、schema 都不变，变的只是某一次读去哪台服务器取数。这条路径只给
+**不经 `start.sh`** 的进程（实验、`postgres_read_split_test.go`）。怎么立本地副本见
+[local-replica.md](local-replica.md)；下面是 engine 的规则。
 
 ### 规则
 
 | 读 | 去哪 | 为什么 |
 |----|------|--------|
-| HTTP 读接口（进度 / agent 状态 / 对话流）、数据 API（`TurnQueryStore` 的遍历、facets、task 候选、计数）、contract 与 verdict 的展示 | **本地副本**（默认） | 只观察：晚一点看到没关系，省掉一次跨网 |
+| HTTP 读接口（进度 / agent 状态 / 对话流）、数据 API（`TurnQueryStore` 的遍历、facets、task 候选、计数）、contract 与 verdict 的展示 | **读侧副本**（仅当进程带了读侧变量，且不是 `start.sh` 拉起的） | 只观察：晚一点看到没关系。部署进程没有读侧，这些读在写侧 |
 | 受理一条指令时读回任务行、停止任务、广播解析目标、resume 读 task/agent、judge 读 plan/step、contract 钉住与读回、收件箱计数（`CountQueuedMessages` / `CountMessagesAhead`）、写完就回读（`AssistantMessageID` / `ListExecutionStepPlan` / `TaskInputMessageID`）、LLM run 的消息 seq | **主库** | 这次读要**照着写**，或者必须看见本进程刚写下的那一版（read-your-writes） |
 
 写永远只有一处：`db`（主库）。副本是只读事务，写过去会直接被数据库拒绝 —— 这正是边界。
@@ -200,10 +207,12 @@ schema 只有写侧建（`migrate`），副本是 `pg_basebackup` 来的，engin
 | `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（`AUTONOMY_STORE_READ_DSN` 优先） | 未设置 → 不分离 |
 
 ```bash
-# 写远端、读本地（DSN 用 scripts/local-replica.sh env 生成）
+# 部署：读写都走这一份（start.sh 会丢掉读侧变量，即使 .env 里还写着）
 export AUTONOMY_STORE_ENGINE=postgres
 export AUTONOMY_STORE_DSN="postgres://autonomy:…@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=…"
-export AUTONOMY_STORE_READ_DSN="postgres://autonomy:…@127.0.0.1:5433/autonomy?sslmode=disable"
+
+# 只在不经 start.sh 的实验里才把观察类的读指到另一份副本
+# export AUTONOMY_STORE_READ_DSN="postgres://autonomy:…@127.0.0.1:5433/autonomy?sslmode=disable"
 ```
 
 ## 扩展：接入一种新数据库

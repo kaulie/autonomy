@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
 # local-replica.sh —— 在本地立一个 PostgreSQL 副本（streaming replica），作为远端主库的
-# standby，让 runtime 「写远端、读本地」（见 docs/local-replica.md、docs/store.md「读写分离」）。
+# standby，给本机 psql 看一份热备（见 docs/local-replica.md）。
+#
+# 部署起来的 autonomy 不读这份副本：scripts/start.sh 会丢掉 AUTONOMY_STORE_READ_DSN，
+# 读写都走写侧（49.234.45.173）。不要把读侧连接串写进 backend/.env。
 #
 # 副本是**一整份数据库**，不是一份导出：pg_basebackup 把主库的数据目录搬过来，之后一直
 # 跟着主库的 WAL 走（hot standby，只读、可查询）。所以 localhost 上的这份库和远端那份库
-# 是同一个库 —— 角色、口令、schema、数据都在里面，runtime 只要换一个连接串就能读它。
+# 是同一个集群 —— 角色、口令、schema、数据都在里面。
 #
 # 用法：
 #   scripts/local-replica.sh init      从主库做一次基础备份，把副本建起来并启动
@@ -13,7 +16,7 @@
 #   scripts/local-replica.sh start     启动副本（127.0.0.1:$REPLICA_PORT，只读）
 #   scripts/local-replica.sh stop      停止副本
 #   scripts/local-replica.sh status    副本状态：在不在恢复、落后多少、主库看到什么
-#   scripts/local-replica.sh env       打印「写远端、读本地」的两个 DSN（供 backend/.env 用）
+#   scripts/local-replica.sh env       打印写侧 DSN（供 backend/.env 用；不含读侧副本）
 #   scripts/local-replica.sh install-agent    装 launchd 代理：登录后自动把副本拉起来
 #   scripts/local-replica.sh uninstall-agent  卸掉代理
 #
@@ -224,7 +227,7 @@ psql_parts() {
   echo "host=${PRIMARY_HOST} port=${PRIMARY_PORT} user=${PRIMARY_USER} $1 sslmode=${PRIMARY_SSLMODE} sslrootcert=${PRIMARY_SSLROOTCERT} connect_timeout=8"
 }
 
-# --- env：runtime 要的两行配置 --------------------------------------------------------
+# --- env：runtime 要的写侧配置 --------------------------------------------------------
 # 口令不进命令行、也不进 git：从 ~/.pgpass 里读（init 时已经写好复制那条；服务角色那条
 # 如果本地没有，就用占位符提醒去哪儿拿）。
 app_password() {
@@ -239,12 +242,11 @@ cmd_env() {
   pw="$(app_password)"
   [ -n "${pw}" ] || pw="<${APP_USER} 的口令：见 ~/.pgpass / 部署用的那个 .env>"
   cat <<EOF
-# 「写远端、读本地」：主库是写侧，本地副本是读侧（docs/local-replica.md）。
-# 把这三行放进 runtime 的 backend/.env，再走部署平台重启（不要在本机直接重启部署）。
+# 部署起来的 autonomy 读写同一份库：写侧就是这一条，观察类的读也走它。
+# scripts/start.sh 会丢掉 AUTONOMY_STORE_READ_DSN，不要再把本地副本写进 backend/.env。
+# 把下面两行放进 runtime 的 backend/.env，再走部署平台重启（不要在本机直接重启部署）。
 AUTONOMY_STORE_ENGINE=postgres
 AUTONOMY_STORE_DSN="postgres://${APP_USER}:${pw}@${PRIMARY_HOST}:${PRIMARY_PORT}/${APP_DB}?sslmode=${PRIMARY_SSLMODE}&sslrootcert=${PRIMARY_SSLROOTCERT}&application_name=autonomy&connect_timeout=5"
-AUTONOMY_STORE_READ_DSN="postgres://${APP_USER}:${pw}@${REPLICA_HOST}:${REPLICA_PORT}/${APP_DB}?sslmode=disable&application_name=autonomy-local-read&connect_timeout=5"
-# 读侧连不上时不会失败：只warning并退回主库（docs/store.md「读写分离」）。
 EOF
 }
 

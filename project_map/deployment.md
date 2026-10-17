@@ -73,7 +73,8 @@ sqlite 库**不在** runtime 目录：默认 `~/database/autonomy/autonomy.db`�
 
 - `AUTONOMY_REASONER=llm`（或 `local`）
 - `AUTONOMY_LLM_BACKEND=cursor|cline|codex|claude`
-- `AUTONOMY_STORE_ENGINE` / `AUTONOMY_STORE_DSN` / `AUTONOMY_POSTGRES_DSN` / `AUTONOMY_STORE_READ_DSN`
+- `AUTONOMY_STORE_ENGINE` / `AUTONOMY_STORE_DSN` / `AUTONOMY_POSTGRES_DSN`
+- `AUTONOMY_STORE_READ_DSN` 写在 `.env` 里也不会被部署进程使用：`scripts/start.sh` 载入后会丢掉读侧，读写都走写侧那一份库（本机是 `49.234.45.173`）
 - `AUTONOMY_HTTP_HOST`（远程）
 - `CURSOR_SDK_BRIDGE_BIN` / `CURSOR_SDK_BRIDGE_PROXY`（仅当 Cursor 出网必须走代理；**不要**把进程的 `HTTP_PROXY` 传给桥——未配置的代理会让 CreateAgent 无错误地挂住）
 - GitHub App：`GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH`
