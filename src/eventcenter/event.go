@@ -15,7 +15,7 @@ import (
 const (
 	// DefaultAPIURL is event-center's contract host (swagger @host / the
 	// instance registered with the service registry).
-	DefaultAPIURL = "http://127.0.0.1:9099"
+	DefaultAPIURL = "http://49.234.45.173:9099"
 	// EnvAPIURL names the event-center base URL.
 	EnvAPIURL = "EVENT_CENTER_API_URL"
 	// EnvAdminToken is the admin bearer for consume APIs.

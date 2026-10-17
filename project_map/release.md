@@ -61,12 +61,12 @@ GOOS=linux GOARCH=amd64 ./build.sh
 | `SERVICE_NAME` | `autonomy` |
 | `DEPARTMENT_ID` | `D0005` |
 | `INSTANCES` | `127.0.0.1:4300` |
-| `REGISTRY_URL` | `http://127.0.0.1:4240` |
+| `REGISTRY_URL` | `http://49.234.45.173:4240` |
 | `HEALTH_PATH` | `/health` |
 | `GIT_REPO` | `https://github.com/kaulie/autonomy` |
 | `SWAG_MAIN` | `cmd/autonomyd/main.go` |
 
-远程实例把 `INSTANCES` 加上可达地址。中心不在本机则设 `REGISTRY_URL`。`cmd/autonomy` 也会被自动探测成入口，所以必须显式 `SWAG_MAIN`。
+远程实例把 `INSTANCES` 加上可达地址。要换注册中心则设 `REGISTRY_URL`。`cmd/autonomy` 也会被自动探测成入口，所以必须显式 `SWAG_MAIN`。
 
 只产 JSON，不产 `docs.go`，避免把 swaggo 拖成运行期依赖。
 

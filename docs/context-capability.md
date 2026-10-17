@@ -286,7 +286,7 @@ Worker 的提示词已经带 `{{CONSTRUCTS}}`（含 `context.list` / `search` / 
 
 ## 5. 运行前置（Agent 需要知道的事实）
 
-- **knowledge-base 必须可达**（`KNOWLEDGE_BASE_URL`，默认 `127.0.0.1:4360`）。不可达时报 `INDEX_FAILED`，不是「项目没有文档」。
+- **knowledge-base 必须可达**（`KNOWLEDGE_BASE_URL`，默认 `49.234.45.173:4360`）。不可达时报 `INDEX_FAILED`，不是「项目没有文档」。
 - **资源必须先在 knowledge-base 登记、绑定到该 project、再 sync。** 未 sync 的源出现在 list 里，但 search 没有 section。
 - **源文件在 knowledge-base 主机上（或它 clone 的仓库里）。** Agent 工作区里的一份 Markdown ≠ 已索引的知识。
 - **修订检测：** git 源用 commit SHA，文件源用内容 SHA256；未变不重建。

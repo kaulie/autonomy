@@ -21,8 +21,8 @@ import (
 const (
 	// EnvURL is the knowledge-base base URL. Empty uses DefaultURL.
 	EnvURL = "KNOWLEDGE_BASE_URL"
-	// DefaultURL is the local knowledge-base the service contract declares.
-	DefaultURL = "http://127.0.0.1:4360"
+	// DefaultURL is the knowledge-base the service contract declares.
+	DefaultURL = "http://49.234.45.173:4360"
 	// EntityProject is the CONTEXT entity type Autonomy's project_id maps onto.
 	EntityProject = "project"
 

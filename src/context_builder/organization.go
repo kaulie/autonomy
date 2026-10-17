@@ -33,7 +33,7 @@ const (
 	// DefaultOrganizationAPIURL is where the organization service lives when
 	// ORGANIZATION_API_URL says nothing (the same default the control plane uses for
 	// its own department picker).
-	DefaultOrganizationAPIURL = "http://127.0.0.1:4244"
+	DefaultOrganizationAPIURL = "http://49.234.45.173:4244"
 	// EnvOrganizationAPIURL names the organization service.
 	EnvOrganizationAPIURL = "ORGANIZATION_API_URL"
 )
@@ -44,7 +44,7 @@ func NewOrganization() *OrganizationResolver { return &OrganizationResolver{} }
 func (r *OrganizationResolver) Name() string { return "organization" }
 
 // BaseURL is where this resolver reads: its own URL when set, else the env var,
-// else the local default.
+// else the compiled default.
 func (r *OrganizationResolver) BaseURL() string {
 	if r != nil && r.URL != "" {
 		return r.URL

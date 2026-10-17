@@ -39,10 +39,10 @@ Result     { Sections map[string]map[string]any,  // 类型 -> 合并后的字�
 |---|---|---|
 | `world`（runtime 提供，`src/context_resolver.go`） | 本进程注册的 context container（`RegisterContextContainer`） | `name` / `description` / `domain` —— 只有这个进程知道的那些 |
 | `task_store`（runtime 提供） | 本进程的 `tasks` 表（`GetTask`）：任务的 world 写在行里（`tasks.context_ref`） | `description` / `goal_type`；并**展开**出那条 task 的 project 引用（`ExtraRefs`） |
-| `project_registry`（模块提供） | 控制面 `GET /api/projects`（`PROJECTS_API_URL`，默认 `http://127.0.0.1:4211`） | `name` / `git_repo_url` / `organization{id,name}` |
-| `organization`（模块提供） | 组织服务 `GET /api/v1/departments/{id}`（`ORGANIZATION_API_URL`，默认 `http://127.0.0.1:4244`） | 补上 `organization{id,name,type}`（部门目录） |
-| `service_registry`（模块提供） | 服务中心 `GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://127.0.0.1:4240`） | `organization.services[]` —— 这个组织登记的服务：`name` / `description` / `git_repo_url` / `version` |
-| `task_registry`（模块提供） | 控制面 `GET /api/tasks/{taskId}`（`TASKS_API_URL`，默认同控制面 `http://127.0.0.1:4211`） | `title` / `description` / `goal` / `task_type`；并**展开**出那条 task 的 project 引用 |
+| `project_registry`（模块提供） | 控制面 `GET /api/projects`（`PROJECTS_API_URL`，默认 `http://49.234.45.173:4211`） | `name` / `git_repo_url` / `organization{id,name}` |
+| `organization`（模块提供） | 组织服务 `GET /api/v1/departments/{id}`（`ORGANIZATION_API_URL`，默认 `http://49.234.45.173:4244`） | 补上 `organization{id,name,type}`（部门目录） |
+| `service_registry`（模块提供） | 服务中心 `GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://49.234.45.173:4240`） | `organization.services[]` —— 这个组织登记的服务：`name` / `description` / `git_repo_url` / `version` |
+| `task_registry`（模块提供） | 控制面 `GET /api/tasks/{taskId}`（`TASKS_API_URL`，默认同控制面 `http://49.234.45.173:4211`） | `title` / `description` / `goal` / `task_type`；并**展开**出那条 task 的 project 引用 |
 
 顺序即优先级：平台注册表答的 `name` 赢过进程里那份，而进程独有的 `description` / `domain` 留着；部门目录答不了（服务没起）时，
 project 注册表里的 `organization{id,name}` 仍然在。部门**成员**故意不注入 —— 谁在这个部门是身份问题（组织服务的地盘），不是每个决策周期都需要。
@@ -66,10 +66,10 @@ task 的 world 写在它自己的行里（`tasks.context_ref`），所以本进�
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
-| `PROJECTS_API_URL` | project 注册表地址 | `http://127.0.0.1:4211`（控制面） |
-| `TASKS_API_URL` | task 注册表地址（控制面按 task id 答 project；与 project 注册表同一个服务） | 同上，`http://127.0.0.1:4211` |
-| `ORGANIZATION_API_URL` | 组织服务地址 | `http://127.0.0.1:4244` |
-| `SERVICE_REGISTRY_API_URL` | 服务中心（服务注册表）地址 | `http://127.0.0.1:4240` |
+| `PROJECTS_API_URL` | project 注册表地址 | `http://49.234.45.173:4211`（控制面） |
+| `TASKS_API_URL` | task 注册表地址（控制面按 task id 答 project；与 project 注册表同一个服务） | 同上，`http://49.234.45.173:4211` |
+| `ORGANIZATION_API_URL` | 组织服务地址 | `http://49.234.45.173:4244` |
+| `SERVICE_REGISTRY_API_URL` | 服务中心（服务注册表）地址 | `http://49.234.45.173:4240` |
 | `AUTONOMY_CONTEXT_BUILDER` | `0` / `off` / `false` / `no` 关掉整个 builder | 开 |
 | `AUTONOMY_CONTEXT_TIMEOUT` | 单个 resolver 的预算（Go duration） | `3s` |
 

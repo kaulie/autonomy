@@ -23,7 +23,7 @@
 #   ★ SERVICE_NAME  服务名（默认 autonomy）
 #   ★ DEPARTMENT_ID 归属部门（默认 D0005 AI研发部；可用 `curl $REGISTRY_URL/v1/departments` 查）
 #   ★ INSTANCES     实例地址，逗号分隔（默认 127.0.0.1:4300 —— 本服务在部署平台的契约端口）
-#   ★ REGISTRY_URL  注册中心地址（默认 http://127.0.0.1:4240，只绑本机）
+#   ★ REGISTRY_URL  注册中心地址（默认 http://49.234.45.173:4240）
 #   ★ REGISTRY_NS   命名空间（默认 default）；REGISTRY_TOKEN 写令牌（写接口收紧后才需要）
 #   ★ VERSION / OWNER / HEALTH_PATH / TAGS / GIT_REPO / SWAG_MAIN / SWAG_ARGS
 #   ★ REGISTRY_CLIENT_CI    直接指定 register-go-service.sh 的路径（跳过自动查找）
@@ -40,7 +40,7 @@ die() { echo "[register-contract][错误] $*" >&2; exit 1; }
 SERVICE_NAME="${SERVICE_NAME:-autonomy}"
 DEPARTMENT_ID="${DEPARTMENT_ID:-D0005}"
 INSTANCES="${INSTANCES:-127.0.0.1:4300}"
-REGISTRY_URL="${REGISTRY_URL:-http://127.0.0.1:4240}"
+REGISTRY_URL="${REGISTRY_URL:-http://49.234.45.173:4240}"
 REGISTRY_NS="${REGISTRY_NS:-default}"
 OWNER="${OWNER:-kaulie}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"

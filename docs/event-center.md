@@ -30,7 +30,7 @@ GitHub webhook ──▶ event-center ──pull──▶ Runtime
 
 ## HTTP（客户端调用的契约）
 
-默认基址 `http://127.0.0.1:9099`（`EVENT_CENTER_API_URL`）。消费口可用 `EVENT_CENTER_ADMIN_TOKEN` / `EVENTD_ADMIN_TOKEN`。
+默认基址 `http://49.234.45.173:9099`（`EVENT_CENTER_API_URL`）。消费口可用 `EVENT_CENTER_ADMIN_TOKEN` / `EVENTD_ADMIN_TOKEN`。
 
 - `GET /v1/streams` — 各流的 `stream_seq` 头
 - `GET /v1/streams/{stream}/events?after=&limit=&wait=` — 游标拉取（`wait` 为 long-poll）

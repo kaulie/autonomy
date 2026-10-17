@@ -77,7 +77,7 @@ curl -sS -X POST http://127.0.0.1:4300/api/events \
 | `AUTONOMY_EVENT_GATEWAY` | `0` / `off` / `false` / `no` 关掉 | 开 |
 | `AUTONOMY_EVENT_GATEWAY_PROMPT_LIMIT` | 注入 prompt 的最近事件条数 | `20`（最大 100） |
 | `AUTONOMY_WATCH_INTERVAL` | Watcher 后台轮询间隔（秒） | `15`（最小 2） |
-| `EVENT_CENTER_API_URL` | 事件中心基址 | `http://127.0.0.1:9099` |
+| `EVENT_CENTER_API_URL` | 事件中心基址 | `http://49.234.45.173:9099` |
 | `AUTONOMY_EVENT_CENTER` | `0` / `off` 关掉事件中心客户端（PR watch 不回退 GitHub） | 开 |
 
 ## 持久化

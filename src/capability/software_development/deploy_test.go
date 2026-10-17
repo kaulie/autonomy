@@ -312,7 +312,7 @@ func TestServiceDeployMetadataPinsTheSemantics(t *testing.T) {
 	if c.Provider() != sd.DeployProvider || sd.DeployProvider != "agent-control-plane" {
 		t.Errorf("provider=%q/%q", c.Provider(), sd.DeployProvider)
 	}
-	if sd.DefaultDeploymentAPIURL != "http://127.0.0.1:4220" {
+	if sd.DefaultDeploymentAPIURL != "http://49.234.45.173:4220" {
 		t.Errorf("default deployment API=%q", sd.DefaultDeploymentAPIURL)
 	}
 	for _, want := range []string{"service", "branch", "pipeline_id", "does not wait", "identity"} {

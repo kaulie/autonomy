@@ -39,7 +39,7 @@ Project 是人类理解和组织世界的一种 **Context**：Context Container 
 它知道的部分（描述、领域）。
 
 **这个组织里有哪些服务**（以及每个服务的代码在哪个仓库）同理是平台的事实：autonomy 从 project id 走到组织 id，再去问服务中心
-`GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://127.0.0.1:4240`）—— 这就是 Project「相关服务与端点」
+`GET /v1/orgs/{orgId}/services`（`SERVICE_REGISTRY_API_URL`，默认 `http://49.234.45.173:4240`）—— 这就是 Project「相关服务与端点」
 这条逻辑字段在运行时被填上的那一跳。
 
 解析这件事只有一个实现：**context builder**（[context-builder.md](context-builder.md)）—— 每个决策周期在 prompt 之前解析一次，

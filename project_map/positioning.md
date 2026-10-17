@@ -28,10 +28,10 @@ Task → Agent → Capability → Action → 世界状态变化 → Verification
 
 | 不是 | 谁才是 |
 |---|---|
-| Web Cursor / 任务面板产品 | [`agent-control-plane`](https://github.com/kaulie/agent-control-plane)（本机默认 `:4211`） |
-| 部署 / 发版平台 | [`agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment)（本机 `:4220`） |
-| 服务目录 / 契约中心 | 服务中心（本机默认 `:4240`） |
-| 组织 / 部门目录 | organization 服务（本机默认 `:4244`） |
+| Web Cursor / 任务面板产品 | [`agent-control-plane`](https://github.com/kaulie/agent-control-plane)（默认 `http://49.234.45.173:4211`） |
+| 部署 / 发版平台 | [`agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment)（默认 `http://49.234.45.173:4220`） |
+| 服务目录 / 契约中心 | 服务中心（默认 `http://49.234.45.173:4240`） |
+| 组织 / 部门目录 | organization 服务（默认 `http://49.234.45.173:4244`） |
 | 评测套件 | [`agent-benchmark-tool`](https://github.com/kaulie/agent-benchmark-tool)（读本服务的数据 API，不直读库） |
 | 通用 LLM 网关 | 它只驱动已注册的 harness（Cursor / Cline / Codex / Claude） |
 

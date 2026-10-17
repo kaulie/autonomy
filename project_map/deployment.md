@@ -17,7 +17,7 @@
 平台入口（需要上线时由人 / 平台调用，不是本仓库默认步骤）：
 
 ```bash
-curl -sS -X POST http://127.0.0.1:4220/api/deploy-notify \
+curl -sS -X POST http://49.234.45.173:4220/api/deploy-notify \
   -H 'content-type: application/json' \
   -d '{"serviceId":"autonomy","ref":"main"}'
 ```

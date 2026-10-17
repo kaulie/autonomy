@@ -115,7 +115,7 @@ INSTANCES=127.0.0.1:4300,203.0.113.10:4300 \
   bash scripts/register-contract.sh
 ```
 
-注册中心默认仍是 `http://127.0.0.1:4240`。中心不在这台远程机器上，就设 `REGISTRY_URL`。
+注册中心默认是 `http://49.234.45.173:4240`。要换注册中心就设 `REGISTRY_URL`。
 
 ## 核对
 

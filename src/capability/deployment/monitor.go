@@ -34,9 +34,9 @@ const (
 	// variable service.deploy and the gateway use, so one setting points both
 	// the trigger and the monitor at the same deployment control plane.
 	EnvAPIURL = "DEPLOYMENT_API_URL"
-	// DefaultAPIURL is the local deployment control plane, mirroring
+	// DefaultAPIURL is the deployment control plane, mirroring
 	// service.deploy: monitoring works out of the box against the same host.
-	DefaultAPIURL = "http://127.0.0.1:4220"
+	DefaultAPIURL = "http://49.234.45.173:4220"
 
 	defaultTail     = 40
 	maxTail         = 500
@@ -172,7 +172,7 @@ func (Monitor) Domain() string { return Domain }
 func (Monitor) Provider() string { return Provider }
 
 func (Monitor) Description() string {
-	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://127.0.0.1:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions, source`
+	return `observe an in-flight deployment/pipeline and report whether it is progressing, what failed, and which logs explain it; never changes the deployment. input: {"deployment":"<id>"} or {"pipeline_id":"<id>"} (required; "poll" from service.deploy works too), optional "status_url", "endpoint" (default $DEPLOYMENT_API_URL or http://49.234.45.173:4220), "logs_url", "watch":"true", "interval" (s), "timeout" (s), "tail". output: state, phase, progress, healthy, terminal, problem, signals, diagnosis, evidence, suggestions, source`
 }
 
 // Inputs / Outputs declare the capability's call signature for {{CONSTRUCTS}}.
@@ -181,7 +181,7 @@ func (Monitor) Inputs() []spec.Field {
 		{Name: "deployment", Aliases: []string{"pipeline_id", "pipeline", "request_id", "target", "run", "id"}, Kind: spec.KindDeployment, Description: "the deployment / pipeline to follow, by the id the deployment control plane knows it as; required unless poll names it"},
 		{Name: "poll", Kind: spec.KindDeployment, Description: "the status path handed back by service.deploy (e.g. /api/pipelines/<id>); naming it is enough on its own and it is joined onto endpoint/status_url"},
 		{Name: "status_url", Description: "the full status URL, when it is not <endpoint>/api/pipelines/<deployment>; it wins over endpoint"},
-		{Name: "endpoint", Description: "the deployment API base URL; default $DEPLOYMENT_API_URL, else http://127.0.0.1:4220, with the status path <endpoint>/api/pipelines/<deployment>"},
+		{Name: "endpoint", Description: "the deployment API base URL; default $DEPLOYMENT_API_URL, else http://49.234.45.173:4220, with the status path <endpoint>/api/pipelines/<deployment>"},
 		{Name: "logs_url", Description: "a separate logs URL, for a control plane whose logs are not at <status_url>/logs; a status answer that already carries logs is used instead"},
 		{Name: "watch", Description: `"true" polls until the deployment reaches a terminal state or the window closes; the default takes one look only`},
 		{Name: "interval", Description: "seconds between polls when watching (default 5, minimum 1)"},
