@@ -74,10 +74,9 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 重启，再用 /health 确认，见 docs/store.md「两个引擎，两份数据」。
 # AUTONOMY_STORE_ENGINE=postgres
 # AUTONOMY_POSTGRES_DSN=postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable
-# 读写分离：主库还是写侧，另外给一个**读侧**连接串（本机那份副本），看得多、改得少的读
-# 就走本地。立副本：scripts/local-replica.sh（见 docs/local-replica.md）；读侧连不上不会
-# 失败，只是退回主库并warning。见 docs/store.md「读写分离」。
-# AUTONOMY_STORE_READ_DSN=postgres://user:pass@127.0.0.1:5433/autonomy?sslmode=disable
+# 读写同一份库。部署起来的进程不使用读侧副本：start.sh 会丢掉
+# AUTONOMY_STORE_READ_DSN / AUTONOMY_POSTGRES_READ_DSN，观察类的读也走上面的写侧。
+# 见 docs/store.md「读写分离」。
 # 推理后端：local（离线）或 llm。部署后按需要改，再走平台重启。
 AUTONOMY_REASONER=llm
 # LLM 后端（默认 harness）：cursor（默认）/ cline / codex。发版包自带两个 Node 桥
@@ -104,6 +103,13 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "${ENV_FILE}"; set +a
+
+# .env 跨部署保留，里面可能还留着本地副本（127.0.0.1:5433）的读侧连接串。
+# 线上读写同一份库：丢掉读侧，观察类的读也走写侧（AUTONOMY_STORE_DSN）。
+[ -f "${DIR}/store_env.sh" ] || die "缺少 ${DIR}/store_env.sh（发版包内容不完整？）"
+# shellcheck source=store_env.sh
+. "${DIR}/store_env.sh"
+unify_store_reads_onto_writer
 
 # 平台注入的端口优先：不让 .env 里的 AUTONOMY_HTTP_ADDR 把服务钉在旧端口。
 # 主机是远程部署的旋钮（AUTONOMY_HTTP_HOST / SERVICE_HOST），默认仍是 127.0.0.1。

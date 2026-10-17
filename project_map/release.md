@@ -24,7 +24,7 @@
 outputs/
   bin/autonomyd                          # CGO_ENABLED=0，-ldflags 写入 main.version
   bin/cursor-sdk-bridge                  # 目标平台的 pin 版本；取不到是警告，不是构建失败
-  scripts/start.sh stop.sh restart.sh listen_addr.sh autonomyd.service
+  scripts/start.sh stop.sh restart.sh listen_addr.sh store_env.sh autonomyd.service
   src/agent_policy/                      # 提示词原样带上
   src/clinesdk/bridge/                   # 源码 + lock + bridge-deps.tgz
   src/codexsdk/bridge/                   # 同上

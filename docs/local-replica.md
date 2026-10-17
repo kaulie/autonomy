@@ -1,27 +1,23 @@
-# 本地副本：写远端、读本地
+# 本地副本
 
 ## 一句话
 
-远端那台 PostgreSQL 是**唯一的写方**，也是数据本身；本机再立一份它的 streaming
-replica（hot standby，只读），让「看得多、改得少」的读落在本地。写走远端，读走本地。
+部署起来的 autonomy **读写同一份库**：`49.234.45.173:5432`。`scripts/start.sh` 载入
+`backend/.env` 之后丢掉 `AUTONOMY_STORE_READ_DSN` / `AUTONOMY_POSTGRES_READ_DSN`，
+HTTP 读接口、数据 API、UI 轮询和写都走写侧。`.env` 跨部署保留，里面若还留着
+`127.0.0.1:5433`，进程也不会用它。
 
 ```
-       写，以及「读完就写」的读
+  读和写
   runtime ───────────────────────►  远端主库  49.234.45.173:5432  (autonomy)
-     │                                  │
-     │                                  │  WAL 流（复制槽 laptop_replica）
-     │                                  ▼
-     └──── 只观察的读 ──────────►  本地副本  127.0.0.1:5433     (只读，热备)
 ```
 
-- **写**：`AUTONOMY_STORE_DSN` 指远端主库 —— 一次写只有一处落点，没有两份真相。
-- **读**：`AUTONOMY_STORE_READ_DSN` 指本地副本 —— HTTP 读接口、数据 API、UI / 评测的轮询
-  都在本机完成，不再每次跨网。
-- **副本是同一份库**：物理复制搬的是主库的数据目录 + 之后的 WAL，所以角色、口令、schema、
-  数据全在里面 —— 服务用哪个角色连主库，就用同一个角色连本地。
+本机那份 streaming replica（`scripts/local-replica.sh`，默认 `127.0.0.1:5433`）不再接到
+runtime 上。脚本还在，给想在本机用 psql 看一份热备的人。**不要**再把
+`AUTONOMY_STORE_READ_DSN` 写进 runtime 的 `.env` 指望服务去读它。
 
-分工与一致性由代码保证，不只是靠约定：见 [store.md](store.md)「读写分离」。本文讲怎么把
-这份副本立起来、怎么验证它、坏了怎么办。
+engine 在不经 `start.sh` 启动时仍可以把观察类的读指到一份副本，规则见
+[store.md](store.md)「读写分离」。本文剩下的部分讲怎么把这份副本立起来。
 
 ## 远端要准备什么（一次性，需要主库的管理员）
 
@@ -90,24 +86,18 @@ scripts/local-replica.sh uninstall-agent
 postgres 会以「postmaster became multithreaded during startup」立刻退出，`127.0.0.1:5433` 就一直
 connection refused。已经装过旧代理的，改完脚本要再跑一次 `install-agent`。
 
-## 打开「读本地」
+## 接到 runtime
 
-```bash
-scripts/local-replica.sh env        # 打印三行（写侧 / 读侧 DSN），口令从 ~/.pgpass 取
-```
-
-把这三行放进 runtime 的 `backend/.env`，然后**走部署平台**重启（不要在本机直接重启部署）：
+部署进程不读这份副本。`scripts/local-replica.sh env` 只打印写侧，放进 `backend/.env` 后走部署平台重启：
 
 ```
 AUTONOMY_STORE_ENGINE=postgres
 AUTONOMY_STORE_DSN="postgres://autonomy:<口令>@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=…"
-AUTONOMY_STORE_READ_DSN="postgres://autonomy:<口令>@127.0.0.1:5433/autonomy?sslmode=disable&application_name=autonomy-local-read"
 ```
 
-- **读侧不给**：行为与过去完全一样，所有读都在主库 —— 这个开关是二元的、可随时退回来。
-- **读侧连不上 / 不是副本**：不会启动失败，只是打一条 warning 并把读退回主库
-  （副本是优化，数据库才是本体）。打开时会检查它确实在恢复中、且和主库同一个
-  `system_identifier`：指错库这种错会安静地给错数据，所以宁可退回主库。
+`scripts/start.sh` 载入 `.env` 之后丢掉 `AUTONOMY_STORE_READ_DSN` / `AUTONOMY_POSTGRES_READ_DSN`。
+文件里留下的 `127.0.0.1:5433` 不会再生效。不经 `start.sh` 直接跑二进制时，engine 仍会按这两个变量
+打开读侧；连不上或不是同一集群的副本就 warning 并退回写侧（见 [store.md](store.md)「读写分离」）。
 
 ## 验证
 
@@ -146,6 +136,8 @@ go test ./src/db/ -run TestTheSplitAgainstARealReplica -v
 
 ## 滞后与一致性
 
+下面只描述**不经 `start.sh`、并且配了读侧**时的 engine。部署起来的进程没有读侧，不存在这份滞后。
+
 副本的答案是**过去的某一刻**，滞后从毫秒到几分钟都可能（本机断网、主库在灌大批 WAL、
 跨系统 collation 差异……）。因此：
 
@@ -160,7 +152,7 @@ go test ./src/db/ -run TestTheSplitAgainstARealReplica -v
 
 | 症状 | 原因 | 处理 |
 |------|------|------|
-| 服务起来了，读走了远端 | 副本没起 / 不是副本（warning 里有原因） | `scripts/local-replica.sh status`；`start`；必要时重新 `init` |
+| 服务起来了，读走了 `49.234.45.173` | 这是部署路径的预期：`start.sh` 丢掉读侧副本 | 不用改。本机副本只给 psql，不给 runtime |
 | `127.0.0.1:5433` connection refused，副本日志里「postmaster 变成多线程的」/ `postmaster became multithreaded during startup` | launchd 没带合法 locale。macOS 上空的 `LC_ALL` 会让 `setlocale()` 在启动阶段把进程变成多线程，postgres 立刻退出（`HINT: Set the LC_ALL environment variable to a valid locale`）。本机代理的默认环境几乎是空的，所以最容易踩。 | 本脚本的 `start` / `install-agent` 会把 `LC_ALL=C`（可用 `REPLICA_LC_ALL` 换）写进进程环境和 plist。已经装过代理的重跑一次 `install-agent`。 |
 | 槽上「没人连着」 | 副本停机，或主库 hba 里那个出口 IP 过期了 | 先 `start`；还是不行就更新主库 hba 那一行并 reload |
 | 副本追不上（位点差得越来越远） | 本机断网 / 上行带宽不够 / 主库 WAL 太多 | 等它追；追不上就重新 `init`（几分钟） |
