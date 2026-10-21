@@ -70,6 +70,55 @@ func TestSessionThroughRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPServersArePassedToTheCLI(t *testing.T) {
+	dir := fakeCLI(t, "printf '%s\\n' \"$@\" > args\ncat >/dev/null\nprintf '%s\\n' '"+success+"'\n")
+	file := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(file, []byte(`{"mcpServers":{"git-via-proxy":{"command":"node","args":["server.mjs"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(llmbackend.MCPServersFileEnv, file)
+	h := &probeHost{facts: llmbackend.Facts{Workspace: dir}}
+	if _, _, err := newSession(h).Prompt(context.Background(), "hello", llmbackend.ModeAgent, nil); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(args)
+	if !strings.Contains(text, "--strict-mcp-config\n") || !strings.Contains(text, "--mcp-config\n") {
+		t.Fatal(text)
+	}
+	if !strings.Contains(text, "mcp__git-via-proxy__*") || !strings.Contains(text, "Read,Edit,Write,Glob,Grep,Bash,mcp__git-via-proxy__*") {
+		t.Fatal(text)
+	}
+	// The config path is an argument of its own, and the file is the Claude dialect.
+	var configPath string
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line == "--mcp-config" && i+1 < len(lines) {
+			configPath = lines[i+1]
+		}
+	}
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `"type": "stdio"`) || !strings.Contains(string(body), `"command": "node"`) {
+		t.Fatal(string(body))
+	}
+}
+
+func TestPlanModeAllowsOnlyMCPTools(t *testing.T) {
+	if got := claudeAllowedTools(llmbackend.ModePlan, nil); got != "" {
+		t.Fatalf("planner with no servers omits the flag, got %q", got)
+	}
+	got := claudeAllowedTools(llmbackend.ModePlan, []llmbackend.MCPServer{{Name: "docs", Type: "http", URL: "https://example.com/mcp"}})
+	if got != "mcp__docs__*" {
+		t.Fatalf("planner with servers allows only those tools, got %q", got)
+	}
+}
+
 func TestTaskModelOutranksTheAccountModel(t *testing.T) {
 	dir := fakeCLI(t, "printf '%s\\n' \"$@\" > args\ncat >/dev/null\nprintf '%s\\n' '"+success+"'\n")
 	h := &probeHost{facts: llmbackend.Facts{
@@ -139,8 +188,12 @@ func TestContentBlocksAndProbe(t *testing.T) {
 	if _, err := s.Attach(context.Background(), llmbackend.ModePlan); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(s.args(), " "), "--no-session-persistence") || s.Resumed() {
-		t.Fatal(s.args())
+	argv, err := s.args()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(argv, " "), "--no-session-persistence") || s.Resumed() {
+		t.Fatal(argv)
 	}
 	s.record("transient")
 	if h.facts.SessionID != "old" {

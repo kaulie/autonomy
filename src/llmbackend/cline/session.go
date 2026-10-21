@@ -56,7 +56,15 @@ func (c *clineSession) Attach(ctx context.Context, mode llmbackend.Mode) (bool, 
 
 // attachFor creates (or reuses) the session for one mode/cwd and makes it the current one.
 func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, error) {
-	if _, _, err := clineClient().Ping(ctx); err != nil {
+	servers, err := llmbackend.MCPServers()
+	if err != nil {
+		return false, fmt.Errorf("mcp servers: %w", err)
+	}
+	client, err := clineClient()
+	if err != nil {
+		return false, err
+	}
+	if _, _, err := client.Ping(ctx); err != nil {
 		return false, fmt.Errorf("cline bridge ping: %w", llmbackend.BridgeCallErr(ctx, err))
 	}
 	key := mode + "\x00" + cwd
@@ -75,7 +83,7 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 	// injection timing is "at session create" (native systemPrompt). Empty
 	// here is a probe / attach-before-frame: the bridge fills a stub so the
 	// SDK does not crash on undefined.trim().
-	agent, err := clineClient().Agents().Create(ctx, clinesdk.CreateOptions{
+	agent, err := client.Agents().Create(ctx, clinesdk.CreateOptions{
 		ProviderID:      creds.Vendor,
 		ModelID:         creds.Model,
 		APIKey:          creds.APIKey,
@@ -84,6 +92,7 @@ func (c *clineSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 		SystemPrompt:    strings.TrimSpace(c.host.Facts().RolePrompt),
 		Mode:            mode,
 		ResumeSessionID: resume,
+		MCPServers:      bridgeMCP(servers),
 	})
 	if err != nil {
 		return false, fmt.Errorf("create cline agent (mode %s): %w", mode, err)

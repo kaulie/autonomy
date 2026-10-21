@@ -10,6 +10,7 @@ import {
 	itemText,
 	normalizeUsage,
 	resolveCodexDefaults,
+	codexMcpConfig,
 	sandboxModeFor,
 	statusOf,
 	threadOptionsFor,
@@ -119,4 +120,29 @@ test("a thread is opened with its mode's sandbox, and the network the runtime as
 
 	// A caller may have its own reason to run where no repository is (the CLI's guard is not ours).
 	assert.equal(threadOptionsFor({ cwd: "/w", mode: MODE_AGENT, skipGitRepoCheck: false }).skipGitRepoCheck, false);
+});
+
+test("mcp servers become codex config overrides, with tools auto-approved", () => {
+	assert.deepEqual(
+		codexMcpConfig([
+			{ name: "git-via-proxy", command: "node", args: ["server.mjs"], env: { GIT_VIA_PROXY_URL: "http://127.0.0.1:7897" } },
+			{ name: "docs", type: "http", url: "https://example.com/mcp", headers: { Authorization: "Bearer t" } },
+		]),
+		{
+			mcp_servers: {
+				"git-via-proxy": {
+					default_tools_approval_mode: "auto",
+					command: "node",
+					args: ["server.mjs"],
+					env: { GIT_VIA_PROXY_URL: "http://127.0.0.1:7897" },
+				},
+				docs: {
+					default_tools_approval_mode: "auto",
+					url: "https://example.com/mcp",
+					http_headers: { Authorization: "Bearer t" },
+				},
+			},
+		},
+	);
+	assert.deepEqual(codexMcpConfig([]), { mcp_servers: {} });
 });

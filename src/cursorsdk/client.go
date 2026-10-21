@@ -231,6 +231,10 @@ type CreateOptions struct {
 	Model string
 	CWD   string
 	Mode  sdkv1.AgentModeOption
+	// McpServers is handed to the local agent as its tool servers. Nil leaves the
+	// agent with no inline MCP. setting_sources stays unset, so project and user
+	// MCP files are not loaded on top of this list.
+	McpServers map[string]*sdkv1.McpServerConfig
 }
 
 // Create creates a local agent.
@@ -247,10 +251,11 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	}
 	req := &sdkv1.CreateAgentRequest{
 		Options: &sdkv1.AgentOptions{
-			Model:  &sdkv1.ModelSelection{Id: opts.Model},
-			ApiKey: f.client.APIKey,
-			Local:  &sdkv1.LocalAgentOptions{Cwd: []string{cwd}},
-			Mode:   opts.Mode,
+			Model:      &sdkv1.ModelSelection{Id: opts.Model},
+			ApiKey:     f.client.APIKey,
+			Local:      &sdkv1.LocalAgentOptions{Cwd: []string{cwd}},
+			Mode:       opts.Mode,
+			McpServers: opts.McpServers,
 		},
 	}
 	Trace("CreateAgent", "rpc begin model=%s cwd=%s", opts.Model, cwd)

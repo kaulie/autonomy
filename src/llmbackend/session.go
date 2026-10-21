@@ -37,6 +37,10 @@ type Facts struct {
 	// that places the system prompt at session create reads it here (Cline). Others
 	// ignore it and receive the same text as their first Prompt.
 	RolePrompt string
+	// MCPServers is the process-wide list from AUTONOMY_MCP_SERVERS_FILE, when that
+	// file loads. A harness still calls MCPServers itself so a bad file fails the
+	// attach instead of looking like an empty list.
+	MCPServers []MCPServer
 }
 
 // Host is the autonomy agent a Session belongs to, as a backend needs it: what it must

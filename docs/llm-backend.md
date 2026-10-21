@@ -60,6 +60,38 @@ codex 的每一轮跑在 CLI 自己的沙箱里（`plan` → `read-only`，其�
 `Runtime.AcquireAgent`，`src/runtime.go`）跑在哪个 provider 上。`AUTONOMY_REASONER=local`
 是离线 reasoner，与后端无关。
 
+### 通用 MCP（`AUTONOMY_MCP_SERVERS_FILE`）
+
+四条 harness 用同一份名单。变量指向一个 JSON 文件；不设就谁都不注入，各 harness 保持原来的行为。planner 和 worker 读的是这一份。文件读不出来或写错，这一轮 attach 失败，不会装成「没有 MCP」。
+
+```json
+{
+  "mcpServers": {
+    "git-via-proxy": {
+      "command": "node",
+      "args": ["/path/to/server.mjs"],
+      "env": { "GIT_VIA_PROXY_URL": "http://127.0.0.1:7897" }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer …" }
+    }
+  }
+}
+```
+
+`type` 省略或 `stdio` 是本地进程；`http`（`streamableHttp` / `streamable-http` 同样认）和 `sse` 是远程。名字、环境变量名、header 名用 `[A-Za-z][A-Za-z0-9_-]*`。改完重启 runtime。
+
+| harness | 这份名单怎么交进去 |
+|---|---|
+| cursor | `Create` 和 `Resume` 的 `mcp_servers`。`setting_sources` 仍空，不另读 `.cursor/mcp.json`。Resume 必须再带，SDK 不把 inline 服务器留在 agent 上。 |
+| claude | 每次 `claude --print` 加 `--mcp-config` 与 `--strict-mcp-config`，并在 `--allowedTools` 里加上 `mcp__<name>__*`。 |
+| codex | 桥的 `new Codex({ config })` 摊成 `--config mcp_servers.<name>.*`，每个服务器 `default_tools_approval_mode=auto`。不改 `~/.codex/config.toml`；同名项被覆盖，文件里别的服务器仍在。 |
+| cline | 桥进程的 `CLINE_MCP_SETTINGS_PATH` 指向 runtime 写出的 `cline_mcp_settings.json`（HTTP 写成 `streamableHttp`）。不改用户自己的 `~/.cline` 设置。要在桥拉起来之前写好。 |
+
+提示词里写服务器名字不会让模型看到工具。工具表是各 SDK 在开会话时自己列出来的。
+
 ## 当前在哪个后端？问 runtime 自己
 
 ```bash

@@ -48,6 +48,7 @@ import {
 	failureMessage,
 	itemText,
 	normalizeUsage,
+	codexMcpConfig,
 	resolveCodexDefaults,
 	statusOf,
 	threadOptionsFor,
@@ -73,12 +74,16 @@ function clientFor(params) {
 	const defaults = resolveCodexDefaults();
 	const apiKey = (params.apiKey || defaults.apiKey || "").trim();
 	const baseUrl = (params.baseUrl || defaults.baseUrl || "").trim();
-	const key = `${apiKey}|${baseUrl}`;
+	const mcpServers = Array.isArray(params.mcpServers) ? params.mcpServers : [];
+	// The list is part of the cache key: a client built without servers must not be
+	// reused for a create that names some, and the reverse.
+	const key = `${apiKey}|${baseUrl}|${JSON.stringify(mcpServers)}`;
 	let client = clients.get(key);
 	if (!client) {
 		const options = {};
 		if (apiKey) options.apiKey = apiKey;
 		if (baseUrl) options.baseUrl = baseUrl;
+		if (mcpServers.length) options.config = codexMcpConfig(mcpServers);
 		client = new Codex(options);
 		clients.set(key, client);
 	}

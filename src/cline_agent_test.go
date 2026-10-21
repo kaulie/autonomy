@@ -31,7 +31,7 @@ func installFakeClineClient(t *testing.T) {
 	t.Helper()
 	previousClient := cline.SwapClineClient(nil)
 	previousFactory := cline.ClineClientFactory
-	cline.ClineClientFactory = func(string) *clinesdk.Client {
+	cline.ClineClientFactory = func(string) (*clinesdk.Client, error) {
 		argv, env := fakebridge.Command(os.Args[0])
 		manager := clinesdk.NewBridgeManager()
 		manager.Command, manager.Env = argv, env
@@ -39,7 +39,7 @@ func installFakeClineClient(t *testing.T) {
 			clinesdk.WithManager(manager),
 			clinesdk.WithProvider("deepseek"),
 			clinesdk.WithModel("deepseek-v4-pro"),
-		)
+		), nil
 	}
 	t.Cleanup(func() {
 		client := cline.SwapClineClient(previousClient)

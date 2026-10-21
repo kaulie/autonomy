@@ -42,6 +42,24 @@ type CreateOptions struct {
 	// without it a git remote does not even resolve. The harness decides it per mode
 	// (src/llmbackend/codex/network.go); a bridge that has no sandbox ignores it.
 	NetworkAccess *bool
+	// MCPServers is the process list (AUTONOMY_MCP_SERVERS_FILE). Empty leaves the
+	// provider's own MCP configuration alone. The Codex bridge turns a non-empty
+	// list into Codex client config; Cline receives the same list as a settings
+	// file on the bridge process instead.
+	MCPServers []MCPServer
+}
+
+// MCPServer is one entry of CreateOptions.MCPServers, in the neutral shape the
+// runtime parsed. Each bridge translates it into what its SDK accepts.
+type MCPServer struct {
+	Name    string            `json:"name"`
+	Type    string            `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Agent is one resident Cline session. The session is started lazily by the
@@ -90,6 +108,9 @@ func (f *AgentFactory) Create(ctx context.Context, opts CreateOptions) (*Agent, 
 	}
 	if opts.NetworkAccess != nil {
 		params["networkAccess"] = *opts.NetworkAccess
+	}
+	if len(opts.MCPServers) > 0 {
+		params["mcpServers"] = opts.MCPServers
 	}
 	raw, err := tr.call(ctx, "createAgent", params)
 	if err != nil {

@@ -32,7 +32,10 @@ a live probe runs a short turn in a temporary directory and spends model usage.
 Each turn pipes the prompt over stdin to `claude --print --verbose --output-format stream-json`.
 The CLI runs in the account-selected agent workspace. Planner turns use permission mode
 `plan`. Workers use `acceptEdits` with `Read,Edit,Write,Glob,Grep,Bash` explicitly allowed.
-Other tools follow Claude's configured permission policy. These are CLI permissions, **not
+When `AUTONOMY_MCP_SERVERS_FILE` names a server list, every turn also passes
+`--mcp-config` and `--strict-mcp-config`, and `--allowedTools` gains `mcp__<name>__*`
+for each server so `--print` can call those tools. Other tools follow Claude's configured
+permission policy. These are CLI permissions, **not
 an OS filesystem sandbox**; operators requiring isolation must run the runtime in one.
 The harness never enables `bypassPermissions`.
 

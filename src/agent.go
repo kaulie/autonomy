@@ -1,14 +1,14 @@
 package autonomy
 
-import "github.com/kaulie/autonomy/src/llmbackend"
-
 import (
 	"context"
 	"fmt"
-	_ "github.com/kaulie/autonomy/src/llmbackend/all" // the harnesses this build runs
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kaulie/autonomy/src/llmbackend"
+	_ "github.com/kaulie/autonomy/src/llmbackend/all" // the harnesses this build runs
 )
 
 // AgentLifecycle controls whether an agent survives past the current task.
@@ -360,17 +360,19 @@ func (a *Agent) Facts() llmbackend.Facts {
 	if a == nil {
 		return llmbackend.Facts{}
 	}
+	servers, _ := llmbackend.MCPServers()
 	return llmbackend.Facts{
-		Name:      a.Name,
-		Workspace: a.Workspace,
-		Model:     a.Model,
-		Backend:   a.effectiveBackend(),
-		Provider:  a.LLMProvider,
-		SessionID: a.LLMAgentID,
-		FrameSent: a.llmFrameSent,
-		Ephemeral: a.IsEphemeral(),
+		Name:       a.Name,
+		Workspace:  a.Workspace,
+		Model:      a.Model,
+		Backend:    a.effectiveBackend(),
+		Provider:   a.LLMProvider,
+		SessionID:  a.LLMAgentID,
+		FrameSent:  a.llmFrameSent,
+		Ephemeral:  a.IsEphemeral(),
 		Creds:      a.credential,
 		RolePrompt: a.rolePrompt,
+		MCPServers: servers,
 	}
 }
 
