@@ -4,6 +4,7 @@ import (
 	"github.com/kaulie/autonomy/src/capability/broker"
 	ctxcap "github.com/kaulie/autonomy/src/capability/contextcap"
 	"github.com/kaulie/autonomy/src/capability/deployment"
+	"github.com/kaulie/autonomy/src/capability/general"
 	sd "github.com/kaulie/autonomy/src/capability/software_development"
 	ctxsvc "github.com/kaulie/autonomy/src/context"
 	"github.com/kaulie/autonomy/src/watcher"
@@ -61,4 +62,7 @@ func RegisterDefaults(f *Factory, deps Deps) {
 	f.Register(ctxcap.Search{Svc: deps.Context})
 	f.Register(ctxcap.Get{Svc: deps.Context})
 	f.Register(ctxcap.List{Svc: deps.Context})
+	// issue.reproduce collects displayable evidence for online issue confirmation
+	// (exception logs via deployment.monitor log paths, or UI screenshots).
+	f.Register(general.IssueReproduce{})
 }

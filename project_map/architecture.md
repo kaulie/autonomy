@@ -78,8 +78,9 @@ Execute 在独立 worker goroutine（`dispatchExecute`）；同 task 仍串行�
 | `context.search` | `contextcap/search.go` | knowledge-base：全文检索，返回候选 section |
 | `context.get` | `contextcap/get.go` | knowledge-base：取一个 section 的完整内容与来源 |
 | `context.list` | `contextcap/list.go` | knowledge-base：列出一个 project 已绑定的知识源 |
+| `issue.reproduce` | `general/issue_reproduce.go` | 线上问题确认：异常日志（deployment 日志路径 / `server.log`）或 UI 截图 |
 
-Planner 与 worker **共用**这三件（角色只是分工）。禁止在 context 不清时用 grep 去感知世界；不限制任务本身需要的 grep（含全局搜）。`context.get` 点名了目录则按指示去。search 零命中则 `need_input`。见 [context-capability.md](../docs/context-capability.md)。写路径在 knowledge-base，不进 Constructs，也不在本 runtime 的 HTTP / CLI / UI。
+Planner 与 worker **共用** context 三件（角色只是分工）。禁止在 context 不清时用 grep 去感知世界；不限制任务本身需要的 grep（含全局搜）。`context.get` 点名了目录则按指示去。search 零命中则 `need_input`。见 [context-capability.md](../docs/context-capability.md)。写路径在 knowledge-base，不进 Constructs，也不在本 runtime 的 HTTP / CLI / UI。
 
 ## 项目知识（`src/knowledgebase`）
 
