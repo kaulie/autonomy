@@ -53,6 +53,10 @@ func (c *codexSession) workspace() string {
 
 // attachFor opens (or reuses) the session for one mode/cwd and makes it the current one.
 func (c *codexSession) attachFor(ctx context.Context, mode, cwd string) (bool, error) {
+	servers, err := llmbackend.MCPServers()
+	if err != nil {
+		return false, fmt.Errorf("mcp servers: %w", err)
+	}
 	if _, _, err := codexClient().Ping(ctx); err != nil {
 		return false, fmt.Errorf("codex bridge ping: %w", llmbackend.BridgeCallErr(ctx, err))
 	}
@@ -82,6 +86,7 @@ func (c *codexSession) attachFor(ctx context.Context, mode, cwd string) (bool, e
 		Mode:            mode,
 		ResumeSessionID: resume,
 		NetworkAccess:   &network,
+		MCPServers:      codexBridgeMCP(servers),
 	})
 	if err != nil {
 		return false, fmt.Errorf("create codex thread (mode %s): %w", mode, err)

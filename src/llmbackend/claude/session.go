@@ -62,15 +62,35 @@ func (s *session) Attach(ctx context.Context, mode llmbackend.Mode) (bool, error
 	return s.resumed, nil
 }
 
-func (s *session) args() []string {
+func (s *session) args() ([]string, error) {
 	permission := "acceptEdits"
 	if s.mode == llmbackend.ModePlan {
 		permission = "plan"
 	}
 	args := []string{"--print", "--verbose", "--output-format", "stream-json", "--permission-mode", permission}
-	if s.mode != llmbackend.ModePlan {
-		// Explicitly permitted worker tools; never bypass all permission checks.
-		args = append(args, "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash")
+	servers, err := llmbackend.MCPServers()
+	if err != nil {
+		return nil, fmt.Errorf("mcp servers: %w", err)
+	}
+	// --print denies a tool that is not already allowed. MCP tools are named
+	// mcp__<server>__<tool>, so each server needs that glob or the model sees
+	// the server and then cannot call it. Plan mode has no other allow list;
+	// a worker keeps its editor tools and gains the same globs.
+	allowed := claudeAllowedTools(s.mode, servers)
+	if allowed != "" {
+		args = append(args, "--allowedTools", allowed)
+	}
+	if len(servers) > 0 {
+		body, err := llmbackend.ClaudeMCPConfig(servers)
+		if err != nil {
+			return nil, err
+		}
+		path, err := llmbackend.WriteMCPFile("claude.mcp.json", body)
+		if err != nil {
+			return nil, err
+		}
+		// strict: this file is the list, not the user's ~/.claude.json as well.
+		args = append(args, "--mcp-config", path, "--strict-mcp-config")
 	}
 	if s.host.Facts().Ephemeral {
 		args = append(args, "--no-session-persistence")
@@ -80,7 +100,20 @@ func (s *session) args() []string {
 	if model := s.model(); model != "" {
 		args = append(args, "--model", model)
 	}
-	return args
+	return args, nil
+}
+
+// claudeAllowedTools is the --allowedTools value for this mode. Empty means the
+// flag is omitted (a planner with no MCP servers).
+func claudeAllowedTools(mode llmbackend.Mode, servers []llmbackend.MCPServer) string {
+	var names []string
+	if mode != llmbackend.ModePlan {
+		names = append(names, "Read", "Edit", "Write", "Glob", "Grep", "Bash")
+	}
+	for _, server := range servers {
+		names = append(names, "mcp__"+server.Name+"__*")
+	}
+	return strings.Join(names, ",")
 }
 
 // model is the id this session opens with: a task-level choice on Facts.Model

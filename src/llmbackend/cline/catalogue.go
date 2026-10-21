@@ -25,7 +25,11 @@ var fallbackVendors = []string{"deepseek", "minimax", "anthropic", "openai", "op
 
 // catalogueVendors lists the Cline vendors, from the bridge when it answers.
 func catalogueVendors(ctx context.Context, _ llmbackend.Creds) ([]string, error) {
-	_, providers, err := clineClient().Ping(ctx)
+	client, err := clineClient()
+	if err != nil {
+		return fallbackVendors, nil
+	}
+	_, providers, err := client.Ping(ctx)
 	if err != nil {
 		return fallbackVendors, nil
 	}
@@ -53,7 +57,11 @@ func catalogueModels(ctx context.Context, creds llmbackend.Creds) ([]string, err
 	if vendor == "" {
 		return nil, nil
 	}
-	models, err := clineClient().Models(ctx, vendor)
+	client, err := clineClient()
+	if err != nil {
+		return nil, nil
+	}
+	models, err := client.Models(ctx, vendor)
 	if err != nil {
 		return nil, nil
 	}

@@ -18,18 +18,23 @@ var (
 )
 
 // ClineClientFactory builds the process-wide llmbackend.Cline client. Tests replace it with
-// a client backed by the fake bridge (see cline_agent_test.go).
+// a client backed by the fake bridge (see cline_agent_test.go). An error means the
+// process MCP list could not be prepared, and the client is not cached.
 var ClineClientFactory = newClineClient
 
 // clineClient returns the process-wide llmbackend.Cline client, creating it (and thus
 // the single bridge) on first use.
-func clineClient() *clinesdk.Client {
+func clineClient() (*clinesdk.Client, error) {
 	sharedClineMu.Lock()
 	defer sharedClineMu.Unlock()
 	if sharedClineClnt == nil {
-		sharedClineClnt = ClineClientFactory(agentWorkspace())
+		client, err := ClineClientFactory(agentWorkspace())
+		if err != nil {
+			return nil, err
+		}
+		sharedClineClnt = client
 	}
-	return sharedClineClnt
+	return sharedClineClnt, nil
 }
 
 // CloseClineClient shuts the bridge down. It should only be called at
@@ -50,10 +55,16 @@ func CloseClineClient() error {
 // It carries no credentials of its own: one bridge process serves every Cline account, and
 // each agent's account rides on its own CreateAgent call (src/llmbackend/cline/session.go).
 // The pool is the runtime's only source of keys — nothing here reads the environment.
-func newClineClient(workspace string) *clinesdk.Client {
-	return clinesdk.NewClient(
-		clinesdk.WithWorkspace(workspace),
-	)
+func newClineClient(workspace string) (*clinesdk.Client, error) {
+	extra, err := clineMCPEnv()
+	if err != nil {
+		return nil, err
+	}
+	client := clinesdk.NewClient(clinesdk.WithWorkspace(workspace))
+	if client.Manager != nil && len(extra) > 0 {
+		client.Manager.Env = append(client.Manager.Env, extra...)
+	}
+	return client, nil
 }
 
 func agentWorkspace() string {

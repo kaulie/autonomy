@@ -36,6 +36,32 @@ export function sandboxModeFor(mode) {
 }
 
 /**
+ * codexMcpConfig is the Codex client `config` object for one neutral server list.
+ * The SDK flattens it into `--config mcp_servers.<name>.*` overrides, which do not
+ * edit ~/.codex/config.toml. Each server approves its tools (`auto`) so a headless
+ * turn is not stuck on an approval prompt. A url is streamable HTTP; anything else
+ * is a stdio process.
+ */
+export function codexMcpConfig(servers) {
+	const mcpServers = {};
+	for (const server of servers || []) {
+		if (!server || typeof server.name !== "string" || !server.name) continue;
+		const entry = { default_tools_approval_mode: "auto" };
+		if (server.url) {
+			entry.url = server.url;
+			if (server.headers && Object.keys(server.headers).length) entry.http_headers = server.headers;
+		} else {
+			entry.command = server.command;
+			if (Array.isArray(server.args) && server.args.length) entry.args = server.args;
+			if (server.env && Object.keys(server.env).length) entry.env = server.env;
+			if (server.cwd) entry.cwd = server.cwd;
+		}
+		mcpServers[server.name] = entry;
+	}
+	return { mcp_servers: mcpServers };
+}
+
+/**
  * threadOptionsFor is what one Codex thread is opened with: where it works, which sandbox it
  * runs in, and whether that sandbox may reach the network.
  *

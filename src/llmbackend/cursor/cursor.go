@@ -3,12 +3,12 @@ package cursor
 import (
 	"context"
 	"fmt"
-	"github.com/kaulie/autonomy/src/llmbackend"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/kaulie/autonomy/src/cursorsdk"
+	"github.com/kaulie/autonomy/src/llmbackend"
 )
 
 // cursorSession is the llmbackend.Cursor backend's session: one llmbackend.Cursor agent, attached through the
@@ -38,6 +38,10 @@ func (c *cursorSession) Attach(ctx context.Context, _ llmbackend.Mode) (bool, er
 	if model == "" {
 		model = DefaultCursorModel()
 	}
+	mcp, err := mcpConfigs()
+	if err != nil {
+		return false, fmt.Errorf("mcp servers: %w", err)
+	}
 	// The account's credential decides which bridge this session talks to (src/accounts.go).
 	client := cursorClientFor(facts.Creds.APIKey)
 	if err := client.Ping(ctx); err != nil {
@@ -45,19 +49,17 @@ func (c *cursorSession) Attach(ctx context.Context, _ llmbackend.Mode) (bool, er
 	}
 
 	resumed := strings.TrimSpace(facts.SessionID) != "" && !facts.Ephemeral
-	var (
-		agent *cursorsdk.Agent
-		err   error
-	)
+	var agent *cursorsdk.Agent
 	create := func() error {
-		agent, err = client.Agents().Create(ctx, cursorsdk.CreateOptions{Model: model, CWD: cwd})
-		if err != nil {
-			return fmt.Errorf("create cursor agent: %w", llmbackend.BridgeCallErr(ctx, err))
+		var createErr error
+		agent, createErr = client.Agents().Create(ctx, cursorsdk.CreateOptions{Model: model, CWD: cwd, McpServers: mcp})
+		if createErr != nil {
+			return fmt.Errorf("create cursor agent: %w", llmbackend.BridgeCallErr(ctx, createErr))
 		}
 		return nil
 	}
 	if resumed {
-		agent, err = client.Agents().Resume(ctx, facts.SessionID, model)
+		agent, err = client.Agents().Resume(ctx, facts.SessionID, model, mcp)
 		if err != nil {
 			// The provider no longer has this session. Remember that on the row (so the
 			// next process does not try it again), then open a fresh one.

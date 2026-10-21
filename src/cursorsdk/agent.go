@@ -153,17 +153,20 @@ func (a *Agent) Delete(ctx context.Context) error {
 	return nil
 }
 
-// Resume re-attaches to an existing agent id.
-func (f *AgentFactory) Resume(ctx context.Context, agentID, model string) (*Agent, error) {
+// Resume re-attaches to an existing agent id. mcp is the same inline server list
+// Create was given: the SDK does not keep those servers on the agent, so a resume
+// that omits them comes back without them.
+func (f *AgentFactory) Resume(ctx context.Context, agentID, model string, mcp map[string]*sdkv1.McpServerConfig) (*Agent, error) {
 	if err := f.client.ensure(); err != nil {
 		return nil, err
 	}
 	req := &sdkv1.ResumeAgentRequest{
 		AgentId: agentID,
 		Options: &sdkv1.AgentOptions{
-			Model:  &sdkv1.ModelSelection{Id: model},
-			ApiKey: f.client.APIKey,
-			Local:  &sdkv1.LocalAgentOptions{Cwd: []string{f.client.Workspace}},
+			Model:      &sdkv1.ModelSelection{Id: model},
+			ApiKey:     f.client.APIKey,
+			Local:      &sdkv1.LocalAgentOptions{Cwd: []string{f.client.Workspace}},
+			McpServers: mcp,
 		},
 	}
 	resp, err := f.client.agentRPC.ResumeAgent(ctx, connect.NewRequest(req))

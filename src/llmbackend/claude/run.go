@@ -34,7 +34,12 @@ func (s *session) Prompt(ctx context.Context, prompt string, mode llmbackend.Mod
 		return
 	}
 	s.from, s.resumed = s.id, s.id != "" && !s.host.Facts().Ephemeral
-	cmd := exec.CommandContext(ctx, binary(), s.args()...)
+	argv, argErr := s.args()
+	if argErr != nil {
+		err = argErr
+		return
+	}
+	cmd := exec.CommandContext(ctx, binary(), argv...)
 	cmd.Dir, cmd.Env, cmd.Stdin = s.cwd, environment(s.host.Facts().Creds), strings.NewReader(prompt)
 	// Bound inherited pipe lifetimes if a tool outlives the CLI on cancellation.
 	cmd.WaitDelay = 2 * time.Second
