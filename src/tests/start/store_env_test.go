@@ -188,6 +188,30 @@ func TestRewriteDatabaseURLCertUsesHomeCAWhenPathIsMissing(t *testing.T) {
 	}
 }
 
+func TestApplyPGSSLModeOverridesVerifyCA(t *testing.T) {
+	out := runStoreEnv(t, `
+		. "$1"
+		export DATABASE_URL='postgres://autonomy:secret@127.0.0.1:5432/autonomy?sslmode=verify-ca&application_name=autonomy'
+		export PGSSLMODE='disable'
+		export AUTONOMY_STORE_ENGINE=sqlite
+		apply_database_url
+		printf 'engine=%s\n' "${AUTONOMY_STORE_ENGINE}"
+		printf 'url=%s\n' "${AUTONOMY_STORE_DSN}"
+	`)
+	if !strings.Contains(out, "engine=postgres") {
+		t.Fatalf("engine:\n%s", out)
+	}
+	if !strings.Contains(out, "sslmode=disable") || strings.Contains(out, "sslmode=verify-ca") {
+		t.Fatalf("sslmode was not overridden:\n%s", out)
+	}
+	if !strings.Contains(out, "application_name=autonomy") {
+		t.Fatalf("query dropped:\n%s", out)
+	}
+	if strings.Contains(strings.Split(out, "\n")[0], "secret") {
+		t.Fatalf("log leaked the password:\n%s", out)
+	}
+}
+
 func TestApplyDatabaseURLBlankLeavesExistingDSN(t *testing.T) {
 	out := runStoreEnv(t, `
 		. "$1"

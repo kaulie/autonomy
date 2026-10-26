@@ -216,6 +216,7 @@ func TestOpenDefaultStoreDefaultsToTheMachinesDatabase(t *testing.T) {
 
 func TestApplyDatabaseURLOverridesDSNAndSelectsPostgres(t *testing.T) {
 	const url = "postgres://user:secret@db.internal:5432/autonomy?sslmode=disable"
+	t.Setenv(EnvPGSSLMode, "")
 	t.Setenv(EnvDatabaseURL, "  "+url+"  ")
 	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/autonomy.db")
 	if engine != StoreEnginePostgres {
@@ -235,6 +236,7 @@ func TestApplyDatabaseURLEmptyLeavesConfig(t *testing.T) {
 }
 
 func TestApplyDatabaseURLFilePathKeepsEngine(t *testing.T) {
+	t.Setenv(EnvPGSSLMode, "")
 	t.Setenv(EnvDatabaseURL, "/var/lib/autonomy/autonomy.db")
 	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/old.db")
 	if engine != StoreEngineSQLite || dsn != "/var/lib/autonomy/autonomy.db" {
@@ -276,6 +278,7 @@ func TestApplyDatabaseURLRewritesMissingCAToHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv(EnvPGSSLMode, "")
 	const original = "postgres://autonomy:secret@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=/no/such/pg-autonomy-ca.pem&application_name=autonomy"
 	t.Setenv(EnvDatabaseURL, original)
 	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/old.db")
@@ -290,12 +293,39 @@ func TestApplyDatabaseURLRewritesMissingCAToHome(t *testing.T) {
 	}
 }
 
+func TestApplyDatabaseURLPGSSLModeOverridesURL(t *testing.T) {
+	const original = "postgres://autonomy:secret@127.0.0.1:5432/autonomy?sslmode=verify-ca&application_name=autonomy"
+	t.Setenv(EnvDatabaseURL, original)
+	t.Setenv(EnvPGSSLMode, " disable ")
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/old.db")
+	if engine != StoreEnginePostgres {
+		t.Fatalf("engine=%s", engine)
+	}
+	if !strings.Contains(dsn, "sslmode=disable") || strings.Contains(dsn, "sslmode=verify-ca") {
+		t.Fatalf("sslmode was not overridden: %s", dsn)
+	}
+	if !strings.Contains(dsn, "application_name=autonomy") || !strings.Contains(dsn, "secret@127.0.0.1:5432") {
+		t.Fatalf("override rewrote the rest of the url: %s", dsn)
+	}
+}
+
+func TestApplyDatabaseURLIgnoresUnknownPGSSLMode(t *testing.T) {
+	const original = "postgres://autonomy:secret@127.0.0.1:5432/autonomy?sslmode=require"
+	t.Setenv(EnvDatabaseURL, original)
+	t.Setenv(EnvPGSSLMode, "sometimes")
+	_, dsn := applyDatabaseURL(StoreEngineSQLite, "")
+	if dsn != original {
+		t.Fatalf("unknown mode changed the url: %s", dsn)
+	}
+}
+
 func TestApplyDatabaseURLKeepsCAThatExists(t *testing.T) {
 	cert := filepath.Join(t.TempDir(), "ca.pem")
 	if err := os.WriteFile(cert, []byte("ca"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	original := "postgres://autonomy:secret@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=" + cert + "&application_name=autonomy"
+	t.Setenv(EnvPGSSLMode, "")
 	t.Setenv(EnvDatabaseURL, original)
 	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "")
 	if engine != StoreEnginePostgres || dsn != original {

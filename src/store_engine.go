@@ -37,6 +37,11 @@ const (
 	// SERVICE_PORT wins over a stale listen address. A Postgres URL also
 	// selects the postgres engine.
 	EnvDatabaseURL = "DATABASE_URL"
+	// EnvPGSSLMode overrides sslmode inside DATABASE_URL. Libpq's own rule is
+	// the opposite (the URL wins); the deployment platform sets this so a
+	// local Postgres with SSL off can use the same URL shape with
+	// PGSSLMODE=disable.
+	EnvPGSSLMode = "PGSSLMODE"
 	// EnvDataDir is the directory the sqlite engine's default database lives in
 	// (`<dir>/autonomy.db`). Unset means ~/database/autonomy, the one database
 	// every consumer on the machine shares.
@@ -143,10 +148,67 @@ func applyDatabaseURL(engine, dsn string) (string, string) {
 		return engine, dsn
 	}
 	url = rewriteSSLRootCert(url)
+	url = applySSLMode(url)
 	if isPostgresDSN(url) {
 		engine = StoreEnginePostgres
 	}
 	return engine, url
+}
+
+// applySSLMode replaces or appends sslmode when PGSSLMODE is set to a mode
+// Postgres accepts. An empty or unknown value leaves the URL alone.
+func applySSLMode(dsn string) string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(EnvPGSSLMode)))
+	if !validPGSSLMode(mode) {
+		return dsn
+	}
+	return setDSNParam(dsn, "sslmode", mode)
+}
+
+func validPGSSLMode(mode string) bool {
+	switch mode {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return true
+	default:
+		return false
+	}
+}
+
+// setDSNParam sets key in a postgres URL query or a keyword DSN. It edits the
+// existing text so a password is not re-encoded.
+func setDSNParam(dsn, key, value string) string {
+	token := key + "="
+	if strings.Contains(dsn, "://") {
+		q := strings.Index(dsn, "?")
+		if q < 0 {
+			return dsn + "?" + token + value
+		}
+		query := dsn[q+1:]
+		if j := strings.Index(query, token); j >= 0 {
+			abs := q + 1 + j + len(token)
+			endRel := strings.Index(dsn[abs:], "&")
+			if endRel < 0 {
+				return dsn[:abs] + value
+			}
+			return dsn[:abs] + value + dsn[abs+endRel:]
+		}
+		if query == "" {
+			return dsn + token + value
+		}
+		return dsn + "&" + token + value
+	}
+	if i := strings.Index(dsn, token); i >= 0 {
+		start := i + len(token)
+		endRel := strings.IndexAny(dsn[start:], " \t")
+		if endRel < 0 {
+			return dsn[:start] + value
+		}
+		return dsn[:start] + value + dsn[start+endRel:]
+	}
+	if strings.TrimSpace(dsn) == "" {
+		return dsn
+	}
+	return strings.TrimRight(dsn, " \t") + " " + token + value
 }
 
 // rewriteSSLRootCert points sslrootcert at this machine's CA when the path in
