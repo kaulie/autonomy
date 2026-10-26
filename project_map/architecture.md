@@ -15,7 +15,7 @@
         ├─ Capability     src/capability（RegisterDefaults）
         ├─ Context        src/knowledgebase（读 knowledge-base）+ src/capability/contextcap（context.*）
         ├─ LLMSession     src/llm_session.go
-        │     └─ harness  src/llmbackend/{cursor,cline,codex,claude}
+        │     └─ harness  src/llmbackend/{cursor,cline,codex,claude,deepseek}
         ├─ ContextBuilder src/context_builder + src/context_resolver.go
         ├─ EventGateway   src/eventgateway + src/event_gateway.go（外部世界事件）
         └─ EventCenter    src/eventcenter + src/event_center.go（拉事件中心，不直连 GitHub）

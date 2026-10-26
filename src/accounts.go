@@ -74,7 +74,7 @@ func DefaultVendorFor(harness string) string {
 // AccountHarnesses are the harnesses the pool can hold credentials for, in a stable order:
 // what the UI offers and what validation accepts.
 func AccountHarnesses() []string {
-	return []string{string(llmbackend.Cursor), string(llmbackend.Cline), string(llmbackend.Codex), string(llmbackend.Claude)}
+	return []string{string(llmbackend.Cursor), string(llmbackend.Cline), string(llmbackend.Codex), string(llmbackend.Claude), string(llmbackend.Deepseek)}
 }
 
 // normalizeHarness maps a harness name (and the aliases a caller may use) onto the backend
@@ -89,6 +89,8 @@ func normalizeHarness(harness string) string {
 		return string(llmbackend.Codex)
 	case string(llmbackend.Claude), "claude_code":
 		return string(llmbackend.Claude)
+	case string(llmbackend.Deepseek):
+		return string(llmbackend.Deepseek)
 	default:
 		return ""
 	}

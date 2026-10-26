@@ -242,6 +242,9 @@ elif [ "${AUTONOMY_REASONER:-llm}" = "local" ]; then
   log "跳过桥自检（AUTONOMY_REASONER=local：不经过 LLM 后端）"
 elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "claude" ] || [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "claude_code" ]; then
   "${AUTONOMY_CLAUDE_BIN:-claude}" --version >/dev/null 2>&1 || die "Claude CLI 不可用；安装 claude 或设置 AUTONOMY_CLAUDE_BIN"
+elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "deepseek" ]; then
+  # 原生 harness：Go 直连 DeepSeek API，没有桥也没有 CLI；key 在账号池里，由 /accounts 的探活检查。
+  log "deepseek 后端：原生 harness，无桥可检"
 elif [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "cline" ] || [ "${AUTONOMY_LLM_BACKEND:-cursor}" = "codex" ]; then
   # 两个 Node 桥的后端检查一样，只有坐标不同。
   node_backend="${AUTONOMY_LLM_BACKEND:-cursor}"

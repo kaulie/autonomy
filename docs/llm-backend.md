@@ -22,6 +22,7 @@
 | `cline` / `cline_sdk` | Cline SDK 桥（[cline-reasoner.md](cline-reasoner.md)） | Node 桥 + `@cline/sdk` |
 | `codex` / `codex_sdk` | Codex SDK 桥（`src/codexsdk/bridge`） | Node 桥 + `@openai/codex-sdk`（它自己驱动 `codex` CLI） |
 | `claude` / `claude_code` | Claude Code CLI（[配置与验证](claude-harness.md)） | 直接运行 `claude --print`，无需 Node 桥 |
+| `deepseek` | 原生 DeepSeek harness（[配置与验证](deepseek-harness.md)） | Go 直连 Chat Completions API，会话与工具循环由 harness 自己管；无桥、无 CLI |
 
 The three harnesses live in `src/llmbackend/{cursor,cline,codex}`; a backend with no harness
 linked in is refused by name (import `src/llmbackend/all`). Codex is the newest: its thread is
@@ -62,7 +63,7 @@ codex 的每一轮跑在 CLI 自己的沙箱里（`plan` → `read-only`，其�
 
 ### 通用 MCP（`AUTONOMY_MCP_SERVERS_FILE`）
 
-四条 harness 用同一份名单。变量指向一个 JSON 文件；不设就谁都不注入，各 harness 保持原来的行为。planner 和 worker 读的是这一份。文件读不出来或写错，这一轮 attach 失败，不会装成「没有 MCP」。
+cursor / cline / codex / claude 四条 harness 用同一份名单（原生 `deepseek` harness 目前不挂 MCP，只有它自己的六个工具，见 [deepseek-harness.md](deepseek-harness.md)）。变量指向一个 JSON 文件；不设就谁都不注入，各 harness 保持原来的行为。planner 和 worker 读的是这一份。文件读不出来或写错，这一轮 attach 失败，不会装成「没有 MCP」。
 
 ```json
 {

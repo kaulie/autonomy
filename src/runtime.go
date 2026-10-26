@@ -562,7 +562,7 @@ func attachWorkerBackend(ctx context.Context, agent *Agent, plan agentRuntimePla
 		return agent.AttachCline(ctx)
 	case llmbackend.Codex:
 		return agent.AttachCodex(ctx)
-	case llmbackend.Claude:
+	case llmbackend.Claude, llmbackend.Deepseek:
 		_, _, err := agent.llmSession().Attach(ctx, llmbackend.ModeAgent)
 		return err
 	case llmbackend.Local:
