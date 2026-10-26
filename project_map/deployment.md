@@ -72,7 +72,7 @@ sqlite 库**不在** runtime 目录：默认 `~/database/autonomy/autonomy.db`�
 只放部署参数，不放「谁付费」：
 
 - `AUTONOMY_REASONER=llm`（或 `local`）
-- `AUTONOMY_LLM_BACKEND=cursor|cline|codex|claude`
+- `AUTONOMY_LLM_BACKEND=cursor|cline|codex|claude|deepseek`（deepseek 无桥可检）
 - `DATABASE_URL`（部署平台的运行时环境变量）：有值时就是库连接，盖过 `.env` 里的 `AUTONOMY_STORE_DSN`。`postgres://` / `postgresql://` / `host=` / `dbname=` 会把引擎选成 postgres
 - `sslmode`：单独覆盖连接串里的 `sslmode`（`disable` 用于没开 SSL 的本机 Postgres）。未设时才看 `PGSSLMODE`
 - `AUTONOMY_STORE_ENGINE` / `AUTONOMY_STORE_DSN` / `AUTONOMY_POSTGRES_DSN`（`DATABASE_URL` 未设时）

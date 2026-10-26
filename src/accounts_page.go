@@ -78,6 +78,7 @@ const accountsPageHTML = `<!DOCTYPE html>
         <option value="cline">cline</option>
         <option value="codex">codex</option>
         <option value="claude">claude</option>
+        <option value="deepseek">deepseek</option>
       </select>
     </div>
     <div>

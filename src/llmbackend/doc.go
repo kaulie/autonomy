@@ -41,6 +41,9 @@ const (
 	Cline  Backend = "cline"
 	Codex  Backend = "codex"
 	Claude Backend = "claude"
+	// Deepseek is the native harness: Go talks to DeepSeek's Chat Completions API and runs
+	// the tool loop itself (src/llmbackend/deepseek).
+	Deepseek Backend = "deepseek"
 )
 
 // Provider identifies which LLM provider backs an agent.

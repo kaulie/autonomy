@@ -16,4 +16,5 @@ import (
 	_ "github.com/kaulie/autonomy/src/llmbackend/cline"
 	_ "github.com/kaulie/autonomy/src/llmbackend/codex"
 	_ "github.com/kaulie/autonomy/src/llmbackend/cursor"
+	_ "github.com/kaulie/autonomy/src/llmbackend/deepseek"
 )

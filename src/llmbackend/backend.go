@@ -16,6 +16,8 @@ func DefaultBackend() Backend {
 		return Codex
 	case string(Claude), "claude_code":
 		return Claude
+	case string(Deepseek):
+		return Deepseek
 	default:
 		return Cursor
 	}

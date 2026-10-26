@@ -11,7 +11,7 @@
 |---|---|
 | 这是目标驱动的 **Agent Runtime**，不是 Workflow Engine，也不是 Web Cursor / 部署平台 | [project_map/positioning.md](project_map/positioning.md) |
 | 线上形态是 `cmd/autonomyd`（store + agents + HTTP）。`cmd/autonomy` 只是客户端。`cmd/hello` 是演示，不是主形态 | [project_map/architecture.md](project_map/architecture.md) |
-| 决策循环、inbox、常驻 agent、文件化提示词、七端口 Store、四套 harness、内置能力表，都已经在跑 | 同上，以及 [`docs/`](docs/README.md) 里对应概念文 |
+| 决策循环、inbox、常驻 agent、文件化提示词、七端口 Store、五套 harness、内置能力表，都已经在跑 | 同上，以及 [`docs/`](docs/README.md) 里对应概念文 |
 | 部署与发版在平台 `:4220`；本仓库只提供 `build.sh`、启停脚本和 graceful 端点 | [project_map/deployment.md](project_map/deployment.md)、[project_map/release.md](project_map/release.md) |
 | 开发在 task workspace、分支带 task id、测试按 `docs/testing.md` | [project_map/development.md](project_map/development.md)、[BRANCHING.md](BRANCHING.md) |
 | 栈是 Go 1.25 + 可插拔 DB engine + Cursor/Cline/Codex/Claude harness + 服务端 HTML | [project_map/tech-stack.md](project_map/tech-stack.md) |

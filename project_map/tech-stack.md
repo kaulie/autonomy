@@ -31,6 +31,7 @@ driver 只能出现在 `src/db`。根包碰 `database/sql` / 具体 driver 会�
 | `cline` | `src/llmbackend/cline` + `src/clinesdk/bridge/bridge.mjs` | Node ≥ 22、`@cline/sdk`（lock 入库，`node_modules` 不入库） |
 | `codex` | `src/llmbackend/codex` + `src/codexsdk/bridge` | Node + `@openai/codex-sdk`（驱动本机 `codex` CLI） |
 | `claude` | `src/llmbackend/claude` | 本机 `claude` CLI，无 Node 桥 |
+| `deepseek` | `src/llmbackend/deepseek` | 无：Go 直连 DeepSeek Chat Completions API（会话 transcript 存 `~/.autonomy/deepseek/sessions`） |
 
 链接方式：`import _ "github.com/kaulie/autonomy/src/llmbackend/all"`。缺 blank import 会在 `autonomyd` 启动日志里暴露，而不是到任务才炸。
 

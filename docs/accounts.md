@@ -1,6 +1,6 @@
 # 账号池（harness accounts）
 
-**一个账号 = 一个 harness（`cursor` / `cline` / `codex` / `claude`）+ 一个 vendor + 一把凭据。**
+**一个账号 = 一个 harness（`cursor` / `cline` / `codex` / `claude` / `deepseek`）+ 一个 vendor + 一把凭据。**
 
 运行时的凭据**只从这里来**：不再有 `AUTONOMY_*_API_KEY` / `CURSOR_API_KEY` 这种注入 ——
 `.env` 只留路径、端口、store DSN 这类部署参数，不留给「谁付费」。这条规矩的写法是
@@ -10,7 +10,7 @@
 
 ## 为什么需要 vendor
 
-四个 harness 对「vendor」的含义不同（与 `src/llmbackend/all` 的链接面一致）：
+五个 harness 对「vendor」的含义不同（与 `src/llmbackend/all` 的链接面一致）：
 
 | harness | vendor | 说明 |
 |---|---|---|
@@ -18,6 +18,7 @@
 | `cline` | `deepseek` / `minimax` / `anthropic` … | Cline 的 key 属于某个 LLM 厂商，离开 vendor 一把 key 没有意义 |
 | `codex` | `openai`（默认） | Codex 走 OpenAI；写了 `baseUrl` 就以它为准 |
 | `claude` | `anthropic` | Claude Code CLI（[claude-harness.md](claude-harness.md)）；无 Node 桥 |
+| `deepseek` | `deepseek` | 原生 harness（[deepseek-harness.md](deepseek-harness.md)）：Go 直连 API，必须有 key；`baseUrl` 可指向兼容网关 |
 
 > **与 web-cursor 的一处差异（如实说明）**：web-cursor 的账号**不带 model** —— 它把 model 放在
 > runtime/project settings 里、再由 task 输入覆盖。autonomy 目前**没有 settings 存储**，所以
