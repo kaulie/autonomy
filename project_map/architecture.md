@@ -99,7 +99,7 @@ V1 不含 vector DB / embedding / LLM 摘要 / 知识图谱 / agent memory / pla
 - 契约：`src/store.go` 七个端口 —— Task / Agent / Inbox / Conversation / Execution / Verification / TurnQuery。
 - SPI：`src/store_engine.go`。上层禁止 import 驱动（`src/store_ports_test.go` 钉死）。
 - 实现：`src/db` 包。`cmd/autonomyd` 空白 import `_ "github.com/kaulie/autonomy/src/db"` 完成注册。
-- 默认 `AUTONOMY_STORE_ENGINE=sqlite`，DSN：`AUTONOMY_STORE_DSN` > `$AUTONOMY_DATA_DIR/autonomy.db` > `~/database/autonomy/autonomy.db`。全机一份 sqlite 文件：部署 runtime、本机 `go run`、评测工具读同一份。
+- 默认 `AUTONOMY_STORE_ENGINE=sqlite`，DSN：`AUTONOMY_STORE_DSN` > `$AUTONOMY_DATA_DIR/autonomy.db` > `~/database/autonomy/autonomy.db`。全机一份 sqlite 文件：部署 runtime、本机 `go run`、评测工具读同一份。部署平台注入的 `DATABASE_URL` 有值时盖过这条，连接串是 Postgres 时改用 postgres 引擎。
 - `postgres` 是另一份库，**不迁移** sqlite 数据。
 - 部署起来的进程读写同一份库：`scripts/start.sh` 载入 `backend/.env` 后丢掉 `AUTONOMY_STORE_READ_DSN` / `AUTONOMY_POSTGRES_READ_DSN`，观察类的读也走写侧（本机写侧是 `49.234.45.173:5432`）。`.env` 跨部署保留，旧的 `127.0.0.1:5433` 留在文件里也不会再生效。engine 仍接受读侧变量，给不经 `start.sh` 的实验用（`docs/store.md`「读写分离」）。
 - `llm_events` 默认不写（叶子表）；`AUTONOMY_LLM_EVENTS=1` 打开。对话在 `reason_turns` + `llm_messages`。

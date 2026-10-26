@@ -93,10 +93,11 @@ StoreEngine（Name / DefaultDSN / Open）
 
 | 环境变量 | 含义 | 默认 |
 |----------|------|------|
-| `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感）：`sqlite` / `postgres` | `sqlite` |
-| `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()` |
+| `DATABASE_URL` | 部署平台注入的连接串。非空时就是这份进程的库，盖过 `.env` 里的 `AUTONOMY_STORE_DSN`。`postgres://`、`postgresql://`，或 `host=` / `dbname=` 关键字串，会把引擎选成 `postgres` | 未设置 → 仍按下面几行 |
+| `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感）：`sqlite` / `postgres` | `sqlite`（`DATABASE_URL` 是 Postgres 连接串时为 `postgres`） |
+| `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()`；`DATABASE_URL` 有值时被盖过 |
 | `AUTONOMY_DATA_DIR` | sqlite 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |
-| `AUTONOMY_POSTGRES_DSN` | postgres 的默认 DSN（`DATABASE_URL` 亦可） | 两个都空且 `AUTONOMY_STORE_DSN` 也空 → 报错 |
+| `AUTONOMY_POSTGRES_DSN` | postgres 的默认 DSN（`DATABASE_URL` 未设时） | 都空且 `AUTONOMY_STORE_DSN` 也空 → 报错 |
 | `AUTONOMY_STORE_READ_DSN` | **读侧**（本地副本）连接串，见下文「读写分离」 | 未设置 → 不分离。部署的 `start.sh` 载入 `.env` 后会清掉它 |
 | `AUTONOMY_POSTGRES_READ_DSN` | 同上，postgres engine 自己的名字（上一个优先） | 未设置 → 不分离。部署的 `start.sh` 同样清掉 |
 
@@ -105,9 +106,10 @@ StoreEngine（Name / DefaultDSN / Open）
 - `sqlite` 的 `DefaultDSN()` = `$AUTONOMY_DATA_DIR/autonomy.db`，默认 `~/database/autonomy/autonomy.db` ——
   **一份库**：部署的 autonomy、开发时 `go run`、评测工具、SQL 编辑器看的是同一个文件，所以「我现在读的是哪个库」
   只有一个答案（目录不存在时 engine 会建）。
-- `postgres` 的 `DefaultDSN()` 取 `$AUTONOMY_POSTGRES_DSN`，其次 `$DATABASE_URL`；都没有就报错 ——
+- `postgres` 的 `DefaultDSN()` 取 `$DATABASE_URL`，其次 `$AUTONOMY_POSTGRES_DSN`；都没有就报错 ——
   网络数据库没有「合理默认」，猜一个本地库正是把一次正式运行写进笔记本库的那条路。
-- 未设置 `AUTONOMY_STORE_DSN` 且 engine 无默认 DSN（如网络数据库）→ 报错，要求显式配置。
+- `OpenDefaultStore()` 同样认 `$DATABASE_URL`：有值就用它当连接串，Postgres 连接串同时把引擎选成 `postgres`。部署的 `start.sh` 在读完 `backend/.env` 之后做同一件事，并且平台注入的值不会被 `.env` 里的同名键盖掉，所以平台上设的 `DATABASE_URL` 不会被留下的旧 `AUTONOMY_STORE_DSN` 钉死。
+- 未设置 `DATABASE_URL` / `AUTONOMY_STORE_DSN` 且 engine 无默认 DSN（如网络数据库）→ 报错，要求显式配置。
 
 ```bash
 # 默认：sqlite @ ~/database/autonomy/autonomy.db（全机一份）
@@ -118,10 +120,11 @@ export AUTONOMY_DATA_DIR=/Users/gaolei/database/autonomy
 export AUTONOMY_STORE_DSN=/tmp/autonomy.db
 
 # 换引擎：postgres（新库，老数据仍在 sqlite 文件里）
+# 部署平台的运行时环境变量写 DATABASE_URL 即可，引擎会跟着选成 postgres：
+export DATABASE_URL="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable"
+# 不经平台时，仍可显式指定引擎和连接串（DATABASE_URL 未设时生效）
 export AUTONOMY_STORE_ENGINE=postgres
 export AUTONOMY_POSTGRES_DSN="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable"
-# 或显式给出连接串（覆盖 DefaultDSN）
-export AUTONOMY_STORE_ENGINE=postgres
 export AUTONOMY_STORE_DSN="postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable"
 ```
 

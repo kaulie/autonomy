@@ -172,6 +172,7 @@ func TestRegisterStoreEngineRejectsBlankNilAndDuplicate(t *testing.T) {
 func TestOpenDefaultStoreHonoursEnv(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "custom.db")
+	t.Setenv(EnvDatabaseURL, "")
 	t.Setenv(EnvStoreEngine, StoreEngineSQLite)
 	t.Setenv(EnvStoreDSN, path)
 
@@ -196,6 +197,7 @@ func TestOpenDefaultStoreDefaultsToTheMachinesDatabase(t *testing.T) {
 	// the database: the machine has one.
 	t.Setenv("PROJECT_ROOT", dir)
 	t.Setenv(EnvDataDir, dir)
+	t.Setenv(EnvDatabaseURL, "")
 	t.Setenv(EnvStoreEngine, "")
 	t.Setenv(EnvStoreDSN, "")
 
@@ -208,6 +210,77 @@ func TestOpenDefaultStoreDefaultsToTheMachinesDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "autonomy.db")); err != nil {
 		t.Fatalf("expected default sqlite file: %v", err)
+	}
+}
+
+func TestApplyDatabaseURLOverridesDSNAndSelectsPostgres(t *testing.T) {
+	const url = "postgres://user:secret@db.internal:5432/autonomy?sslmode=disable"
+	t.Setenv(EnvDatabaseURL, "  "+url+"  ")
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/autonomy.db")
+	if engine != StoreEnginePostgres {
+		t.Fatalf("engine=%s, want postgres", engine)
+	}
+	if dsn != url {
+		t.Fatalf("dsn=%q, want the platform URL", dsn)
+	}
+}
+
+func TestApplyDatabaseURLEmptyLeavesConfig(t *testing.T) {
+	t.Setenv(EnvDatabaseURL, "  ")
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/autonomy.db")
+	if engine != StoreEngineSQLite || dsn != "/tmp/autonomy.db" {
+		t.Fatalf("got engine=%s dsn=%s", engine, dsn)
+	}
+}
+
+func TestApplyDatabaseURLFilePathKeepsEngine(t *testing.T) {
+	t.Setenv(EnvDatabaseURL, "/var/lib/autonomy/autonomy.db")
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/old.db")
+	if engine != StoreEngineSQLite || dsn != "/var/lib/autonomy/autonomy.db" {
+		t.Fatalf("got engine=%s dsn=%s", engine, dsn)
+	}
+}
+
+func TestOpenDefaultStoreUsesDatabaseURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "from-platform.db")
+	ignored := filepath.Join(dir, "ignored.db")
+	t.Setenv(EnvDatabaseURL, path)
+	t.Setenv(EnvStoreEngine, StoreEngineSQLite)
+	t.Setenv(EnvStoreDSN, ignored)
+
+	store, err := OpenDefaultStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected sqlite file from DATABASE_URL: %v", err)
+	}
+	if _, err := os.Stat(ignored); !os.IsNotExist(err) {
+		t.Fatalf("AUTONOMY_STORE_DSN was used despite DATABASE_URL: %v", err)
+	}
+}
+
+func TestIsPostgresDSN(t *testing.T) {
+	cases := []struct {
+		dsn  string
+		want bool
+	}{
+		{"postgres://db.internal/autonomy", true},
+		{"PostgreSQL://db.internal/autonomy", true},
+		{"host=db.internal port=5432 dbname=autonomy", true},
+		{"dbname=autonomy user=autonomy", true},
+		{"/tmp/autonomy.db", false},
+		{"mysql://db.internal/autonomy", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isPostgresDSN(tc.dsn); got != tc.want {
+			t.Errorf("isPostgresDSN(%q)=%v, want %v", tc.dsn, got, tc.want)
+		}
 	}
 }
 

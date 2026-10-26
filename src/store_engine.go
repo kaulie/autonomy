@@ -19,6 +19,8 @@ import (
 const (
 	// StoreEngineSQLite is the built-in, file-backed engine.
 	StoreEngineSQLite = "sqlite"
+	// StoreEnginePostgres is the registered name of the postgres engine.
+	StoreEnginePostgres = "postgres"
 	// DefaultStoreEngine is used when AUTONOMY_STORE_ENGINE is unset.
 	DefaultStoreEngine = StoreEngineSQLite
 
@@ -28,6 +30,12 @@ const (
 	// EnvStoreDSN overrides the selected engine's default data source name
 	// (for sqlite, the database file path).
 	EnvStoreDSN = "AUTONOMY_STORE_DSN"
+	// EnvDatabaseURL is the connection string the deployment platform injects
+	// (DATABASE_URL). When it is set, it is the database this process uses:
+	// it wins over AUTONOMY_STORE_DSN left in backend/.env, the same way
+	// SERVICE_PORT wins over a stale listen address. A Postgres URL also
+	// selects the postgres engine.
+	EnvDatabaseURL = "DATABASE_URL"
 	// EnvDataDir is the directory the sqlite engine's default database lives in
 	// (`<dir>/autonomy.db`). Unset means ~/database/autonomy, the one database
 	// every consumer on the machine shares.
@@ -116,9 +124,42 @@ func OpenStore(engineName, dsn string) (Store, error) {
 }
 
 // OpenDefaultStore opens the configured engine, honouring AUTONOMY_STORE_ENGINE
-// and AUTONOMY_STORE_DSN. By default it is a SQLite file at
-// $AUTONOMY_DATA_DIR/autonomy.db (~/database/autonomy/autonomy.db) — the one
-// database this machine keeps.
+// and AUTONOMY_STORE_DSN. DATABASE_URL, when the deployment platform set it, is
+// the connection string and wins over both. By default (no DATABASE_URL, no
+// explicit DSN) it is a SQLite file at $AUTONOMY_DATA_DIR/autonomy.db
+// (~/database/autonomy/autonomy.db) — the one database this machine keeps.
 func OpenDefaultStore() (Store, error) {
-	return OpenStore(os.Getenv(EnvStoreEngine), os.Getenv(EnvStoreDSN))
+	engine, dsn := applyDatabaseURL(os.Getenv(EnvStoreEngine), os.Getenv(EnvStoreDSN))
+	return OpenStore(engine, dsn)
+}
+
+// applyDatabaseURL returns the engine and DSN to open. A non-empty DATABASE_URL
+// replaces the DSN. A Postgres connection string also selects the postgres
+// engine, so a platform URL is not handed to sqlite.
+func applyDatabaseURL(engine, dsn string) (string, string) {
+	url := strings.TrimSpace(os.Getenv(EnvDatabaseURL))
+	if url == "" {
+		return engine, dsn
+	}
+	if isPostgresDSN(url) {
+		engine = StoreEnginePostgres
+	}
+	return engine, url
+}
+
+// isPostgresDSN reports whether dsn is a Postgres URL or a libpq keyword
+// string. Anything else (a sqlite file path, another scheme) is not.
+func isPostgresDSN(dsn string) bool {
+	s := strings.TrimSpace(dsn)
+	if s == "" {
+		return false
+	}
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
+		return true
+	}
+	if strings.Contains(s, "://") {
+		return false
+	}
+	return strings.Contains(s, "host=") || strings.Contains(s, "dbname=")
 }

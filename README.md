@@ -137,7 +137,9 @@ export AUTONOMY_LLM_MODEL=composer-2
 # AUTONOMY_STORE_DSN overrides its default DSN (sqlite: ~/database/autonomy/autonomy.db,
 # or $AUTONOMY_DATA_DIR/autonomy.db — one database for the whole machine).
 # The other built-in engine is postgres: AUTONOMY_STORE_ENGINE=postgres with a DSN from
-# AUTONOMY_STORE_DSN or AUTONOMY_POSTGRES_DSN. It is a database of its own — the sqlite
+# AUTONOMY_STORE_DSN or AUTONOMY_POSTGRES_DSN. The deployment platform's DATABASE_URL
+# wins over both and selects postgres when the URL is a Postgres connection string.
+# It is a database of its own — the sqlite
 # file keeps its data, nothing is migrated — and it creates its schema on open
 # (see docs/store.md).
 go run ./cmd/autonomyd

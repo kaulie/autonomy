@@ -38,8 +38,10 @@ PID_FILE="${BACKEND}/runtime.pid"
 LOG_FILE="${BACKEND}/server.log"
 # 数据库引擎：sqlite（默认）或 postgres。sqlite 的库路径在下面 .env 载入之后推导
 # （$AUTONOMY_STORE_DSN > $AUTONOMY_DATA_DIR/autonomy.db > ~/database/autonomy/autonomy.db）；
-# postgres 的连接串由 .env / 环境给出（AUTONOMY_STORE_DSN 或 AUTONOMY_POSTGRES_DSN），
-# 本脚本不推导、也不动它 —— 「全机一份库」只对 sqlite 的文件路径成立。
+# postgres 的连接串由部署平台的 DATABASE_URL、.env 或环境给出
+# （DATABASE_URL > AUTONOMY_STORE_DSN > AUTONOMY_POSTGRES_DSN）。
+# DATABASE_URL 非空时本脚本用它，并在它是 Postgres 连接串时把引擎选成 postgres。
+# 「全机一份库」只对 sqlite 的文件路径成立。
 
 log() { echo "[start] $*"; }
 die() { echo "[start][错误] $*" >&2; exit 1; }
@@ -69,9 +71,10 @@ if [ ! -f "${ENV_FILE}" ]; then
 # 评测工具、SQL 编辑器看的是同一个文件。要换位置就设这里（或 AUTONOMY_DATA_DIR
 # 只换目录）；没有特殊原因不要改，改了就等于换一个库。
 # AUTONOMY_STORE_DSN=/Users/gaolei/database/autonomy/autonomy.db
-# 换引擎（postgres）：老数据留在上面那个 sqlite 文件里，不迁移；postgres 那边是新建的库，
-# 连接串由 AUTONOMY_STORE_DSN 或 AUTONOMY_POSTGRES_DSN 给出（后者是它的默认 DSN）。改完走平台
-# 重启，再用 /health 确认，见 docs/store.md「两个引擎，两份数据」。
+# 换引擎（postgres）：老数据留在上面那个 sqlite 文件里，不迁移；postgres 那边是新建的库。
+# 部署平台上设 DATABASE_URL 即可（postgres:// 或 host= 关键字串会把引擎选成 postgres），
+# 它盖过下面留下的连接串。没设 DATABASE_URL 时才用 AUTONOMY_STORE_DSN / AUTONOMY_POSTGRES_DSN。
+# 改完走平台重启，再用 /health 确认，见 docs/store.md「两个引擎，两份数据」。
 # AUTONOMY_STORE_ENGINE=postgres
 # AUTONOMY_POSTGRES_DSN=postgres://user:pass@127.0.0.1:5432/autonomy?sslmode=disable
 # 读写同一份库。部署起来的进程不使用读侧副本：start.sh 会丢掉
@@ -101,14 +104,23 @@ EOF
   log "已生成 ${ENV_FILE}"
 fi
 
+# 平台在拉起本脚本时注入 DATABASE_URL。.env 跨部署保留，source 会用同名键盖掉它，
+# 所以先记下平台的值，读完再写回去。和 SERVICE_PORT 盖过旧端口是同一条规矩。
+_platform_database_url="$(printf '%s' "${DATABASE_URL:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
 # shellcheck disable=SC1090
 set -a; . "${ENV_FILE}"; set +a
 
-# .env 跨部署保留，里面可能还留着本地副本（127.0.0.1:5433）的读侧连接串。
-# 线上读写同一份库：丢掉读侧，观察类的读也走写侧（AUTONOMY_STORE_DSN）。
+if [ -n "${_platform_database_url}" ]; then
+  export DATABASE_URL="${_platform_database_url}"
+fi
+
+# .env 里可能还留着旧的 AUTONOMY_STORE_DSN，以及本地副本（127.0.0.1:5433）的读侧
+# 连接串。DATABASE_URL 盖过旧连接串；线上读写同一份库：丢掉读侧，观察类的读也走写侧。
 [ -f "${DIR}/store_env.sh" ] || die "缺少 ${DIR}/store_env.sh（发版包内容不完整？）"
 # shellcheck source=store_env.sh
 . "${DIR}/store_env.sh"
+apply_database_url
 unify_store_reads_onto_writer
 
 # 平台注入的端口优先：不让 .env 里的 AUTONOMY_HTTP_ADDR 把服务钉在旧端口。
@@ -121,8 +133,8 @@ AUTONOMY_HTTP_ADDR="$(compose_http_addr "${LISTEN_HOST}" "${PORT}")" ||
   die "无法组成监听地址（host=${LISTEN_HOST} port=${PORT}）"
 export AUTONOMY_HTTP_ADDR
 HEALTH_HOST="$(health_probe_host "${LISTEN_HOST}")"
-# 引擎与库：sqlite（默认）走「全机一份库」那条推导，显式给了就听显式的；postgres 的连接串
-# 原样传下去，脚本不为它建目录、也不猜它。
+# 引擎与库：DATABASE_URL 已在上面套用。sqlite（默认）走「全机一份库」那条推导，显式给了就听显式的；
+# postgres 的连接串原样传下去，脚本不为它建目录、也不猜它。
 STORE_ENGINE="${AUTONOMY_STORE_ENGINE:-sqlite}"
 if [ "${STORE_ENGINE}" = "sqlite" ]; then
   DB_PATH="${AUTONOMY_STORE_DSN:-${AUTONOMY_DATA_DIR:-${HOME}/database/autonomy}/autonomy.db}"
