@@ -49,12 +49,36 @@ store_writer_target() {
 # 和 SERVICE_PORT 盖过 .env 里的旧端口一样，DATABASE_URL 非空就用它。
 # postgres URL（postgres://、postgresql://）或 host=/dbname= 关键字串同时把
 # 引擎选成 postgres，避免还按 sqlite 去打开一条网络连接串。
+# rewrite_database_url_cert 把 sslrootcert 换成这台机器上的 CA。
+# 平台只存一份 DATABASE_URL（本机路径）。文件不在这儿、但
+# ~/database/autonomy/pg-autonomy-ca.pem 在，就换成本机这份，两边都是同一张 CA。
+rewrite_database_url_cert() {
+  local url="$1" cert home_cert
+  case "${url}" in
+    *sslrootcert=*) ;;
+    *) printf '%s' "${url}"; return ;;
+  esac
+  cert="$(printf '%s' "${url}" | sed -n 's/.*[?&]sslrootcert=\([^&]*\).*/\1/p')"
+  cert="$(printf '%s' "${cert}" | sed 's/%2[Ff]/\//g')"
+  if [ -n "${cert}" ] && [ -f "${cert}" ]; then
+    printf '%s' "${url}"
+    return
+  fi
+  home_cert="${HOME}/database/autonomy/pg-autonomy-ca.pem"
+  if [ ! -f "${home_cert}" ]; then
+    printf '%s' "${url}"
+    return
+  fi
+  printf '%s' "${url}" | sed "s#sslrootcert=[^&]*#sslrootcert=${home_cert}#"
+}
+
 apply_database_url() {
   local url scheme
   url="$(printf '%s' "${DATABASE_URL:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   if [ -z "${url}" ]; then
     return 0
   fi
+  url="$(rewrite_database_url_cert "${url}")"
   export DATABASE_URL="${url}"
   export AUTONOMY_STORE_DSN="${url}"
   scheme="$(printf '%s' "${url}" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')"

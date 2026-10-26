@@ -93,7 +93,7 @@ StoreEngine（Name / DefaultDSN / Open）
 
 | 环境变量 | 含义 | 默认 |
 |----------|------|------|
-| `DATABASE_URL` | 部署平台注入的连接串。非空时就是这份进程的库，盖过 `.env` 里的 `AUTONOMY_STORE_DSN`。`postgres://`、`postgresql://`，或 `host=` / `dbname=` 关键字串，会把引擎选成 `postgres` | 未设置 → 仍按下面几行 |
+| `DATABASE_URL` | 部署平台注入的连接串。非空时就是这份进程的库，盖过 `.env` 里的 `AUTONOMY_STORE_DSN`。`postgres://`、`postgresql://`，或 `host=` / `dbname=` 关键字串，会把引擎选成 `postgres`。`sslrootcert` 指向的文件不在这台机器上时，改用 `~/database/autonomy/pg-autonomy-ca.pem`（同一张 CA） | 未设置 → 仍按下面几行 |
 | `AUTONOMY_STORE_ENGINE` | 选择 engine，按注册名（大小写不敏感）：`sqlite` / `postgres` | `sqlite`（`DATABASE_URL` 是 Postgres 连接串时为 `postgres`） |
 | `AUTONOMY_STORE_DSN` | 覆盖 engine 的默认连接串（sqlite 即数据库文件路径；postgres 即 DSN） | 未设置时用 engine 的 `DefaultDSN()`；`DATABASE_URL` 有值时被盖过 |
 | `AUTONOMY_DATA_DIR` | sqlite 默认库所在的**目录**（`<dir>/autonomy.db`） | `~/database/autonomy` |

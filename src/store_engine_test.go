@@ -5,6 +5,7 @@ import "github.com/kaulie/autonomy/src/llmbackend"
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -261,6 +262,44 @@ func TestOpenDefaultStoreUsesDatabaseURL(t *testing.T) {
 	}
 	if _, err := os.Stat(ignored); !os.IsNotExist(err) {
 		t.Fatalf("AUTONOMY_STORE_DSN was used despite DATABASE_URL: %v", err)
+	}
+}
+
+func TestApplyDatabaseURLRewritesMissingCAToHome(t *testing.T) {
+	home := t.TempDir()
+	certDir := filepath.Join(home, "database", "autonomy")
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fallback := filepath.Join(certDir, "pg-autonomy-ca.pem")
+	if err := os.WriteFile(fallback, []byte("ca"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	const original = "postgres://autonomy:secret@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=/no/such/pg-autonomy-ca.pem&application_name=autonomy"
+	t.Setenv(EnvDatabaseURL, original)
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "/tmp/old.db")
+	if engine != StoreEnginePostgres {
+		t.Fatalf("engine=%s", engine)
+	}
+	if !strings.Contains(dsn, "sslrootcert="+fallback) {
+		t.Fatalf("dsn=%s, want home CA", dsn)
+	}
+	if !strings.Contains(dsn, "application_name=autonomy") || !strings.Contains(dsn, "secret") {
+		t.Fatalf("rewritten dsn dropped the rest: %s", dsn)
+	}
+}
+
+func TestApplyDatabaseURLKeepsCAThatExists(t *testing.T) {
+	cert := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(cert, []byte("ca"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := "postgres://autonomy:secret@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=" + cert + "&application_name=autonomy"
+	t.Setenv(EnvDatabaseURL, original)
+	engine, dsn := applyDatabaseURL(StoreEngineSQLite, "")
+	if engine != StoreEnginePostgres || dsn != original {
+		t.Fatalf("engine=%s dsn=%s", engine, dsn)
 	}
 }
 
