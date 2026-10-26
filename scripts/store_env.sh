@@ -72,6 +72,38 @@ rewrite_database_url_cert() {
   printf '%s' "${url}" | sed "s#sslrootcert=[^&]*#sslrootcert=${home_cert}#"
 }
 
+# apply_pgsslmode 用部署平台的 PGSSLMODE 盖过连接串里的 sslmode。
+# 本机 Postgres 常常没开 SSL，URL 里留着 verify-ca 会连不上；单独设
+# PGSSLMODE=disable 即可，不用改整条 DATABASE_URL。
+apply_pgsslmode() {
+  local url mode
+  url="$1"
+  mode="$(printf '%s' "${PGSSLMODE:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+  case "${mode}" in
+    disable|allow|prefer|require|verify-ca|verify-full) ;;
+    *) printf '%s' "${url}"; return ;;
+  esac
+  case "${url}" in
+    *://*)
+      case "${url}" in
+        *\?*)
+          case "${url}" in
+            *sslmode=*)
+              printf '%s' "${url}" | sed "s/sslmode=[^&]*/sslmode=${mode}/"
+              ;;
+            *) printf '%s' "${url}&sslmode=${mode}" ;;
+          esac
+          ;;
+        *) printf '%s' "${url}?sslmode=${mode}" ;;
+      esac
+      ;;
+    *sslmode=*)
+      printf '%s' "${url}" | sed "s/sslmode=[^ ]*/sslmode=${mode}/"
+      ;;
+    *) printf '%s' "${url} sslmode=${mode}" ;;
+  esac
+}
+
 apply_database_url() {
   local url scheme
   url="$(printf '%s' "${DATABASE_URL:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -79,6 +111,7 @@ apply_database_url() {
     return 0
   fi
   url="$(rewrite_database_url_cert "${url}")"
+  url="$(apply_pgsslmode "${url}")"
   export DATABASE_URL="${url}"
   export AUTONOMY_STORE_DSN="${url}"
   scheme="$(printf '%s' "${url}" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')"
