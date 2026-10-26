@@ -21,15 +21,12 @@ import (
 // between them — see "两个引擎，两份数据" in docs/store.md.
 type postgresEngine struct{}
 
-// StoreEnginePostgres is the registered name of the postgres engine.
-const StoreEnginePostgres = "postgres"
-
 const (
-	// EnvPostgresDSN is where the postgres engine looks for its connection string
-	// when AUTONOMY_STORE_DSN is unset. DATABASE_URL is accepted as well because
-	// that is the name a container/deployment platform hands a service.
+	// EnvPostgresDSN is the engine-specific connection string, used when
+	// AUTONOMY_STORE_DSN and DATABASE_URL are both unset.
 	EnvPostgresDSN = "AUTONOMY_POSTGRES_DSN"
-	// EnvPostgresDatabaseURL is the conventional fallback DSN variable.
+	// EnvPostgresDatabaseURL is the connection string the deployment platform
+	// injects. It wins over EnvPostgresDSN.
 	EnvPostgresDatabaseURL = "DATABASE_URL"
 	// EnvPostgresReadDSN is the connection string of the read follower: a streaming
 	// replica of the same database whose rows serve the reads that only observe
@@ -50,13 +47,15 @@ func (postgresEngine) Name() string { return StoreEnginePostgres }
 // connecting to "some local postgres" is exactly the mistake that ends up writing
 // a production run into a laptop database.
 func (postgresEngine) DefaultDSN() (string, error) {
-	for _, env := range []string{EnvPostgresDSN, EnvPostgresDatabaseURL} {
+	// DATABASE_URL is what the deployment platform sets. The engine-specific
+	// variable is the fallback when the platform did not inject one.
+	for _, env := range []string{EnvPostgresDatabaseURL, EnvPostgresDSN} {
 		if dsn := strings.TrimSpace(os.Getenv(env)); dsn != "" {
 			return dsn, nil
 		}
 	}
 	return "", fmt.Errorf("no default dsn for %s: set %s (or %s / %s)",
-		StoreEnginePostgres, EnvStoreDSN, EnvPostgresDSN, EnvPostgresDatabaseURL)
+		StoreEnginePostgres, EnvStoreDSN, EnvPostgresDatabaseURL, EnvPostgresDSN)
 }
 
 // Open connects to the database at dsn and makes the schema it needs. A read
