@@ -3,6 +3,7 @@ package autonomy
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -141,10 +142,49 @@ func applyDatabaseURL(engine, dsn string) (string, string) {
 	if url == "" {
 		return engine, dsn
 	}
+	url = rewriteSSLRootCert(url)
 	if isPostgresDSN(url) {
 		engine = StoreEnginePostgres
 	}
 	return engine, url
+}
+
+// rewriteSSLRootCert points sslrootcert at this machine's CA when the path in
+// DATABASE_URL is not here. The deployment platform stores one URL; the CA file
+// is the same bytes at ~/database/autonomy/pg-autonomy-ca.pem on each machine.
+func rewriteSSLRootCert(dsn string) string {
+	const key = "sslrootcert="
+	idx := strings.Index(dsn, key)
+	if idx < 0 {
+		return dsn
+	}
+	start := idx + len(key)
+	endRel := strings.Index(dsn[start:], "&")
+	cert := dsn[start:]
+	rest := ""
+	if endRel >= 0 {
+		cert = dsn[start : start+endRel]
+		rest = dsn[start+endRel:]
+	}
+	decoded := strings.ReplaceAll(cert, "%2F", "/")
+	decoded = strings.ReplaceAll(decoded, "%2f", "/")
+	if cert != "" && fileExists(decoded) {
+		return dsn
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dsn
+	}
+	fallback := filepath.Join(home, "database", "autonomy", "pg-autonomy-ca.pem")
+	if !fileExists(fallback) {
+		return dsn
+	}
+	return dsn[:start] + fallback + rest
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // isPostgresDSN reports whether dsn is a Postgres URL or a libpq keyword

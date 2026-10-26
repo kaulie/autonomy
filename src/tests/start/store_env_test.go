@@ -155,6 +155,39 @@ func TestApplyDatabaseURLOverridesEnvFileDSN(t *testing.T) {
 	}
 }
 
+func TestRewriteDatabaseURLCertUsesHomeCAWhenPathIsMissing(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "database", "autonomy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cert := filepath.Join(home, "database", "autonomy", "pg-autonomy-ca.pem")
+	if err := os.WriteFile(cert, []byte("ca"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := runStoreEnv(t, `
+		. "$1"
+		export HOME='`+home+`'
+		export DATABASE_URL='postgres://autonomy:secret@49.234.45.173:5432/autonomy?sslmode=verify-ca&sslrootcert=/no/such/ca.pem&application_name=autonomy'
+		export AUTONOMY_STORE_ENGINE=sqlite
+		apply_database_url
+		printf 'engine=%s\n' "${AUTONOMY_STORE_ENGINE}"
+		printf 'cert=%s\n' "${AUTONOMY_STORE_DSN}"
+	`)
+	if !strings.Contains(out, "engine=postgres") {
+		t.Fatalf("engine:\n%s", out)
+	}
+	if !strings.Contains(out, "sslrootcert="+cert) {
+		t.Fatalf("cert was not rewritten:\n%s", out)
+	}
+	if !strings.Contains(out, "application_name=autonomy") {
+		t.Fatalf("query was dropped:\n%s", out)
+	}
+	logLine := strings.Split(out, "\n")[0]
+	if strings.Contains(logLine, "secret") {
+		t.Fatalf("log leaked the password:\n%s", logLine)
+	}
+}
+
 func TestApplyDatabaseURLBlankLeavesExistingDSN(t *testing.T) {
 	out := runStoreEnv(t, `
 		. "$1"
