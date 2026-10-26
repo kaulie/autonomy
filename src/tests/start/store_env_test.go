@@ -192,7 +192,8 @@ func TestApplyPGSSLModeOverridesVerifyCA(t *testing.T) {
 	out := runStoreEnv(t, `
 		. "$1"
 		export DATABASE_URL='postgres://autonomy:secret@127.0.0.1:5432/autonomy?sslmode=verify-ca&application_name=autonomy'
-		export PGSSLMODE='disable'
+		export sslmode='disable'
+		unset PGSSLMODE
 		export AUTONOMY_STORE_ENGINE=sqlite
 		apply_database_url
 		printf 'engine=%s\n' "${AUTONOMY_STORE_ENGINE}"

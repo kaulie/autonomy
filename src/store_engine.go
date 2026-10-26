@@ -37,10 +37,12 @@ const (
 	// SERVICE_PORT wins over a stale listen address. A Postgres URL also
 	// selects the postgres engine.
 	EnvDatabaseURL = "DATABASE_URL"
-	// EnvPGSSLMode overrides sslmode inside DATABASE_URL. Libpq's own rule is
-	// the opposite (the URL wins); the deployment platform sets this so a
-	// local Postgres with SSL off can use the same URL shape with
-	// PGSSLMODE=disable.
+	// EnvSSLMode overrides sslmode inside DATABASE_URL. This is the name the
+	// deployment platform is given. EnvPGSSLMode is the libpq spelling and is
+	// used only when EnvSSLMode is unset. Libpq itself lets the URL win; here
+	// the environment wins, so a local Postgres with SSL off can set
+	// sslmode=disable without rewriting DATABASE_URL.
+	EnvSSLMode   = "sslmode"
 	EnvPGSSLMode = "PGSSLMODE"
 	// EnvDataDir is the directory the sqlite engine's default database lives in
 	// (`<dir>/autonomy.db`). Unset means ~/database/autonomy, the one database
@@ -155,10 +157,14 @@ func applyDatabaseURL(engine, dsn string) (string, string) {
 	return engine, url
 }
 
-// applySSLMode replaces or appends sslmode when PGSSLMODE is set to a mode
-// Postgres accepts. An empty or unknown value leaves the URL alone.
+// applySSLMode replaces or appends sslmode from the environment. sslmode wins
+// over PGSSLMODE. An empty or unknown value leaves the URL alone.
 func applySSLMode(dsn string) string {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv(EnvPGSSLMode)))
+	mode := strings.TrimSpace(os.Getenv(EnvSSLMode))
+	if mode == "" {
+		mode = strings.TrimSpace(os.Getenv(EnvPGSSLMode))
+	}
+	mode = strings.ToLower(mode)
 	if !validPGSSLMode(mode) {
 		return dsn
 	}

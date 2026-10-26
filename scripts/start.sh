@@ -104,9 +104,10 @@ EOF
   log "已生成 ${ENV_FILE}"
 fi
 
-# 平台在拉起本脚本时注入 DATABASE_URL。.env 跨部署保留，source 会用同名键盖掉它，
+# 平台在拉起本脚本时注入 DATABASE_URL 和 sslmode。.env 跨部署保留，source 会用同名键盖掉它，
 # 所以先记下平台的值，读完再写回去。和 SERVICE_PORT 盖过旧端口是同一条规矩。
 _platform_database_url="$(printf '%s' "${DATABASE_URL:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+_platform_sslmode="$(printf '%s' "${sslmode:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 _platform_pgsslmode="$(printf '%s' "${PGSSLMODE:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
 # shellcheck disable=SC1090
@@ -114,6 +115,9 @@ set -a; . "${ENV_FILE}"; set +a
 
 if [ -n "${_platform_database_url}" ]; then
   export DATABASE_URL="${_platform_database_url}"
+fi
+if [ -n "${_platform_sslmode}" ]; then
+  export sslmode="${_platform_sslmode}"
 fi
 if [ -n "${_platform_pgsslmode}" ]; then
   export PGSSLMODE="${_platform_pgsslmode}"
